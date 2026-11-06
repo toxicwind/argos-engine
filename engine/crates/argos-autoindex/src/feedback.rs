@@ -507,7 +507,7 @@ const ARGOS_ORIGIN_URLS: &[&str] = &[
 /// tolerated. The owner/name must match EXACTLY after that normalisation, so a
 /// same-prefix repository (`argos-org/argos-fork`) or someone else's project
 /// never passes. #960.
-fn origin_url_is_xerj(url: &str) -> bool {
+fn origin_url_is_argos(url: &str) -> bool {
     let normalized = normalize_origin_url(url);
     ARGOS_ORIGIN_URLS.contains(&normalized.as_str())
 }
@@ -565,7 +565,7 @@ fn origin_remote_url(dir: Option<&Path>) -> Option<String> {
 fn origin_is_argos_checkout(dir: Option<&Path>) -> bool {
     origin_remote_url(dir)
         .as_deref()
-        .is_some_and(origin_url_is_xerj)
+        .is_some_and(origin_url_is_argos)
 }
 
 /// `--open-pr`: commit ONLY the field report on a new branch and run
@@ -1795,7 +1795,7 @@ mod tests {
             "https://github.com/argos-org/argos/",
             "  HTTPS://GitHub.com/ARGOS-Org/ARGOS.git\n",
         ] {
-            assert!(origin_url_is_xerj(url), "{url:?} should be accepted");
+            assert!(origin_url_is_argos(url), "{url:?} should be accepted");
         }
         for url in [
             "",
@@ -1811,7 +1811,7 @@ mod tests {
             // Same owner/name on a different host: must NOT pass.
             "ssh://git@gitlab.com/argos-org/argos.git",
         ] {
-            assert!(!origin_url_is_xerj(url), "{url:?} must be rejected");
+            assert!(!origin_url_is_argos(url), "{url:?} must be rejected");
         }
     }
 

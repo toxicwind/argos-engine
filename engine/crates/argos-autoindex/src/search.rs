@@ -96,12 +96,12 @@ pub(crate) fn search_mode_refusal(asked: &str) -> String {
 /// One line for the human printer when the node says this lexical query
 /// scored a `semantic_text` field and did not consult the embedding.
 ///
-/// The response already carries `_xerj.hints[].reason`, which tells the
+/// The response already carries `_argos.hints[].reason`, which tells the
 /// caller to POST a `semantic` query. That reason is the wrong sentence for
 /// `argos search`: this command has no semantic mode. `--json` returns the
 /// hint unchanged.
 pub(crate) fn lexical_semantic_note(resp: &Value) -> Option<&'static str> {
-    let hints = resp.pointer("/_xerj/hints")?.as_array()?;
+    let hints = resp.pointer("/_argos/hints")?.as_array()?;
     let flagged = hints
         .iter()
         .any(|hint| hint.get("code").and_then(Value::as_str) == Some("lexical_on_semantic_text"));
@@ -1410,7 +1410,7 @@ mod tests {
     #[test]
     fn a_lexical_on_semantic_text_hint_is_one_line_and_not_the_post_recipe() {
         let flagged = json!({
-            "_xerj": { "hints": [{
+            "_argos": { "hints": [{
                 "code": "lexical_on_semantic_text",
                 "reason": "body is semantic_text, but this query scored it with BM25. POST a semantic query.",
                 "try": { "request": "POST /smoke-nb-docs/_search" }
@@ -1423,7 +1423,7 @@ mod tests {
         assert!(!note.contains('\n'), "{note}");
 
         let other = json!({
-            "_xerj": { "hints": [{ "code": "unknown_field", "reason": "no such field" }] }
+            "_argos": { "hints": [{ "code": "unknown_field", "reason": "no such field" }] }
         });
         assert!(lexical_semantic_note(&other).is_none());
         assert!(lexical_semantic_note(&json!({"hits": []})).is_none());

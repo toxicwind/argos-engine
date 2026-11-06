@@ -177,7 +177,7 @@ fn serve(mut stream: TcpStream, state: &Mutex<NodeState>) {
     // terminator and the body and corrupt the framing.
     let _ = write!(
         stream,
-        "HTTP/1.1 {status} XERJTEST\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\
+        "HTTP/1.1 {status} ARGOSTEST\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\
          connection: close\r\n\r\n",
         bytes.len()
     );

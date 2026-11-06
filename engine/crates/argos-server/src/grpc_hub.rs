@@ -1,4 +1,4 @@
-//! Corpus Hub v2 — the gRPC `XerjHub` service (plan §7,
+//! Corpus Hub v2 — the gRPC `ArgosHub` service (plan §7,
 //! `docs/CORPUS_HUB_V2_IMPLEMENTATION.md`; wire contract and mapping in
 //! `docs/hub-v2-grpc-mcp-notes.md`).
 //!
@@ -32,7 +32,7 @@
 //! # Authentication
 //!
 //! The service sits behind the same [`super::grpc`] interceptor as
-//! `XerjSearch`: an RPC without a valid key (when auth is on) never reaches it.
+//! `ArgosSearch`: an RPC without a valid key (when auth is on) never reaches it.
 //! The caller's principal then becomes the engine visibility rule the hub's
 //! in-process node runs under, exactly as `authz_middleware` installs it for
 //! the HTTP routes, so a key scoped to `tenant-a-*` is refused a corpus here
@@ -58,9 +58,9 @@ use argos_common::hub::{Answer, AnswerMode, Hit};
 use argos_engine::index_guard;
 
 use crate::grpc::pb;
-use pb::argos_hub_server::XerjHub;
+use pb::argos_hub_server::ArgosHub;
 
-/// The `XerjHub` service. Holds the node's [`HubShared`] (query slots,
+/// The `ArgosHub` service. Holds the node's [`HubShared`] (query slots,
 /// rate-limit budget, catalogue cache) — the one the ES-compat router's hub
 /// routes hold, never a second one.
 #[derive(Clone)]
@@ -122,7 +122,7 @@ struct Caller {
 }
 
 #[tonic::async_trait]
-impl XerjHub for HubService {
+impl ArgosHub for HubService {
     async fn ask(
         &self,
         request: Request<pb::HubAskRequest>,
@@ -608,7 +608,7 @@ mod tests {
 
     mod e2e {
         use super::super::*;
-        use crate::grpc::pb::argos_hub_client::XerjHubClient;
+        use crate::grpc::pb::argos_hub_client::ArgosHubClient;
         use axum::body::Body;
         use serde_json::{json, Value};
         use std::sync::OnceLock;
@@ -872,7 +872,7 @@ mod tests {
             let url = format!("http://127.0.0.1:{port}");
             let mut client = None;
             for _ in 0..50 {
-                if let Ok(c) = XerjHubClient::connect(url.clone()).await {
+                if let Ok(c) = ArgosHubClient::connect(url.clone()).await {
                     client = Some(c);
                     break;
                 }

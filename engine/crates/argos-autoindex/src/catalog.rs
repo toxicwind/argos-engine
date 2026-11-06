@@ -50,7 +50,7 @@ pub const CORPUS_SCOPE_FIELD: &str = "corpus_scope";
 ///   `date` to those is refused **400 `mapper_parsing_exception`** — *"field
 ///   [started] already exists as [text], cannot add [date]"* — from the
 ///   `idx.schema()` guard in `argos-api/src/es_compat.rs` (the
-///   `XerjError::invalid_mapping` arm; `InvalidMapping` maps to
+///   `ArgosError::invalid_mapping` arm; `InvalidMapping` maps to
 ///   `mapper_parsing_exception` in `argos-api/src/error.rs`). `es.update_mapping`
 ///   surfaces that as an `Err`, which aborts the invocation before any document
 ///   work.

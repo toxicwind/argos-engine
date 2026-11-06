@@ -9,7 +9,7 @@ use std::fmt;
 use std::str::FromStr;
 use uuid::Uuid;
 
-use crate::error::XerjError;
+use crate::error::ArgosError;
 
 // ═════════════════════════════════════════════════════════════════════════════
 // Primitive IDs
@@ -82,7 +82,7 @@ pub struct IndexName(String);
 
 impl IndexName {
     /// Create a new `IndexName`, validating the input.
-    pub fn new(name: impl Into<String>) -> Result<Self, XerjError> {
+    pub fn new(name: impl Into<String>) -> Result<Self, ArgosError> {
         let name = name.into();
         Self::validate(&name)?;
         Ok(Self(name))
@@ -97,8 +97,8 @@ impl IndexName {
     /// constructing an `IndexName`. Public so handler boundaries (e.g. the
     /// es_compat `create_index` surface, #80) can reject `..`/separators/NUL
     /// locally instead of relying solely on the deeper `IndexName::new` guard.
-    pub fn validate(name: &str) -> Result<(), XerjError> {
-        let reject = |reason: String| XerjError::invalid_index_name(name, reason);
+    pub fn validate(name: &str) -> Result<(), ArgosError> {
+        let reject = |reason: String| ArgosError::invalid_index_name(name, reason);
         if name.len() > 255 {
             return Err(reject(format!(
                 "index name too long: {} chars (max 255)",
@@ -161,7 +161,7 @@ impl fmt::Display for IndexName {
 }
 
 impl FromStr for IndexName {
-    type Err = XerjError;
+    type Err = ArgosError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Self::new(s)
     }
@@ -555,9 +555,9 @@ impl Schema {
     /// Add a field, bumping the schema version.
     ///
     /// Returns an error if a field with this name already exists.
-    pub fn add_field(&mut self, field: FieldConfig) -> Result<(), XerjError> {
+    pub fn add_field(&mut self, field: FieldConfig) -> Result<(), ArgosError> {
         if self.has_field(&field.name) {
-            return Err(XerjError::invalid_mapping(format!(
+            return Err(ArgosError::invalid_mapping(format!(
                 "field '{}' already exists in schema",
                 field.name
             )));

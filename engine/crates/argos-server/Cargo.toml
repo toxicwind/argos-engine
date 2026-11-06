@@ -53,7 +53,7 @@ memmap2 = { workspace = true }
 memchr = { workspace = true }
 rayon = { workspace = true }
 
-# gRPC server: the real XerjSearch service on :8081 (proto: ../../proto/argos.proto).
+# gRPC server: the real ArgosSearch service on :8081 (proto: ../../proto/argos.proto).
 tonic.workspace = true
 prost.workspace = true
 
@@ -118,7 +118,7 @@ protox = { workspace = true }
 # HTTPS round-trip test against the in-process rustls listener.
 reqwest = { workspace = true }
 tempfile = { workspace = true }
-# `oneshot` against the ES router: the XerjHub test compares a gRPC `Def` with
+# `oneshot` against the ES router: the ArgosHub test compares a gRPC `Def` with
 # the HTTP `/_hub/v1/def` route field by field.
 tower = { workspace = true }
 # HTTP/2 *as a client*, so `tests/http2_small_data_frames.rs` can choose the

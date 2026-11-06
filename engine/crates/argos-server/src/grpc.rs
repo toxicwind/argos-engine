@@ -1,5 +1,5 @@
-//! Real tonic gRPC server for the `XerjSearch` service (default `:8081`), and
-//! the Corpus Hub `XerjHub` service on the same listener behind the same
+//! Real tonic gRPC server for the `ArgosSearch` service (default `:8081`), and
+//! the Corpus Hub `ArgosHub` service on the same listener behind the same
 //! interceptor (`grpc_hub.rs`).
 //!
 //! Replaces the v0.1 placeholder (which only bound the port and dropped
@@ -44,7 +44,7 @@ pub mod pb {
     tonic::include_proto!("argos.v1");
 }
 
-use pb::argos_search_server::{XerjSearch, XerjSearchServer};
+use pb::argos_search_server::{ArgosSearch, ArgosSearchServer};
 
 /// gRPC adapter over the engine. Clone is cheap — `AppState` is all `Arc`s.
 #[derive(Clone)]
@@ -102,7 +102,7 @@ fn reject_wildcards(principal: &Principal, index: &str) -> Result<(), Status> {
 }
 
 #[tonic::async_trait]
-impl XerjSearch for GrpcService {
+impl ArgosSearch for GrpcService {
     async fn search(
         &self,
         request: Request<pb::SearchRequest>,
@@ -404,14 +404,14 @@ impl tonic::service::Interceptor for GrpcAuth {
         // partial bulk response depending on the method.
         if !self.state.engine.cluster_state_boot_status().is_writable() {
             return Err(Status::unavailable(
-                argos_common::XerjError::cluster_state_unavailable().to_string(),
+                argos_common::ArgosError::cluster_state_unavailable().to_string(),
             ));
         }
         Ok(request)
     }
 }
 
-/// Serve the `XerjSearch` gRPC service on `addr` until `shutdown` resolves.
+/// Serve the `ArgosSearch` gRPC service on `addr` until `shutdown` resolves.
 ///
 /// Returns `Err` if the port cannot be bound or the transport fails; callers
 /// log-and-continue so a gRPC bind failure never takes the whole server down.
@@ -449,7 +449,7 @@ where
 ///
 /// `hub` is the [`argos_api::hub_api::HubShared`] the ES-compat router's
 /// `/_hub/v1/*` routes were built over
-/// ([`argos_api::router::build_es_compat_router_with_hub`]): the `XerjHub`
+/// ([`argos_api::router::build_es_compat_router_with_hub`]): the `ArgosHub`
 /// service draws on the same per-client rate-limit budget, query slots and
 /// catalogue cache, so a second listener is not a second allowance.
 pub async fn serve_grpc_on<F>(
@@ -485,12 +485,12 @@ where
     let interceptor = GrpcAuth {
         state: state.clone(),
     };
-    let hub = pb::argos_hub_server::XerjHubServer::with_interceptor(
+    let hub = pb::argos_hub_server::ArgosHubServer::with_interceptor(
         crate::grpc_hub::HubService::new(hub),
         interceptor.clone(),
     );
-    let svc = XerjSearchServer::with_interceptor(GrpcService::new(state), interceptor);
-    info!("gRPC XerjSearch + XerjHub listening on {addr}");
+    let svc = ArgosSearchServer::with_interceptor(GrpcService::new(state), interceptor);
+    info!("gRPC ArgosSearch + ArgosHub listening on {addr}");
     tonic::transport::Server::builder()
         .add_service(svc)
         .add_service(hub)
@@ -502,7 +502,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::pb::argos_search_client::XerjSearchClient;
+    use super::pb::argos_search_client::ArgosSearchClient;
     use super::*;
     use tempfile::TempDir;
     use argos_common::config::Config;
@@ -537,10 +537,10 @@ mod tests {
             .port()
     }
 
-    async fn connect(addr: &str) -> XerjSearchClient<tonic::transport::Channel> {
+    async fn connect(addr: &str) -> ArgosSearchClient<tonic::transport::Channel> {
         // The server task needs a moment to start listening; retry briefly.
         for _ in 0..50 {
-            if let Ok(c) = XerjSearchClient::connect(addr.to_string()).await {
+            if let Ok(c) = ArgosSearchClient::connect(addr.to_string()).await {
                 return c;
             }
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
@@ -808,7 +808,7 @@ mod tests {
 
     /// A rejected persisted-metadata format leaves the process available only
     /// for HTTP liveness/readiness diagnostics. The gRPC surface has no split
-    /// liveness service, so every generated XerjSearch method is unavailable.
+    /// liveness service, so every generated ArgosSearch method is unavailable.
     /// Authentication stays outside that fence: missing credentials remain
     /// UNAUTHENTICATED and a valid credential reaches the UNAVAILABLE latch.
     #[tokio::test]

@@ -6,7 +6,7 @@ fn argos_index_refuses_a_directory_before_touching_disk() {
     let scratch = tempfile::tempdir().expect("tempdir for --data-dir");
     let data_dir = scratch.path().join("data");
 
-    let out = Command::new(env!("CARGO_BIN_EXE_xerj"))
+    let out = Command::new(env!("CARGO_BIN_EXE_argos"))
         .args(["index", "--index", "probe", "--file"])
         .arg(file_target.path())
         .arg("--data-dir")

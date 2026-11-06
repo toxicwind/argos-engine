@@ -38,7 +38,7 @@ const SURFACES: [&[&str]; 5] = [
 ];
 
 fn help(args: &[&str], env: Option<&str>) -> String {
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_xerj"));
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_argos"));
     cmd.args(args);
     match env {
         Some(v) => cmd.env("ARGOS_DISABLE_FEEDBACK", v),
@@ -154,7 +154,7 @@ fn the_env_var_silences_every_surface() {
 /// help text itself — and never by refusing to print the help.
 #[test]
 fn an_unreadable_env_value_is_reported_on_stderr_only() {
-    let out = Command::new(env!("CARGO_BIN_EXE_xerj"))
+    let out = Command::new(env!("CARGO_BIN_EXE_argos"))
         .args(["--help"])
         .env("ARGOS_DISABLE_FEEDBACK", "maybe")
         .output()

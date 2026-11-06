@@ -9,10 +9,10 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tracing::{debug, warn};
-use argos_common::XerjError;
+use argos_common::ArgosError;
 
 /// Result alias.
-pub type Result<T> = std::result::Result<T, XerjError>;
+pub type Result<T> = std::result::Result<T, ArgosError>;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // LogRecord
@@ -36,13 +36,13 @@ impl LogRecord {
     /// Parse from a JSON byte slice.
     pub fn from_json(data: &[u8]) -> Result<Self> {
         serde_json::from_slice(data)
-            .map_err(|e| XerjError::serialization(format!("log record parse: {e}")))
+            .map_err(|e| ArgosError::serialization(format!("log record parse: {e}")))
     }
 
     /// Parse from a JSON string.
     pub fn from_json_str(s: &str) -> Result<Self> {
         serde_json::from_str(s)
-            .map_err(|e| XerjError::serialization(format!("log record parse: {e}")))
+            .map_err(|e| ArgosError::serialization(format!("log record parse: {e}")))
     }
 
     /// Create a simple record with the current time.

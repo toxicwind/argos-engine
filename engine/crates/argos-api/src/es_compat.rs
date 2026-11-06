@@ -743,7 +743,7 @@ impl CatVisibility {
             Some("" | "true" | "1" | "yes") => true,
             Some("false" | "0" | "no") => false,
             Some(other) => {
-                return Err(ApiError::new(argos_common::XerjError::invalid_query(
+                return Err(ApiError::new(argos_common::ArgosError::invalid_query(
                     format!("unknown include_system value `{other}` (expected true or false)"),
                 )));
             }
@@ -773,7 +773,7 @@ impl CatVisibility {
                 "all" => all = true,
                 "none" => none = true,
                 other => {
-                    return Err(ApiError::new(argos_common::XerjError::invalid_query(
+                    return Err(ApiError::new(argos_common::ArgosError::invalid_query(
                         format!(
                             "unknown expand_wildcards value `{other}` \
                              (expected open, closed, hidden, none, or all)"
@@ -926,7 +926,7 @@ async fn cat_indices_inner(
                     && !indices.iter().any(|i| i.name == p)
                     && !failed.iter().any(|f| f.name == p)
                 {
-                    return ApiError::new(argos_common::XerjError::index_not_found(p))
+                    return ApiError::new(argos_common::ArgosError::index_not_found(p))
                         .into_response();
                 }
             }
@@ -1483,7 +1483,7 @@ pub async fn create_index(
 
     // Leading dots are allowed for system indices like .kibana, .security-*.
     if index.starts_with('_') || index.starts_with('-') || index.starts_with('+') {
-        let e = argos_common::XerjError::invalid_index_name(
+        let e = argos_common::ArgosError::invalid_index_name(
             index.clone(),
             format!("Invalid index name [{index}]: must not start with '_', '-', or '+'"),
         );
@@ -1526,18 +1526,18 @@ pub async fn create_index(
             return refusal;
         }
         if let Err(reason) = validate_properties(props) {
-            let e = argos_common::XerjError::invalid_mapping(reason);
+            let e = argos_common::ArgosError::invalid_mapping(reason);
             return ApiError::new(e).into_response();
         }
         if let Err(reason) = validate_semantic_companion_targets(props) {
-            let e = argos_common::XerjError::invalid_mapping(reason);
+            let e = argos_common::ArgosError::invalid_mapping(reason);
             return ApiError::new(e).into_response();
         }
     }
     // Runtime mapping type validation too.
     if let Some(rt_obj) = mappings_val.get("runtime").and_then(Value::as_object) {
         if let Err(reason) = validate_runtime_fields(rt_obj) {
-            let e = argos_common::XerjError::invalid_mapping(reason);
+            let e = argos_common::ArgosError::invalid_mapping(reason);
             return ApiError::new(e).into_response();
         }
     }
@@ -1549,7 +1549,7 @@ pub async fn create_index(
         match es_properties_to_schema(props) {
             Ok(schema) => schema,
             Err(reason) => {
-                let e = argos_common::XerjError::invalid_mapping(reason);
+                let e = argos_common::ArgosError::invalid_mapping(reason);
                 return ApiError::new(e).into_response();
             }
         }
@@ -1638,7 +1638,7 @@ pub async fn create_index(
                 resp.warnings = embedder_warnings(&state, &body);
                 (StatusCode::OK, Json(resp)).into_response()
             }
-            Err(e) => ApiError::new(argos_common::XerjError::from(e)).into_response(),
+            Err(e) => ApiError::new(argos_common::ArgosError::from(e)).into_response(),
         };
     }
 
@@ -1657,7 +1657,7 @@ pub async fn create_index(
                 // Persists es_mapping.json into the index dir (atomic) so
                 // the create-time mapping survives a restart.
                 if let Err(error) = state.engine.put_index_mapping(&index, mappings_val.clone()) {
-                    return ApiError::new(argos_common::XerjError::from(error)).into_response();
+                    return ApiError::new(argos_common::ArgosError::from(error)).into_response();
                 }
             }
             if let Some(resolved_aliases) = resolved_aliases {
@@ -1667,7 +1667,7 @@ pub async fn create_index(
                 // resolved name so GET /_alias round-trips correctly.
                 for alias in resolved_aliases.keys() {
                     if let Err(error) = state.engine.add_alias(alias, &index) {
-                        return ApiError::new(argos_common::XerjError::from(error)).into_response();
+                        return ApiError::new(argos_common::ArgosError::from(error)).into_response();
                     }
                 }
                 state
@@ -1692,12 +1692,12 @@ pub async fn create_index(
             resp.warnings = embedder_warnings(&state, &body);
             (StatusCode::OK, Json(resp)).into_response()
         }
-        Err(e) => ApiError::new(argos_common::XerjError::from(e)).into_response(),
+        Err(e) => ApiError::new(argos_common::ArgosError::from(e)).into_response(),
     }
 }
 
 /// A 400 in Elasticsearch's error shape, for refusals whose `type` (or
-/// `caused_by`) a caller matches on and that no `XerjError` variant renders.
+/// `caused_by`) a caller matches on and that no `ArgosError` variant renders.
 fn es_bad_request(error_type: &str, reason: &str, caused_by: Option<(&str, &str)>) -> Response {
     let mut error = json!({
         "root_cause": [{ "type": error_type, "reason": reason }],
@@ -2645,7 +2645,7 @@ pub async fn delete_index(
                 }
             }
             if !matched_any && !allow_no_indices {
-                let e = argos_common::XerjError::index_not_found(*part);
+                let e = argos_common::ArgosError::index_not_found(*part);
                 return ApiError::new(e).into_response();
             }
             continue;
@@ -2657,7 +2657,7 @@ pub async fn delete_index(
                 // and continues processing the rest of the comma list.
                 continue;
             }
-            let e = argos_common::XerjError::invalid_query(format!(
+            let e = argos_common::ArgosError::invalid_query(format!(
                 "The provided expression [{part}] matches an alias, specify the corresponding concrete indices instead."
             ));
             let mut resp = ApiError::new(e).into_response();
@@ -2669,7 +2669,7 @@ pub async fn delete_index(
             if ignore_unavailable {
                 continue;
             }
-            let e = argos_common::XerjError::index_not_found(*part);
+            let e = argos_common::ArgosError::index_not_found(*part);
             return ApiError::new(e).into_response();
         }
         if !to_delete.contains(&(*part).to_string()) {
@@ -2687,8 +2687,8 @@ pub async fn delete_index(
         match state.engine.delete_index(name).await {
             Ok(()) => {}
             Err(e) => {
-                let inner: argos_common::XerjError = e.into();
-                if !matches!(inner, argos_common::XerjError::IndexNotFound { .. }) {
+                let inner: argos_common::ArgosError = e.into();
+                if !matches!(inner, argos_common::ArgosError::IndexNotFound { .. }) {
                     return ApiError::new(inner).into_response();
                 }
             }
@@ -2866,7 +2866,7 @@ async fn get_index_inner(
             had_missing = true;
             if !ignore_unavailable {
                 // Exact missing names fail unless ignore_unavailable=true.
-                let e = argos_common::XerjError::index_not_found(part);
+                let e = argos_common::ArgosError::index_not_found(part);
                 return ApiError::new(e).into_response();
             }
         }
@@ -2892,7 +2892,7 @@ async fn get_index_inner(
         if allow_no_indices || ignore_unavailable || had_missing {
             return Json(json!({})).into_response();
         }
-        let e = argos_common::XerjError::index_not_found(&index);
+        let e = argos_common::ArgosError::index_not_found(&index);
         return ApiError::new(e).into_response();
     }
 
@@ -3133,7 +3133,7 @@ pub async fn put_mapping(
     // Wildcard-expand index list.
     let targets = resolve_index_selector(&state, &index).await;
     if targets.is_empty() {
-        let e = argos_common::XerjError::index_not_found(&index);
+        let e = argos_common::ArgosError::index_not_found(&index);
         return ApiError::new(e).into_response();
     }
 
@@ -3188,11 +3188,11 @@ pub async fn put_mapping(
             return refusal;
         }
         if let Err(reason) = validate_properties(props) {
-            let e = argos_common::XerjError::invalid_mapping(reason);
+            let e = argos_common::ArgosError::invalid_mapping(reason);
             return ApiError::new(e).into_response();
         }
         if let Err(reason) = validate_semantic_companion_targets(props) {
-            let e = argos_common::XerjError::invalid_mapping(reason);
+            let e = argos_common::ArgosError::invalid_mapping(reason);
             return ApiError::new(e).into_response();
         }
     }
@@ -3330,7 +3330,7 @@ pub async fn put_mapping(
         // earlier request can collide with a newly added semantic source.
         if let Some(merged_props) = existing.get("properties").and_then(Value::as_object) {
             if let Err(reason) = validate_semantic_companion_targets(merged_props) {
-                let e = argos_common::XerjError::invalid_mapping(reason);
+                let e = argos_common::ArgosError::invalid_mapping(reason);
                 return ApiError::new(e).into_response();
             }
         }
@@ -3346,14 +3346,14 @@ pub async fn put_mapping(
             let parsed = match es_properties_to_fields(properties) {
                 Ok(parsed) => parsed,
                 Err(reason) => {
-                    let e = argos_common::XerjError::invalid_mapping(reason);
+                    let e = argos_common::ArgosError::invalid_mapping(reason);
                     return ApiError::new(e).into_response();
                 }
             };
             for field in parsed {
                 if let Some(existing_field) = current.field(&field.name) {
                     if existing_field.field_type != field.field_type {
-                        let e = argos_common::XerjError::invalid_mapping(format!(
+                        let e = argos_common::ArgosError::invalid_mapping(format!(
                             "field [{}] already exists as [{}], cannot add [{}]",
                             field.name, existing_field.field_type, field.field_type
                         ));
@@ -3377,7 +3377,7 @@ pub async fn put_mapping(
                 .replicate_mapping(&idx_name, &existing, &additions)
                 .await
             {
-                return ApiError::new(argos_common::XerjError::from(error)).into_response();
+                return ApiError::new(argos_common::ArgosError::from(error)).into_response();
             }
         }
         let warnings = embedder_warnings(&state, &body);
@@ -3396,7 +3396,7 @@ pub async fn put_mapping(
     for (_, idx, _, additions) in &plans {
         if !additions.is_empty() {
             if let Err(error) = idx.add_fields(additions.clone()).await {
-                return ApiError::new(argos_common::XerjError::from(error)).into_response();
+                return ApiError::new(argos_common::ArgosError::from(error)).into_response();
             }
         }
     }
@@ -3404,7 +3404,7 @@ pub async fn put_mapping(
         // Persists es_mapping.json into the index dir (atomic) so the
         // merged mapping survives a restart.
         if let Err(error) = state.engine.put_index_mapping(&idx_name, existing) {
-            return ApiError::new(argos_common::XerjError::from(error)).into_response();
+            return ApiError::new(argos_common::ArgosError::from(error)).into_response();
         }
     }
 
@@ -3665,12 +3665,12 @@ pub async fn get_mapping(
             || failed.iter().any(|f| f.name == part)
             || state.engine.aliases.contains_key(part)
     }) {
-        let e = argos_common::XerjError::index_not_found(missing);
+        let e = argos_common::ArgosError::index_not_found(missing);
         return ApiError::new(e).into_response();
     }
     let targets = resolve_index_selector(&state, &index).await;
     if targets.is_empty() {
-        let e = argos_common::XerjError::index_not_found(&index);
+        let e = argos_common::ArgosError::index_not_found(&index);
         return ApiError::new(e).into_response();
     }
     let mut out = serde_json::Map::new();
@@ -3893,7 +3893,7 @@ pub async fn get_settings(
 ) -> impl IntoResponse {
     let targets = resolve_index_selector(&state, &index).await;
     if targets.is_empty() {
-        let e = argos_common::XerjError::index_not_found(&index);
+        let e = argos_common::ArgosError::index_not_found(&index);
         return ApiError::new(e).into_response();
     }
     let mut out = serde_json::Map::new();
@@ -3951,14 +3951,14 @@ fn resolve_effective_pipeline(
 /// Bytes that are not valid JSON and are also over the ceiling report the
 /// size refusal, not a parse error — that is how a test can see the check
 /// ran first.
-pub(crate) fn parse_indexed_document_body(body: &[u8]) -> Result<Value, argos_common::XerjError> {
+pub(crate) fn parse_indexed_document_body(body: &[u8]) -> Result<Value, argos_common::ArgosError> {
     if argos_common::document_limit::indexed_document_too_large(body.len()) {
-        return Err(argos_common::XerjError::invalid_document_json(
+        return Err(argos_common::ArgosError::invalid_document_json(
             argos_common::document_limit::indexed_document_refusal(body.len()),
         ));
     }
     serde_json::from_slice(body)
-        .map_err(|e| argos_common::XerjError::invalid_query(format!("invalid JSON body: {e}")))
+        .map_err(|e| argos_common::ArgosError::invalid_query(format!("invalid JSON body: {e}")))
 }
 
 /// Serialize a document the in-process callers already hold as a [`Value`]
@@ -4100,7 +4100,7 @@ pub async fn index_doc_auto(
     } else {
         match state.engine.get_or_create_index(&index) {
             Ok(i) => i,
-            Err(e) => return ApiError::new(argos_common::XerjError::from(e)).into_response(),
+            Err(e) => return ApiError::new(argos_common::ArgosError::from(e)).into_response(),
         }
     };
 
@@ -4115,7 +4115,7 @@ pub async fn index_doc_auto(
             );
             (StatusCode::CREATED, Json(er)).into_response()
         }
-        Err(e) => ApiError::new(argos_common::XerjError::from(e)).into_response(),
+        Err(e) => ApiError::new(argos_common::ArgosError::from(e)).into_response(),
     }
 }
 
@@ -4279,7 +4279,7 @@ pub async fn index_doc(
     } else {
         match state.engine.get_or_create_index(&index) {
             Ok(i) => i,
-            Err(e) => return ApiError::new(argos_common::XerjError::from(e)).into_response(),
+            Err(e) => return ApiError::new(argos_common::ArgosError::from(e)).into_response(),
         }
     };
 
@@ -4295,7 +4295,7 @@ pub async fn index_doc(
                 );
                 (StatusCode::CREATED, Json(er)).into_response()
             }
-            Err(e) => ApiError::new(argos_common::XerjError::from(e)).into_response(),
+            Err(e) => ApiError::new(argos_common::ArgosError::from(e)).into_response(),
         }
     } else {
         let ext_type = params.version_type.as_deref();
@@ -4339,7 +4339,7 @@ pub async fn index_doc(
                 };
                 (status, Json(er)).into_response()
             }
-            Err(e) => ApiError::new(argos_common::XerjError::from(e)).into_response(),
+            Err(e) => ApiError::new(argos_common::ArgosError::from(e)).into_response(),
         }
     }
 }
@@ -4429,7 +4429,7 @@ pub async fn create_doc(
     } else {
         match state.engine.get_or_create_index(&index) {
             Ok(i) => i,
-            Err(e) => return ApiError::new(argos_common::XerjError::from(e)).into_response(),
+            Err(e) => return ApiError::new(argos_common::ArgosError::from(e)).into_response(),
         }
     };
 
@@ -4444,7 +4444,7 @@ pub async fn create_doc(
             );
             (StatusCode::CREATED, Json(er)).into_response()
         }
-        Err(e) => ApiError::new(argos_common::XerjError::from(e)).into_response(),
+        Err(e) => ApiError::new(argos_common::ArgosError::from(e)).into_response(),
     }
 }
 
@@ -4689,7 +4689,7 @@ pub async fn get_doc(
 
     let idx = match state.engine.get_index(&index) {
         Ok(i) => i,
-        Err(e) => return ApiError::new(argos_common::XerjError::from(e)).into_response(),
+        Err(e) => return ApiError::new(argos_common::ArgosError::from(e)).into_response(),
     };
 
     match idx.get_document(&id).await {
@@ -4719,7 +4719,7 @@ pub async fn get_doc(
                         .unwrap_or(0);
                     if doc_bytes > LARGE_RESPONSE_HINT_THRESHOLD_BYTES {
                         let mut out = serde_json::Map::new();
-                        out.insert("_xerj".into(), get_doc_response_hint(&index, doc_bytes));
+                        out.insert("_argos".into(), get_doc_response_hint(&index, doc_bytes));
                         out.extend(map);
                         return Json(Value::Object(out)).into_response();
                     }
@@ -4732,7 +4732,7 @@ pub async fn get_doc(
             let resp = EsGetResponse::not_found(&index, &id);
             (StatusCode::NOT_FOUND, Json(resp)).into_response()
         }
-        Err(e) => ApiError::new(argos_common::XerjError::from(e)).into_response(),
+        Err(e) => ApiError::new(argos_common::ArgosError::from(e)).into_response(),
     }
 }
 
@@ -4855,7 +4855,7 @@ pub async fn delete_doc(
 
     let idx = match state.engine.get_index(&index) {
         Ok(i) => i,
-        Err(e) => return ApiError::new(argos_common::XerjError::from(e)).into_response(),
+        Err(e) => return ApiError::new(argos_common::ArgosError::from(e)).into_response(),
     };
 
     match idx
@@ -4888,7 +4888,7 @@ pub async fn delete_doc(
             (StatusCode::NOT_FOUND, Json(resp)).into_response()
         }
         // CAS mismatch surfaces as 409 version_conflict_engine_exception.
-        Err(e) => ApiError::new(argos_common::XerjError::from(e)).into_response(),
+        Err(e) => ApiError::new(argos_common::ArgosError::from(e)).into_response(),
     }
 }
 
@@ -8743,7 +8743,7 @@ fn source_filter_drops_a_name(
 fn build_search_request(
     body: &EsSearchBody,
     aggs_value: Option<Value>,
-) -> Result<argos_query::ast::SearchRequest, argos_common::XerjError> {
+) -> Result<argos_query::ast::SearchRequest, argos_common::ArgosError> {
     use argos_query::ast::SourceFilter;
 
     // Reject scripts that exceed the engine's resource limits up front with a
@@ -8752,14 +8752,14 @@ fn build_search_request(
     // The field set lives in `GuardedField`, shared with the raw-body guard
     // the `_msearch` / `_search/template` / `_msearch/template` paths run.
     if let Some(msg) = find_search_body_script_limit_violation(body, aggs_value.as_ref()) {
-        return Err(argos_common::XerjError::invalid_query(msg));
+        return Err(argos_common::ArgosError::invalid_query(msg));
     }
     if let Some(msg) = find_invalid_agg_order_path(aggs_value.as_ref())
         .or_else(|| find_invalid_composite_agg(aggs_value.as_ref()))
         .or_else(|| find_invalid_agg_params(aggs_value.as_ref()))
         .or_else(|| find_invalid_pipeline_agg(aggs_value.as_ref()))
     {
-        return Err(argos_common::XerjError::invalid_query(msg));
+        return Err(argos_common::ArgosError::invalid_query(msg));
     }
 
     let query_val = body.query.clone().unwrap_or(json!({ "match_all": {} }));
@@ -8785,7 +8785,7 @@ fn build_search_request(
     }
 
     let mut req = parse_request(&query_body)
-        .map_err(|e| argos_common::XerjError::invalid_query(e.to_string()))?;
+        .map_err(|e| argos_common::ArgosError::invalid_query(e.to_string()))?;
 
     // #943: `post_filter` never reaches the engine (accepted-and-ignored for
     // ordinary queries — implementing it generally is #204), but beside a
@@ -8795,7 +8795,7 @@ fn build_search_request(
     // naming the supported spellings (the filter inside each leg, or the
     // bool{must, filter} wrapper the engine now pushes into every leg).
     if body.post_filter.is_some() && req.query.contains_hybrid() {
-        return Err(argos_common::XerjError::invalid_query(
+        return Err(argos_common::ArgosError::invalid_query(
             "post_filter is not supported with hybrid/fusion queries; put the \
              filter inside each leg (hybrid.queries[].query) or beside the hybrid \
              as bool{must: [hybrid], filter: […]} so it is applied to every leg",
@@ -9678,7 +9678,7 @@ impl Drop for SignalOnDrop {
 
 fn search_task_panic_response(join_err: tokio::task::JoinError, index: &str) -> Response {
     tracing::error!(error = %join_err, index, "search task panicked");
-    ApiError::new(argos_common::XerjError::internal(
+    ApiError::new(argos_common::ArgosError::internal(
         "search panicked; check server logs for details",
     ))
     .into_response()
@@ -9880,11 +9880,11 @@ fn profile_shard_count(n: i64) -> u64 {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Actionable response hint (`_xerj`)
+// Actionable response hint (`_argos`)
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Byte threshold above which an unprojected `_search` response is "large"
-/// enough to earn the `_xerj` hint (see [`search_response_hint`]). Picked
+/// enough to earn the `_argos` hint (see [`search_response_hint`]). Picked
 /// well above realistic small-document test fixtures — most are a few
 /// hundred bytes at most — and well below the response a handful of whole
 /// source files produce (measured: 5 hits returning full file bodies via
@@ -9909,7 +9909,7 @@ fn fields_request_includes_passage(fields: &Value) -> bool {
     }
 }
 
-/// Build the additive `_xerj.hints` hint for a `_search` response.
+/// Build the additive `_argos.hints` hint for a `_search` response.
 ///
 /// `_passage` — the field that returns just the matching snippet instead of
 /// the whole document body — has no default trigger and is absent from
@@ -9957,7 +9957,7 @@ fn field_known_in_any(name: &str, schemas: &[&argos_common::types::Schema]) -> b
 /// Every clause in [`FIELD_KEYED_CLAUSES`] is a lookup: zero hits there is a
 /// claim about the data, and a wrong field name makes it a false claim.
 /// `exists` is deliberately absent — zero IS the truthful answer to "does any
-/// document have this field" — and keeps its `_xerj.hints` diagnostic instead
+/// document have this field" — and keeps its `_argos.hints` diagnostic instead
 /// of a refusal. `multi_match` appears once, joining its field list, and only
 /// when EVERY field it names is unknown (a half-real multi_match still
 /// searches the fields that exist, so it gets the hint, not the 400); a
@@ -10267,7 +10267,7 @@ fn strict_unknown_fields_set(settings: &Value) -> bool {
 /// the very 0-hit its strict member was configured to refuse.
 ///
 /// The default is ES's own lenient behaviour: a lookup on an unmapped field
-/// is a 0-hit 200 (with the `_xerj.hints` diagnostic). Turning the refusal
+/// is a 0-hit 200 (with the `_argos.hints` diagnostic). Turning the refusal
 /// on wholesale broke the ES-YAML suite (aggregation cases legitimately
 /// query `missing_field` expecting 200), so strictness is opt-in — and
 /// `argos autoindex` turns it on for the indices it creates, whose explicit
@@ -10998,7 +10998,7 @@ fn index_not_found_guidance(available: &[String]) -> String {
     format!("Indices on this node use these prefixes: {listed}.{ax_note} {cat}")
 }
 
-/// Build the additive `_xerj.hints` hint for a `404 index_not_found_exception`
+/// Build the additive `_argos.hints` hint for a `404 index_not_found_exception`
 /// on `_search`. The ES-parity `reason` ("no such index [name]") is fixed
 /// byte-for-byte by conformance tests and untouched here — this only rides
 /// alongside it with something an agent can actually act on: nearby index
@@ -11086,7 +11086,7 @@ mod search_response_hint_tests {
     }
 
     fn has_unknown_value_hint(json: &Value) -> bool {
-        json["_xerj"]["hints"].as_array().is_some_and(|hints| {
+        json["_argos"]["hints"].as_array().is_some_and(|hints| {
             hints
                 .iter()
                 .any(|h| h["code"].as_str() == Some("unknown_value"))
@@ -11156,7 +11156,7 @@ mod search_response_hint_tests {
 
         let (json, _) =
             run_search(&router, "hint-large", json!({"query": {"match_all": {}}})).await;
-        let hints = json["_xerj"]["hints"]
+        let hints = json["_argos"]["hints"]
             .as_array()
             .expect("hints array present");
         assert!(!hints.is_empty());
@@ -11181,7 +11181,7 @@ mod search_response_hint_tests {
             json!({"query": {"match_all": {}}, "_source": false}),
         )
         .await;
-        assert!(json.get("_xerj").is_none(), "unexpected hint: {json}");
+        assert!(json.get("_argos").is_none(), "unexpected hint: {json}");
     }
 
     /// Regression for a defect a blind usability run exposed: the hint used to
@@ -11203,7 +11203,7 @@ mod search_response_hint_tests {
         )
         .await;
         assert!(
-            json.get("_xerj").is_some(),
+            json.get("_argos").is_some(),
             "a large projected response must still hint: {json}"
         );
     }
@@ -11223,7 +11223,7 @@ mod search_response_hint_tests {
             }),
         )
         .await;
-        assert!(json.get("_xerj").is_none(), "unexpected hint: {json}");
+        assert!(json.get("_argos").is_none(), "unexpected hint: {json}");
     }
 
     #[tokio::test]
@@ -11243,7 +11243,7 @@ mod search_response_hint_tests {
 
         let (json, _) =
             run_search(&router, "hint-small", json!({"query": {"match_all": {}}})).await;
-        assert!(json.get("_xerj").is_none(), "unexpected hint: {json}");
+        assert!(json.get("_argos").is_none(), "unexpected hint: {json}");
     }
 
     /// PLACEMENT MATTERS: an agent that truncates long output from the
@@ -11261,13 +11261,13 @@ mod search_response_hint_tests {
 
         let (json, text) =
             run_search(&router, "hint-order", json!({"query": {"match_all": {}}})).await;
-        assert!(json.get("_xerj").is_some(), "expected a hint: {json}");
+        assert!(json.get("_argos").is_some(), "expected a hint: {json}");
 
-        let hint_pos = text.find("\"_xerj\"").expect("_xerj key in wire bytes");
+        let hint_pos = text.find("\"_argos\"").expect("_argos key in wire bytes");
         let hits_pos = text.find("\"hits\"").expect("hits key in wire bytes");
         assert!(
             hint_pos < hits_pos,
-            "_xerj (byte {hint_pos}) must precede hits (byte {hits_pos}): {text}"
+            "_argos (byte {hint_pos}) must precede hits (byte {hits_pos}): {text}"
         );
     }
 
@@ -11300,7 +11300,7 @@ mod search_response_hint_tests {
         assert_eq!(json["error"]["reason"], "no such index [ax-report]");
 
         // The additive hint rides alongside it, unrecognized by ES clients.
-        let hints = json["_xerj"]["hints"]
+        let hints = json["_argos"]["hints"]
             .as_array()
             .expect("hints array present");
         assert!(
@@ -11334,7 +11334,7 @@ mod search_response_hint_tests {
         let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         let json: Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(json["error"]["reason"], "no such index [anything]");
-        let hints = json["_xerj"]["hints"]
+        let hints = json["_argos"]["hints"]
             .as_array()
             .expect("hints array present");
         assert_eq!(hints[0]["candidates"], json!([]));
@@ -11372,7 +11372,7 @@ mod search_response_hint_tests {
         let json: Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(json["error"]["type"], "index_not_found_exception");
         assert_eq!(json["error"]["reason"], "no such index [qqqq]");
-        let hints = json["_xerj"]["hints"].as_array().expect("hints");
+        let hints = json["_argos"]["hints"].as_array().expect("hints");
         assert_eq!(hints[0]["candidates"], json!(["logs-app"]));
         let reason = hints[0]["reason"].as_str().unwrap();
         assert!(reason.contains("logs-*"), "{reason}");
@@ -11486,7 +11486,7 @@ mod semantic_text_lexical_hint_tests {
     }
 
     fn hint_codes(json: &Value) -> Vec<String> {
-        json["_xerj"]["hints"]
+        json["_argos"]["hints"]
             .as_array()
             .map(|hints| {
                 hints
@@ -11498,7 +11498,7 @@ mod semantic_text_lexical_hint_tests {
     }
 
     fn semantic_hint(json: &Value) -> Option<&Value> {
-        json["_xerj"]["hints"]
+        json["_argos"]["hints"]
             .as_array()?
             .iter()
             .find(|h| h["code"] == json!("lexical_on_semantic_text"))
@@ -11805,7 +11805,7 @@ mod semantic_text_lexical_hint_tests {
 /// #1093 — opt-in strict mode refuses lookup clauses (`term`, `match`,
 /// `range`, …) naming fields no target index maps, instead of ES's silent
 /// 0-hit 200 that a caller cannot tell from an empty corpus. The default is
-/// ES's own lenient answer (with the `_xerj.hints` diagnostic); strictness
+/// ES's own lenient answer (with the `_argos.hints` diagnostic); strictness
 /// comes from `?strict_unknown_fields=true`, the
 /// `index.query.strict_unknown_fields` setting, or an autoindex-created
 /// index. Pinned here: the refusal, both opt-in routes and the per-request
@@ -11948,7 +11948,7 @@ mod unknown_field_refusal_tests {
         assert_eq!(json["hits"]["total"]["value"], 0, "{json}");
     }
 
-    /// The default carries the `_xerj.hints` unknown-field diagnostic, so a
+    /// The default carries the `_argos.hints` unknown-field diagnostic, so a
     /// lenient caller keeps the explanation a strict caller gets as a 400 —
     /// and the per-request opt-out beats a strict index setting.
     #[tokio::test]
@@ -11965,7 +11965,7 @@ mod unknown_field_refusal_tests {
         .await;
         assert_eq!(status, StatusCode::OK, "{json}");
         assert_eq!(json["hits"]["total"]["value"], 0, "{json}");
-        let codes = json["_xerj"]["hints"]
+        let codes = json["_argos"]["hints"]
             .as_array()
             .map(|h| {
                 h.iter()
@@ -12455,7 +12455,7 @@ mod unknown_field_refusal_tests {
                 }),
                 "{path} must return the code hit: {json}"
             );
-            let codes = json["_xerj"]["hints"]
+            let codes = json["_argos"]["hints"]
                 .as_array()
                 .map(|h| {
                     h.iter()
@@ -12480,7 +12480,7 @@ mod unknown_field_refusal_tests {
         )
         .await;
         assert_eq!(status, StatusCode::OK, "{json}");
-        let reason = json["_xerj"]["hints"]
+        let reason = json["_argos"]["hints"]
             .as_array()
             .and_then(|h| h.iter().find(|x| x["code"] == "unknown_field"))
             .and_then(|h| h["reason"].as_str())
@@ -13068,8 +13068,8 @@ impl ExpandedSemanticSkips {
         selector: &str,
         index_name: &str,
         node: &str,
-        err: argos_common::XerjError,
-    ) -> Result<(), argos_common::XerjError> {
+        err: argos_common::ArgosError,
+    ) -> Result<(), argos_common::ArgosError> {
         let Some(reason) = absent_semantic_field_reason(&err) else {
             return Err(err);
         };
@@ -13094,11 +13094,11 @@ impl ExpandedSemanticSkips {
     /// When every index that was searched lacked the field, there is nothing
     /// to answer from. A wrong field name on a wildcard must stay a 400
     /// rather than an empty 200.
-    fn failure_if_every_index_skipped(&self) -> Option<argos_common::XerjError> {
+    fn failure_if_every_index_skipped(&self) -> Option<argos_common::ArgosError> {
         if self.attempted > 0 && self.skipped == self.attempted {
             self.first_reason
                 .clone()
-                .map(argos_common::XerjError::invalid_query)
+                .map(argos_common::ArgosError::invalid_query)
         } else {
             None
         }
@@ -13109,9 +13109,9 @@ impl ExpandedSemanticSkips {
 /// `semantic_text` (lexical embedder, no comparable stored vector). The
 /// clause is the contract the coordinator matches; the rest of the sentence
 /// is the operator hint and may be reworded.
-fn absent_semantic_field_reason(err: &argos_common::XerjError) -> Option<&str> {
+fn absent_semantic_field_reason(err: &argos_common::ArgosError) -> Option<&str> {
     match err {
-        argos_common::XerjError::InvalidQuery { reason }
+        argos_common::ArgosError::InvalidQuery { reason }
             if reason.contains("it is not a `semantic_text` field") =>
         {
             Some(reason.as_str())
@@ -13303,7 +13303,7 @@ async fn search_with_post_filter(
     let (Some(mut merged), Some(aggs_value)) =
         (read(hits_body).await, read(aggs_response.into_body()).await)
     else {
-        return ApiError::new(argos_common::XerjError::internal(
+        return ApiError::new(argos_common::ArgosError::internal(
             "post_filter: could not read the search responses to merge them",
         ))
         .into_response();
@@ -13985,7 +13985,7 @@ async fn search_impl(
             .unwrap_or(true);
         let iu = params.ignore_unavailable.as_deref() == Some("true");
         if !allow_no && !iu {
-            return ApiError::new(argos_common::XerjError::index_not_found(&index)).into_response();
+            return ApiError::new(argos_common::ArgosError::index_not_found(&index)).into_response();
         }
     }
 
@@ -15375,7 +15375,7 @@ async fn search_impl(
         if let Some(q) = body.query.as_ref() {
             if mentions_seq_no(q) {
                 let reason = "failed to create query: Cannot query field [_seq_no]: _seq_no cannot be queried when [index.disable_sequence_numbers] is [true]";
-                return ApiError::new(argos_common::XerjError::invalid_query(reason))
+                return ApiError::new(argos_common::ArgosError::invalid_query(reason))
                     .into_response();
             }
         }
@@ -15475,7 +15475,7 @@ async fn search_impl(
                     "failed to create query: Too many ids specified, allowed max result window is [{}]",
                     max_w
                 );
-                return ApiError::new(argos_common::XerjError::invalid_query(reason))
+                return ApiError::new(argos_common::ArgosError::invalid_query(reason))
                     .into_response();
             }
         }
@@ -15517,7 +15517,7 @@ async fn search_impl(
                      [{max_sf}] but was [{n}]. This limit can be set by changing the \
                      [index.max_script_fields] index level setting."
                 );
-                return ApiError::new(argos_common::XerjError::invalid_query(reason))
+                return ApiError::new(argos_common::ArgosError::invalid_query(reason))
                     .into_response();
             }
         }
@@ -15535,7 +15535,7 @@ async fn search_impl(
             scroll_page_size,
             is_scroll_request,
         ) {
-            return ApiError::new(argos_common::XerjError::invalid_query(reason)).into_response();
+            return ApiError::new(argos_common::ArgosError::invalid_query(reason)).into_response();
         }
     }
 
@@ -15856,15 +15856,15 @@ async fn search_impl(
                         "in-process search: index unavailable, skipping it"
                     );
                     skipped.attempt();
-                    skipped.skip(|| ApiError::new(argos_common::XerjError::from(e)).into_response());
+                    skipped.skip(|| ApiError::new(argos_common::ArgosError::from(e)).into_response());
                     shards_failed_count += 1;
                     continue;
                 }
-                let mut api_err = ApiError::new(argos_common::XerjError::from(e));
+                let mut api_err = ApiError::new(argos_common::ArgosError::from(e));
                 // Byte-parity `reason` ("no such index [name]") is fixed by
                 // ES-compat tests and set unconditionally in `error.rs` — this
-                // only adds the additive `_xerj` hint alongside it.
-                if matches!(api_err.inner, argos_common::XerjError::IndexNotFound { .. }) {
+                // only adds the additive `_argos` hint alongside it.
+                if matches!(api_err.inner, argos_common::ArgosError::IndexNotFound { .. }) {
                     let available = state.engine.index_name_list();
                     api_err = api_err.with_hint(index_not_found_hint(idx_name, &available));
                 }
@@ -15982,14 +15982,14 @@ async fn search_impl(
                         error = ?e.to_string().chars().take(300).collect::<String>(),
                         "in-process search: index search failed, skipping it"
                     );
-                    skipped.skip(|| ApiError::new(argos_common::XerjError::from(e)).into_response());
+                    skipped.skip(|| ApiError::new(argos_common::ArgosError::from(e)).into_response());
                     shards_failed_count += 1;
                     continue;
                 }
                 // #2305: a wildcard, `_all`, or alias member with no
                 // `semantic_text` field for this query contributes no hits.
                 // A concrete name in the selector still fails the request.
-                let err = argos_common::XerjError::from(e);
+                let err = argos_common::ArgosError::from(e);
                 match semantic_skips.take_skippable(&index, idx_name, search_node.as_str(), err) {
                     Ok(()) => {
                         shards_failed_count += 1;
@@ -19246,7 +19246,7 @@ async fn search_impl(
     if let Some(hint) = response_hint {
         if let Some(obj) = response_body.as_object_mut() {
             let mut rebuilt = serde_json::Map::with_capacity(obj.len() + 1);
-            rebuilt.insert("_xerj".to_string(), hint);
+            rebuilt.insert("_argos".to_string(), hint);
             for (k, v) in obj.iter() {
                 rebuilt.insert(k.clone(), v.clone());
             }
@@ -20758,7 +20758,7 @@ async fn process_bulk_body(
     let text = match std::str::from_utf8(body) {
         Ok(t) => t,
         Err(_) => {
-            let e = argos_common::XerjError::serialization("bulk body is not valid UTF-8");
+            let e = argos_common::ArgosError::serialization("bulk body is not valid UTF-8");
             return ApiError::new(e).into_response();
         }
     };
@@ -23526,7 +23526,7 @@ async fn build_update_get_field(
 /// even when it could not be applied, and that parse is an infallible
 /// allocation (`panic = "abort"`, #1122). Bytes that are not JSON and are
 /// also over the limit report the size refusal, not a parse error.
-pub(crate) fn parse_update_body(body: &[u8]) -> Result<EsUpdateBody, argos_common::XerjError> {
+pub(crate) fn parse_update_body(body: &[u8]) -> Result<EsUpdateBody, argos_common::ArgosError> {
     if argos_common::document_limit::update_body_too_large(body.len()) {
         let len = body.len();
         tracing::warn!(
@@ -23534,12 +23534,12 @@ pub(crate) fn parse_update_body(body: &[u8]) -> Result<EsUpdateBody, argos_commo
             limit = argos_common::document_limit::MAX_UPDATE_BODY_BYTES,
             "update body refused before parse; the existing document was not changed (#1122)"
         );
-        return Err(argos_common::XerjError::invalid_document_json(
+        return Err(argos_common::ArgosError::invalid_document_json(
             argos_common::document_limit::update_body_refusal(len),
         ));
     }
     serde_json::from_slice(body).map_err(|e| {
-        argos_common::XerjError::invalid_document_json(format!("invalid JSON body: {e}"))
+        argos_common::ArgosError::invalid_document_json(format!("invalid JSON body: {e}"))
     })
 }
 
@@ -23594,7 +23594,7 @@ pub(crate) async fn apply_local_update(
     let idx = match state.engine.get_or_create_index(index) {
         Ok(i) => i,
         Err(e) => {
-            return settled(ApiError::new(argos_common::XerjError::from(e)), false);
+            return settled(ApiError::new(argos_common::ArgosError::from(e)), false);
         }
     };
 
@@ -23659,12 +23659,12 @@ pub(crate) async fn apply_local_update(
                 return settled(Json(er), true);
             }
             Ok(Ok(None)) => {
-                let e = argos_common::XerjError::document_not_found(id, index);
+                let e = argos_common::ArgosError::document_not_found(id, index);
                 return settled(ApiError::new(e), false);
             }
             Ok(Err(error)) => return settled(update_script_bad_request(error), false),
             Err(error) => {
-                return settled(ApiError::new(argos_common::XerjError::from(error)), false);
+                return settled(ApiError::new(argos_common::ArgosError::from(error)), false);
             }
         }
     }
@@ -23688,10 +23688,10 @@ pub(crate) async fn apply_local_update(
             settled(Json(er), replicate)
         }
         Ok(None) => {
-            let e = argos_common::XerjError::document_not_found(id, index);
+            let e = argos_common::ArgosError::document_not_found(id, index);
             settled(ApiError::new(e), false)
         }
-        Err(e) => settled(ApiError::new(argos_common::XerjError::from(e)), false),
+        Err(e) => settled(ApiError::new(argos_common::ArgosError::from(e)), false),
     }
 }
 
@@ -24065,7 +24065,7 @@ pub async fn refresh_index(
         let (name, result) = match task.await {
             Ok(pair) => pair,
             Err(error) => {
-                let rendered = ApiError::new(argos_common::XerjError::internal(format!(
+                let rendered = ApiError::new(argos_common::ArgosError::internal(format!(
                     "index [{name}] refresh task failed: {error}"
                 )))
                 .into_value();
@@ -24076,7 +24076,7 @@ pub async fn refresh_index(
         match result {
             Ok(()) => successful += 1,
             Err(error) => {
-                let rendered = ApiError::new(argos_common::XerjError::from(error)).into_value();
+                let rendered = ApiError::new(argos_common::ArgosError::from(error)).into_value();
                 record_refresh_failure(&mut failures, &mut response_status, &name, rendered);
             }
         }
@@ -24318,7 +24318,7 @@ pub async fn count_docs(
                 let mut req = match argos_query::parse_request(&search_body) {
                     Ok(r) => r,
                     Err(e) => {
-                        let ze = argos_common::XerjError::invalid_query(e.to_string());
+                        let ze = argos_common::ArgosError::invalid_query(e.to_string());
                         return ApiError::new(ze).into_response();
                     }
                 };
@@ -24341,7 +24341,7 @@ pub async fn count_docs(
                         successful += 1;
                     }
                     Err(e) => {
-                        let rendered = ApiError::new(argos_common::XerjError::from(e)).into_value();
+                        let rendered = ApiError::new(argos_common::ArgosError::from(e)).into_value();
                         shard_failures.push(count_shard_failure(ix_name, &rendered));
                         if first_error.is_none() {
                             first_error = Some(rendered);
@@ -24387,7 +24387,7 @@ pub async fn count_docs(
     }
     let idx = match state.engine.get_index(&index) {
         Ok(i) => i,
-        Err(e) => return ApiError::new(argos_common::XerjError::from(e)).into_response(),
+        Err(e) => return ApiError::new(argos_common::ArgosError::from(e)).into_response(),
     };
 
     // If no query or match_all, use the stored stats for speed. A body that
@@ -24428,12 +24428,12 @@ pub async fn count_docs(
                         result.total.value
                     }
                     Err(e) => {
-                        return ApiError::new(argos_common::XerjError::from(e)).into_response()
+                        return ApiError::new(argos_common::ArgosError::from(e)).into_response()
                     }
                 }
             }
             Err(e) => {
-                let ze = argos_common::XerjError::invalid_query(e.to_string());
+                let ze = argos_common::ArgosError::invalid_query(e.to_string());
                 return ApiError::new(ze).into_response();
             }
         }
@@ -24760,7 +24760,7 @@ async fn cat_ann_inner(
             for &p in &parts {
                 let is_wild = p == "_all" || p == "*" || p.contains('*');
                 if !is_wild && !all.iter().any(|n| n == p) {
-                    return ApiError::new(argos_common::XerjError::index_not_found(p))
+                    return ApiError::new(argos_common::ArgosError::index_not_found(p))
                         .into_response();
                 }
             }
@@ -25208,7 +25208,7 @@ pub async fn analyze_text(
                 .first()
                 .and_then(|name| state.engine.get_index(name).ok())
             else {
-                return ApiError::new(argos_common::XerjError::index_not_found(&index))
+                return ApiError::new(argos_common::ArgosError::index_not_found(&index))
                     .into_response();
             };
             idx.analysis_in_force().await
@@ -25248,7 +25248,7 @@ pub async fn analyze_text(
         .first()
         .and_then(|name| state.engine.get_index(name).ok())
     else {
-        return ApiError::new(argos_common::XerjError::index_not_found(&index)).into_response();
+        return ApiError::new(argos_common::ArgosError::index_not_found(&index)).into_response();
     };
     match idx
         .analyze(body.analyzer.as_deref(), body.field.as_deref(), &input)
@@ -25423,7 +25423,7 @@ pub async fn index_disk_usage(
 ) -> impl IntoResponse {
     let targets = resolve_index_selector(&state, &index).await;
     if targets.is_empty() {
-        let e = argos_common::XerjError::index_not_found(&index);
+        let e = argos_common::ArgosError::index_not_found(&index);
         return ApiError::new(e).into_response();
     }
     let mut indices = serde_json::Map::new();
@@ -25467,7 +25467,7 @@ pub async fn index_stats(
     // sum their stats into a single _all view + per-index breakdown.
     let targets = resolve_index_selector(&state, &index).await;
     if targets.is_empty() {
-        let e = argos_common::XerjError::index_not_found(&index);
+        let e = argos_common::ArgosError::index_not_found(&index);
         return ApiError::new(e).into_response();
     }
     if targets.len() > 1 || index == "_all" || index.contains('*') {
@@ -25620,7 +25620,7 @@ pub async fn index_stats(
     }
     let stats = match state.engine.index_stats(&index).await {
         Ok(s) => s,
-        Err(e) => return ApiError::new(argos_common::XerjError::from(e)).into_response(),
+        Err(e) => return ApiError::new(argos_common::ArgosError::from(e)).into_response(),
     };
 
     let doc_count = stats.doc_count;
@@ -25963,7 +25963,7 @@ pub async fn post_aliases(
             let targets = if alias_target_is_pattern(&add.index) {
                 let expanded = resolve_index_selector(&state, &add.index).await;
                 if expanded.is_empty() {
-                    let e = argos_common::XerjError::index_not_found(&add.index);
+                    let e = argos_common::ArgosError::index_not_found(&add.index);
                     return ApiError::new(e).into_response();
                 }
                 expanded
@@ -25992,7 +25992,7 @@ pub async fn post_aliases(
                 }
                 for target in targets {
                     if let Err(error) = state.engine.add_alias(&add.alias, target) {
-                        return ApiError::new(argos_common::XerjError::from(error)).into_response();
+                        return ApiError::new(argos_common::ArgosError::from(error)).into_response();
                     }
                     store_alias_meta(&state, target, &add.alias, &meta);
                 }
@@ -26000,7 +26000,7 @@ pub async fn post_aliases(
             Resolved::Remove(remove, targets) => {
                 for target in targets {
                     if let Err(error) = state.engine.remove_alias(&remove.alias, target) {
-                        return ApiError::new(argos_common::XerjError::from(error)).into_response();
+                        return ApiError::new(argos_common::ArgosError::from(error)).into_response();
                     }
                     clear_alias_meta(&state, target, &remove.alias);
                 }
@@ -26055,7 +26055,7 @@ async fn resolve_selector_with_filters(
         Vec<(String, std::sync::Arc<argos_engine::Index>)>,
         Vec<Value>,
     ),
-    argos_common::XerjError,
+    argos_common::ArgosError,
 > {
     let names = resolve_index_selector(state, spec).await;
     let mut alias_filters: Vec<Value> = Vec::new();
@@ -26077,7 +26077,7 @@ async fn resolve_selector_with_filters(
             state
                 .engine
                 .get_index(name)
-                .map_err(argos_common::XerjError::from)?,
+                .map_err(argos_common::ArgosError::from)?,
         ));
     }
     Ok((out, alias_filters))
@@ -26149,7 +26149,7 @@ async fn resolve_index_selector(state: &AppState, spec: &str) -> Vec<String> {
 async fn resolve_indices_for_op(
     state: &AppState,
     spec: &str,
-) -> Result<Vec<(String, std::sync::Arc<argos_engine::Index>)>, argos_common::XerjError> {
+) -> Result<Vec<(String, std::sync::Arc<argos_engine::Index>)>, argos_common::ArgosError> {
     let is_selector = spec == "_all" || spec.contains('*') || spec.contains(',');
     let mut all: Option<Vec<String>> = None;
     let mut names: Vec<String> = Vec::new();
@@ -26201,7 +26201,7 @@ async fn resolve_indices_for_op(
                 // ES's default `ignore_unavailable=false` 404s the whole
                 // request on a missing name instead of silently dropping it —
                 // `POST /real,typo/_refresh` must not report success.
-                return Err(argos_common::XerjError::index_not_found(part));
+                return Err(argos_common::ArgosError::index_not_found(part));
             }
         }
     }
@@ -26213,7 +26213,7 @@ async fn resolve_indices_for_op(
         })
         .collect();
     if handles.is_empty() && !is_selector {
-        return Err(argos_common::XerjError::index_not_found(spec));
+        return Err(argos_common::ArgosError::index_not_found(spec));
     }
     Ok(handles)
 }
@@ -26307,12 +26307,12 @@ pub async fn put_alias(
         // happen; `PUT /.argos-memory-*/_alias/X` was the case that made it
         // look like the reserved namespace had just been aliased. Refuse, the
         // way ES does.
-        let e = argos_common::XerjError::index_not_found(&index);
+        let e = argos_common::ArgosError::index_not_found(&index);
         return ApiError::new(e).into_response();
     }
     for idx in &targets {
         if let Err(error) = attach(idx) {
-            return ApiError::new(argos_common::XerjError::from(error)).into_response();
+            return ApiError::new(argos_common::ArgosError::from(error)).into_response();
         }
     }
     Json(json!({ "acknowledged": true })).into_response()
@@ -26325,13 +26325,13 @@ pub async fn delete_alias(
     let targets = resolve_index_selector(&state, &index).await;
     if targets.is_empty() {
         if let Err(error) = state.engine.remove_alias(&alias, &index) {
-            return ApiError::new(argos_common::XerjError::from(error)).into_response();
+            return ApiError::new(argos_common::ArgosError::from(error)).into_response();
         }
         clear_alias_meta(&state, &index, &alias);
     } else {
         for idx in &targets {
             if let Err(error) = state.engine.remove_alias(&alias, idx) {
-                return ApiError::new(argos_common::XerjError::from(error)).into_response();
+                return ApiError::new(argos_common::ArgosError::from(error)).into_response();
             }
             clear_alias_meta(&state, idx, &alias);
         }
@@ -26394,7 +26394,7 @@ pub async fn put_index_template(
     };
     match state.engine.put_index_template(name, tmpl) {
         Ok(()) => Json(json!({ "acknowledged": true })).into_response(),
-        Err(e) => ApiError::new(argos_common::XerjError::from(e)).into_response(),
+        Err(e) => ApiError::new(argos_common::ArgosError::from(e)).into_response(),
     }
 }
 
@@ -26445,7 +26445,7 @@ pub async fn get_index_template(
         }
         None => {
             let e =
-                argos_common::XerjError::index_not_found(format!("index template [{name}] missing"));
+                argos_common::ArgosError::index_not_found(format!("index template [{name}] missing"));
             ApiError::new(e).into_response()
         }
     }
@@ -26459,10 +26459,10 @@ pub async fn delete_index_template(
         Ok(true) => Json(json!({ "acknowledged": true })).into_response(),
         Ok(false) => {
             let e =
-                argos_common::XerjError::index_not_found(format!("index template [{name}] missing"));
+                argos_common::ArgosError::index_not_found(format!("index template [{name}] missing"));
             ApiError::new(e).into_response()
         }
-        Err(e) => ApiError::new(argos_common::XerjError::from(e)).into_response(),
+        Err(e) => ApiError::new(argos_common::ArgosError::from(e)).into_response(),
     }
 }
 
@@ -26775,7 +26775,7 @@ pub async fn search_with_scroll(
     for idx_name in &index_names {
         let idx = match state.engine.get_index(idx_name) {
             Ok(i) => i,
-            Err(e) => return ApiError::new(argos_common::XerjError::from(e)).into_response(),
+            Err(e) => return ApiError::new(argos_common::ArgosError::from(e)).into_response(),
         };
 
         // Fetch up to the scroll window per index.
@@ -26795,7 +26795,7 @@ pub async fn search_with_scroll(
                 }
             }
             Err(e) => {
-                let err = argos_common::XerjError::from(e);
+                let err = argos_common::ArgosError::from(e);
                 match semantic_skips.take_skippable(&index, idx_name, search_node.as_str(), err) {
                     Ok(()) => continue,
                     Err(err) => return ApiError::new(err).into_response(),
@@ -27109,7 +27109,7 @@ pub async fn next_scroll(
     let scroll_id = match body.scroll_id.clone().or_else(|| params.scroll_id.clone()) {
         Some(id) if !id.is_empty() => id,
         _ => {
-            let e = argos_common::XerjError::invalid_query("Missing scroll_id");
+            let e = argos_common::ArgosError::invalid_query("Missing scroll_id");
             return ApiError::new(e).into_response();
         }
     };
@@ -28286,13 +28286,13 @@ pub async fn reindex(
     // Get or create destination index.
     let dest_idx = match state.engine.get_or_create_index(dest_name) {
         Ok(i) => i,
-        Err(e) => return ApiError::new(argos_common::XerjError::from(e)).into_response(),
+        Err(e) => return ApiError::new(argos_common::ArgosError::from(e)).into_response(),
     };
 
     // Fetch all docs from source via paginated search_after to handle large indices.
     let source_idx = match state.engine.get_index(source_name) {
         Ok(i) => i,
-        Err(e) => return ApiError::new(argos_common::XerjError::from(e)).into_response(),
+        Err(e) => return ApiError::new(argos_common::ArgosError::from(e)).into_response(),
     };
 
     // Flush the source memtable to segments before paging. `_id`-sorted
@@ -28307,7 +28307,7 @@ pub async fn reindex(
     // must not be followed by a reindex that reports `"total": N` over a source
     // it could not read consistently (issue #204).
     if let Err(e) = source_idx.flush().await {
-        return ApiError::new(argos_common::XerjError::internal(format!(
+        return ApiError::new(argos_common::ArgosError::internal(format!(
             "reindex from [{source_name}] into [{dest_name}] was not attempted: flushing \
              the source failed ({e}); the copy needs a flushed source to page over it \
              without skipping or duplicating documents"
@@ -28357,7 +28357,7 @@ pub async fn reindex(
         }
 
         let search_req = match argos_query::parse_request(&search_body_val)
-            .map_err(|e| argos_common::XerjError::invalid_query(e.to_string()))
+            .map_err(|e| argos_common::ArgosError::invalid_query(e.to_string()))
         {
             Ok(r) => r,
             Err(e) => return ApiError::new(e).into_response(),
@@ -28365,7 +28365,7 @@ pub async fn reindex(
 
         let results = match source_idx.search(&search_req).await {
             Ok(r) => r,
-            Err(e) => return ApiError::new(argos_common::XerjError::from(e)).into_response(),
+            Err(e) => return ApiError::new(argos_common::ArgosError::from(e)).into_response(),
         };
         // A script resource limit in `source.query` makes matching fail-closed,
         // so this batch is a subset of the documents the caller asked to copy.
@@ -29808,7 +29808,7 @@ async fn msearch_impl(
 
         // Parse search request.
         let mut search_req = match argos_query::parse_request(&effective_body)
-            .map_err(|e| argos_common::XerjError::invalid_query(e.to_string()))
+            .map_err(|e| argos_common::ArgosError::invalid_query(e.to_string()))
         {
             Ok(r) => r,
             // Rendered through the same `ApiError` path the single-request
@@ -29850,7 +29850,7 @@ async fn msearch_impl(
         let mut total_count: u64 = 0;
         let mut total_relation = "eq";
         let mut merged_aggs: Option<Value> = None;
-        let mut search_error: Option<argos_common::XerjError> = None;
+        let mut search_error: Option<argos_common::ArgosError> = None;
         let mut script_failure: Option<String> = None;
         // #2305: same wildcard/alias isolation as `_search`. `_msearch` fans
         // out on its own, so a `proj-*` item used to 400 when one match lacked
@@ -29862,7 +29862,7 @@ async fn msearch_impl(
             let idx = match state.engine.get_index(idx_name) {
                 Ok(i) => i,
                 Err(e) => {
-                    search_error = Some(argos_common::XerjError::from(e));
+                    search_error = Some(argos_common::ArgosError::from(e));
                     break;
                 }
             };
@@ -29891,7 +29891,7 @@ async fn msearch_impl(
                     }
                 }
                 Err(e) => {
-                    let err = argos_common::XerjError::from(e);
+                    let err = argos_common::ArgosError::from(e);
                     match semantic_skips.take_skippable(
                         &index_name,
                         idx_name,
@@ -29918,7 +29918,7 @@ async fn msearch_impl(
 
         // The sub-response carries the SAME body the single-request `_search`
         // would have produced for this error, status and all: `ApiError`
-        // already maps every `XerjError` to its ES exception type, status and
+        // already maps every `ArgosError` to its ES exception type, status and
         // `root_cause` (see `api/error.rs`). It used to be flattened to a bare
         // `{"reason": …}` under a hardcoded 500, which turned a plain user
         // mapping declaration — a query naming an `"index": false` field, a
@@ -31833,7 +31833,7 @@ async fn resolve_by_query_targets(
     user_query: Value,
 ) -> std::result::Result<
     (Vec<std::sync::Arc<argos_engine::Index>>, Vec<String>, Value),
-    argos_common::XerjError,
+    argos_common::ArgosError,
 > {
     let member_names = resolve_index_selector(state, spec).await;
 
@@ -31863,7 +31863,7 @@ async fn resolve_by_query_targets(
             state
                 .engine
                 .get_index(name)
-                .map_err(argos_common::XerjError::from)?,
+                .map_err(argos_common::ArgosError::from)?,
         );
     }
     Ok((indices, member_names, effective_query))
@@ -32031,7 +32031,7 @@ pub async fn delete_by_query(
         "sort": [{ "_id": "asc" }],
     });
     if let Err(e) = argos_query::parse_request(&validation_body) {
-        return ApiError::new(argos_common::XerjError::invalid_query(e.to_string())).into_response();
+        return ApiError::new(argos_common::ArgosError::invalid_query(e.to_string())).into_response();
     }
 
     // ES defaults `wait_for_completion` to true (synchronous); only an
@@ -32180,13 +32180,13 @@ async fn by_query_matches_anything(
         Ok(r) => r,
         Err(e) => {
             return Err(
-                ApiError::new(argos_common::XerjError::invalid_query(e.to_string())).into_value(),
+                ApiError::new(argos_common::ArgosError::invalid_query(e.to_string())).into_value(),
             )
         }
     };
     let results = match idx.search(&probe).await {
         Ok(r) => r,
-        Err(e) => return Err(ApiError::new(argos_common::XerjError::from(e)).into_value()),
+        Err(e) => return Err(ApiError::new(argos_common::ArgosError::from(e)).into_value()),
     };
     if let Some(reason) = &results.script_failure {
         return Err(script_limit_error_value(reason));
@@ -32290,7 +32290,7 @@ pub(crate) async fn run_delete_by_query_recorded(
     // purge that reports a `total` over an index it could not read
     // consistently.
     if let Err(e) = idx.flush().await {
-        return ApiError::new(argos_common::XerjError::internal(format!(
+        return ApiError::new(argos_common::ArgosError::internal(format!(
             "delete_by_query was not attempted: flushing the index failed ({e}); the purge \
              needs a flushed index to page over it without skipping documents"
         )))
@@ -32304,7 +32304,7 @@ pub(crate) async fn run_delete_by_query_recorded(
     let parsed_query = match argos_query::parse_request(&json!({ "query": query })) {
         Ok(r) => r.query,
         Err(e) => {
-            return ApiError::new(argos_common::XerjError::invalid_query(e.to_string())).into_value()
+            return ApiError::new(argos_common::ArgosError::invalid_query(e.to_string())).into_value()
         }
     };
 
@@ -32406,7 +32406,7 @@ pub(crate) async fn run_delete_by_query_recorded(
             search_body_val["search_after"] = json!([cursor]);
         }
         let mut search_req = match argos_query::parse_request(&search_body_val)
-            .map_err(|e| argos_common::XerjError::invalid_query(e.to_string()))
+            .map_err(|e| argos_common::ArgosError::invalid_query(e.to_string()))
         {
             Ok(r) => r,
             Err(e) => return ApiError::new(e).into_value(),
@@ -32416,7 +32416,7 @@ pub(crate) async fn run_delete_by_query_recorded(
 
         let results = match idx.search(&search_req).await {
             Ok(r) => r,
-            Err(e) => return ApiError::new(argos_common::XerjError::from(e)).into_value(),
+            Err(e) => return ApiError::new(argos_common::ArgosError::from(e)).into_value(),
         };
         // A script resource limit makes matching fail-closed, so the
         // selection is a subset of what the caller asked to delete — checked
@@ -32669,7 +32669,7 @@ pub async fn update_by_query(
         "sort": [{ "_id": "asc" }],
     });
     if let Err(e) = argos_query::parse_request(&validation_body) {
-        return ApiError::new(argos_common::XerjError::invalid_query(e.to_string())).into_response();
+        return ApiError::new(argos_common::ArgosError::invalid_query(e.to_string())).into_response();
     }
 
     // Optional painless script — when present, each matched hit's source is
@@ -32923,7 +32923,7 @@ pub(crate) async fn run_update_by_query_recorded(
     // followed by an update that reports a `total` over an index it could not
     // read consistently.
     if let Err(e) = idx.flush().await {
-        return ApiError::new(argos_common::XerjError::internal(format!(
+        return ApiError::new(argos_common::ArgosError::internal(format!(
             "update_by_query was not attempted: flushing the index failed ({e}); the update \
              needs a flushed index to page over it without skipping or duplicating documents"
         )))
@@ -32937,7 +32937,7 @@ pub(crate) async fn run_update_by_query_recorded(
     let parsed_query = match argos_query::parse_request(&json!({ "query": query })) {
         Ok(r) => r.query,
         Err(e) => {
-            return ApiError::new(argos_common::XerjError::invalid_query(e.to_string())).into_value()
+            return ApiError::new(argos_common::ArgosError::invalid_query(e.to_string())).into_value()
         }
     };
 
@@ -33067,7 +33067,7 @@ pub(crate) async fn run_update_by_query_recorded(
                         search_body_val["search_after"] = json!([cursor]);
                     }
                     let mut search_req = match argos_query::parse_request(&search_body_val)
-                        .map_err(|e| argos_common::XerjError::invalid_query(e.to_string()))
+                        .map_err(|e| argos_common::ArgosError::invalid_query(e.to_string()))
                     {
                         Ok(r) => r,
                         Err(e) => return Err(ApiError::new(e).into_value()),
@@ -33082,7 +33082,7 @@ pub(crate) async fn run_update_by_query_recorded(
                     let results = match idx.search(&search_req).await {
                         Ok(r) => r,
                         Err(e) => {
-                            return Err(ApiError::new(argos_common::XerjError::from(e)).into_value())
+                            return Err(ApiError::new(argos_common::ArgosError::from(e)).into_value())
                         }
                     };
                     // A script resource limit makes matching fail-closed, so the
@@ -33189,7 +33189,7 @@ pub(crate) async fn run_update_by_query_recorded(
                     // search unflushed state.
                     if mutated_in_batch > 0 {
                         if let Err(e) = idx.flush().await {
-                            return Err(ApiError::new(argos_common::XerjError::internal(format!(
+                            return Err(ApiError::new(argos_common::ArgosError::internal(format!(
                                 "update_by_query aborted mid-run: flushing a batch failed ({e}); \
                              paging on without the flush could apply the script twice"
                             )))
@@ -33657,7 +33657,7 @@ pub async fn cat_count(
         // loud error instead of a plausible undercount.
         let idx = match state.engine.get_index(name) {
             Ok(i) => i,
-            Err(e) => return ApiError::new(argos_common::XerjError::from(e)).into_response(),
+            Err(e) => return ApiError::new(argos_common::ArgosError::from(e)).into_response(),
         };
         if alias_filters.is_empty() {
             count += idx.stats().await.doc_count;
@@ -33672,13 +33672,13 @@ pub async fn cat_count(
             let req = match argos_query::parse_request(&body) {
                 Ok(r) => r,
                 Err(e) => {
-                    return ApiError::new(argos_common::XerjError::invalid_query(e.to_string()))
+                    return ApiError::new(argos_common::ArgosError::invalid_query(e.to_string()))
                         .into_response()
                 }
             };
             match idx.search(&req).await {
                 Ok(res) => count += res.total.value,
-                Err(e) => return ApiError::new(argos_common::XerjError::from(e)).into_response(),
+                Err(e) => return ApiError::new(argos_common::ArgosError::from(e)).into_response(),
             }
         }
     }
@@ -33883,7 +33883,7 @@ pub async fn put_settings(
 ) -> impl IntoResponse {
     let targets = resolve_index_selector(&state, &index).await;
     if targets.is_empty() {
-        let e = argos_common::XerjError::index_not_found(&index);
+        let e = argos_common::ArgosError::index_not_found(&index);
         return ApiError::new(e).into_response();
     }
 
@@ -33908,7 +33908,7 @@ pub async fn put_settings(
     // echoes an analyzer that analyses nothing — the same silent lie the
     // nested spelling was closed against, one string away.
     if declares_analysis(&body) || declares_analysis(&inner) {
-        let e = argos_common::XerjError::config(format!(
+        let e = argos_common::ArgosError::config(format!(
             "index [{index}]: `analysis` settings cannot be updated after the index is \
              created — the analyzer registry is built at index creation and this request \
              would change only what `GET /{index}/_settings` echoes back, not how \
@@ -33921,7 +33921,7 @@ pub async fn put_settings(
     if state.engine.has_cluster() {
         for idx in &targets {
             if let Err(e) = state.engine.replicate_index_settings(idx, &body).await {
-                return ApiError::new(argos_common::XerjError::from(e)).into_response();
+                return ApiError::new(argos_common::ArgosError::from(e)).into_response();
             }
         }
     } else {
@@ -33962,7 +33962,7 @@ pub async fn put_settings(
                 continue;
             };
             if let Err(e) = idx.apply_block_settings(&body).await {
-                return ApiError::new(argos_common::XerjError::from(e)).into_response();
+                return ApiError::new(argos_common::ArgosError::from(e)).into_response();
             }
             sync_display_blocks(&state, name).await;
         }
@@ -33987,7 +33987,7 @@ pub async fn put_settings(
                 // the public port (#262 hit exactly this in review).
                 if state.engine.get_index(idx).is_ok() {
                     if let Err(error) = state.engine.detach_lifecycle(idx) {
-                        return ApiError::new(argos_common::XerjError::from(error)).into_response();
+                        return ApiError::new(argos_common::ArgosError::from(error)).into_response();
                     }
                 }
             }
@@ -34057,7 +34057,7 @@ fn ilm_lifecycle_directive_from_settings(body: &Value) -> Option<Option<String>>
 /// having to guess.
 fn pipeline_execution_error(pipeline: &str, e: &argos_wasm::WasmError) -> ApiError {
     tracing::warn!(pipeline = %pipeline, error = %e, "refusing write: ingest pipeline did not run");
-    ApiError::new(argos_common::XerjError::config(format!(
+    ApiError::new(argos_common::ArgosError::config(format!(
         "document not indexed: ingest pipeline [{pipeline}] did not run: {e}"
     )))
 }
@@ -34072,7 +34072,7 @@ fn pipeline_execution_error(pipeline: &str, e: &argos_wasm::WasmError) -> ApiErr
 /// exactly the redaction case where it costs the most.
 fn pipeline_empty_result_error(pipeline: &str) -> ApiError {
     tracing::error!(pipeline = %pipeline, "refusing write: ingest pipeline returned no document");
-    ApiError::new(argos_common::XerjError::config(format!(
+    ApiError::new(argos_common::ArgosError::config(format!(
         "document not indexed: ingest pipeline [{pipeline}] returned no document"
     )))
 }
@@ -34390,7 +34390,7 @@ pub async fn put_ingest_pipeline(
             // stages than were written, and still acknowledged.
             let Some((proc_type, proc_config)) = proc.as_object().and_then(|o| o.iter().next())
             else {
-                let e = argos_common::XerjError::invalid_mapping(format!(
+                let e = argos_common::ArgosError::invalid_mapping(format!(
                     "pipeline [{id}] processor[{i}] is not a processor object \
                      (expected {{\"<processor>\": {{...}}}})"
                 ));
@@ -34576,7 +34576,7 @@ pub async fn put_ingest_pipeline(
                 ),
             ) {
                 Ok(()) => Json(json!({ "acknowledged": true })).into_response(),
-                Err(e) => ApiError::new(argos_common::XerjError::from(e)).into_response(),
+                Err(e) => ApiError::new(argos_common::ArgosError::from(e)).into_response(),
             }
         }
         Ok(None) => Json(json!({ "acknowledged": true })).into_response(),
@@ -34590,7 +34590,7 @@ pub async fn put_ingest_pipeline(
                 ),
             ) {
                 Ok(()) => Json(json!({ "acknowledged": true })).into_response(),
-                Err(e) => ApiError::new(argos_common::XerjError::from(e)).into_response(),
+                Err(e) => ApiError::new(argos_common::ArgosError::from(e)).into_response(),
             }
         }
         // Same shape one level down: the processor exists, an option on it does
@@ -34611,17 +34611,17 @@ pub async fn put_ingest_pipeline(
                 ),
             ) {
                 Ok(()) => Json(json!({ "acknowledged": true })).into_response(),
-                Err(e) => ApiError::new(argos_common::XerjError::from(e)).into_response(),
+                Err(e) => ApiError::new(argos_common::ArgosError::from(e)).into_response(),
             }
         }
         Ok(Some(e)) => {
             tracing::warn!(pipeline = %id, error = %e, "rejected ingest pipeline definition");
-            let err = argos_common::XerjError::invalid_mapping(format!(
+            let err = argos_common::ArgosError::invalid_mapping(format!(
                 "pipeline [{id}] cannot be created: {e}"
             ));
             ApiError::new(err).into_response()
         }
-        Err(e) => ApiError::new(argos_common::XerjError::from(e)).into_response(),
+        Err(e) => ApiError::new(argos_common::ArgosError::from(e)).into_response(),
     }
 }
 
@@ -34642,7 +34642,7 @@ pub async fn get_ingest_pipeline(
             Json(result).into_response()
         }
         None => {
-            let e = argos_common::XerjError::index_not_found(format!("pipeline [{id}] is missing"));
+            let e = argos_common::ArgosError::index_not_found(format!("pipeline [{id}] is missing"));
             ApiError::new(e).into_response()
         }
     }
@@ -34662,10 +34662,10 @@ pub async fn delete_ingest_pipeline(
     match state.engine.delete_pipeline(&id) {
         Ok(true) => Json(json!({ "acknowledged": true })).into_response(),
         Ok(false) => {
-            let e = argos_common::XerjError::index_not_found(format!("pipeline [{id}] is missing"));
+            let e = argos_common::ArgosError::index_not_found(format!("pipeline [{id}] is missing"));
             ApiError::new(e).into_response()
         }
-        Err(e) => ApiError::new(argos_common::XerjError::from(e)).into_response(),
+        Err(e) => ApiError::new(argos_common::ArgosError::from(e)).into_response(),
     }
 }
 
@@ -35707,7 +35707,7 @@ pub async fn simulate_ingest_pipeline(
     let stored = match state.engine.pipelines.get(&id) {
         Some(p) => p.clone(),
         None => {
-            let e = argos_common::XerjError::index_not_found(format!("pipeline [{id}] is missing"));
+            let e = argos_common::ArgosError::index_not_found(format!("pipeline [{id}] is missing"));
             return ApiError::new(e).into_response();
         }
     };
@@ -35789,7 +35789,7 @@ pub async fn close_index(
         // handle), not just flip the closed flag. A flush failure aborts the
         // close and leaves the index in service rather than losing data.
         if let Err(e) = state.engine.close_index(name).await {
-            return ApiError::new(argos_common::XerjError::from(e)).into_response();
+            return ApiError::new(argos_common::ArgosError::from(e)).into_response();
         }
         indices.insert(name.clone(), json!({ "closed": true }));
     }
@@ -36307,7 +36307,7 @@ pub async fn put_data_stream(
 ) -> impl IntoResponse {
     match state.engine.create_data_stream(&name) {
         Ok(()) => Json(json!({ "acknowledged": true })).into_response(),
-        Err(e) => ApiError::new(argos_common::XerjError::from(e)).into_response(),
+        Err(e) => ApiError::new(argos_common::ArgosError::from(e)).into_response(),
     }
 }
 
@@ -36332,7 +36332,7 @@ pub async fn get_data_stream(
 
     for &p in &parts {
         if !is_wildcard(p) && !state.engine.data_streams.contains_key(p) {
-            let e = argos_common::XerjError::index_not_found(format!("data_stream [{p}] missing"));
+            let e = argos_common::ArgosError::index_not_found(format!("data_stream [{p}] missing"));
             return ApiError::new(e).into_response();
         }
     }
@@ -36455,7 +36455,7 @@ pub async fn delete_data_stream(
 ) -> impl IntoResponse {
     match state.engine.delete_data_stream(&name).await {
         Ok(()) => Json(json!({ "acknowledged": true })).into_response(),
-        Err(e) => ApiError::new(argos_common::XerjError::from(e)).into_response(),
+        Err(e) => ApiError::new(argos_common::ArgosError::from(e)).into_response(),
     }
 }
 
@@ -36473,7 +36473,7 @@ pub async fn rollover_data_stream(
             "dry_run": false,
         }))
         .into_response(),
-        Err(e) => ApiError::new(argos_common::XerjError::from(e)).into_response(),
+        Err(e) => ApiError::new(argos_common::ArgosError::from(e)).into_response(),
     }
 }
 
@@ -36501,7 +36501,7 @@ pub async fn put_ilm_policy(
     let policy = match argos_engine::lifecycle::translate_ilm_policy(&body) {
         Ok(policy) => policy,
         Err(reason) => {
-            return ApiError::new(argos_common::XerjError::invalid_query(format!(
+            return ApiError::new(argos_common::ArgosError::invalid_query(format!(
                 "ILM policy '{name}' was refused, not stored: {reason}"
             )))
             .into_response();
@@ -36516,10 +36516,10 @@ pub async fn put_ilm_policy(
     // a 500 and nothing has happened, rather than an `acknowledged` that a
     // reboot silently undoes.
     if let Err(e) = state.engine.put_ilm_policy(name.clone(), body.clone()) {
-        return ApiError::new(argos_common::XerjError::from(e)).into_response();
+        return ApiError::new(argos_common::ArgosError::from(e)).into_response();
     }
     if let Err(error) = state.engine.put_ism_policy(name, policy) {
-        return ApiError::new(argos_common::XerjError::from(error)).into_response();
+        return ApiError::new(argos_common::ArgosError::from(error)).into_response();
     }
     Json(json!({ "acknowledged": true })).into_response()
 }
@@ -36555,7 +36555,7 @@ pub async fn get_ilm_policy(
             Json(result).into_response()
         }
         None => {
-            let e = argos_common::XerjError::index_not_found(format!("policy [{name}] not found"));
+            let e = argos_common::ArgosError::index_not_found(format!("policy [{name}] not found"));
             ApiError::new(e).into_response()
         }
     }
@@ -36585,15 +36585,15 @@ pub async fn delete_ilm_policy(
     match state.engine.delete_ilm_policy(&name) {
         Ok(true) => {
             if let Err(error) = state.engine.remove_ism_policy(&name) {
-                return ApiError::new(argos_common::XerjError::from(error)).into_response();
+                return ApiError::new(argos_common::ArgosError::from(error)).into_response();
             }
             Json(json!({ "acknowledged": true })).into_response()
         }
         Ok(false) => {
-            let e = argos_common::XerjError::index_not_found(format!("policy [{name}] not found"));
+            let e = argos_common::ArgosError::index_not_found(format!("policy [{name}] not found"));
             ApiError::new(e).into_response()
         }
-        Err(e) => ApiError::new(argos_common::XerjError::from(e)).into_response(),
+        Err(e) => ApiError::new(argos_common::ArgosError::from(e)).into_response(),
     }
 }
 
@@ -36694,13 +36694,13 @@ pub async fn ilm_explain(
 async fn resolve_existing_index_targets(
     state: &AppState,
     spec: &str,
-) -> Result<Vec<String>, argos_common::XerjError> {
+) -> Result<Vec<String>, argos_common::ArgosError> {
     for part in spec.split(',').map(str::trim).filter(|s| !s.is_empty()) {
         if part == "_all" || part.contains('*') {
             continue;
         }
         if state.engine.get_index(part).is_err() && !state.engine.aliases.contains_key(part) {
-            return Err(argos_common::XerjError::index_not_found(part));
+            return Err(argos_common::ArgosError::index_not_found(part));
         }
     }
     Ok(resolve_index_selector(state, spec)
@@ -36727,7 +36727,7 @@ pub async fn remove_ilm_policy_from_index(
     };
     for name in &targets {
         if let Err(error) = state.engine.detach_lifecycle(name) {
-            return ApiError::new(argos_common::XerjError::from(error)).into_response();
+            return ApiError::new(argos_common::ArgosError::from(error)).into_response();
         }
     }
     Json(json!({ "has_failures": false, "failed_indexes": [] })).into_response()
@@ -36778,7 +36778,7 @@ pub async fn put_component_template(
 ) -> impl IntoResponse {
     match state.engine.put_component_template(name, body) {
         Ok(()) => Json(json!({ "acknowledged": true })).into_response(),
-        Err(e) => ApiError::new(argos_common::XerjError::from(e)).into_response(),
+        Err(e) => ApiError::new(argos_common::ArgosError::from(e)).into_response(),
     }
 }
 
@@ -36809,7 +36809,7 @@ pub async fn get_component_template(
         }))
         .into_response(),
         None => {
-            let e = argos_common::XerjError::index_not_found(format!(
+            let e = argos_common::ArgosError::index_not_found(format!(
                 "component template [{name}] missing"
             ));
             ApiError::new(e).into_response()
@@ -36824,12 +36824,12 @@ pub async fn delete_component_template(
     match state.engine.delete_component_template(&name) {
         Ok(true) => Json(json!({ "acknowledged": true })).into_response(),
         Ok(false) => {
-            let e = argos_common::XerjError::index_not_found(format!(
+            let e = argos_common::ArgosError::index_not_found(format!(
                 "component template [{name}] missing"
             ));
             ApiError::new(e).into_response()
         }
-        Err(e) => ApiError::new(argos_common::XerjError::from(e)).into_response(),
+        Err(e) => ApiError::new(argos_common::ArgosError::from(e)).into_response(),
     }
 }
 
@@ -37291,7 +37291,7 @@ pub async fn get_index_aliases(
 ) -> impl IntoResponse {
     let targets = resolve_index_selector(&state, &index).await;
     if targets.is_empty() {
-        let e = argos_common::XerjError::index_not_found(&index);
+        let e = argos_common::ArgosError::index_not_found(&index);
         return ApiError::new(e).into_response();
     }
 
@@ -37321,7 +37321,7 @@ pub async fn get_index_alias(
 ) -> impl IntoResponse {
     let targets = resolve_index_selector(&state, &index).await;
     if targets.is_empty() {
-        let e = argos_common::XerjError::index_not_found(&index);
+        let e = argos_common::ArgosError::index_not_found(&index);
         return ApiError::new(e).into_response();
     }
 
@@ -37363,14 +37363,14 @@ pub async fn get_index_alias(
 /// in-memory `snapshot_repos` map, but it is also echoed in API responses and
 /// surfaced in logs, and a future change could path-join it. Reject anything
 /// that could traverse (`..`) or contain a path separator.
-fn validate_snapshot_repo_name(repo: &str) -> Result<(), argos_common::XerjError> {
+fn validate_snapshot_repo_name(repo: &str) -> Result<(), argos_common::ArgosError> {
     if repo.is_empty() {
-        return Err(argos_common::XerjError::invalid_mapping(
+        return Err(argos_common::ArgosError::invalid_mapping(
             "snapshot repository name must not be empty",
         ));
     }
     if repo.contains("..") || repo.contains('/') || repo.contains('\\') || repo.contains('\0') {
-        return Err(argos_common::XerjError::invalid_mapping(format!(
+        return Err(argos_common::ArgosError::invalid_mapping(format!(
             "invalid snapshot repository name [{repo}]: must not contain '..', '/', '\\', or NUL"
         )));
     }
@@ -37382,9 +37382,9 @@ fn validate_snapshot_repo_name(repo: &str) -> Result<(), argos_common::XerjError
 /// so `..` or a separator would let a write escape the repo. ES restricts
 /// snapshot names to `[a-zA-Z0-9._-]`; we apply the same traversal-blocking
 /// rule as `IndexName::validate` (no `..`, no separators, no NUL).
-fn validate_snapshot_name(name: &str) -> Result<(), argos_common::XerjError> {
+fn validate_snapshot_name(name: &str) -> Result<(), argos_common::ArgosError> {
     if name.is_empty() {
-        return Err(argos_common::XerjError::invalid_mapping(
+        return Err(argos_common::ArgosError::invalid_mapping(
             "snapshot name must not be empty",
         ));
     }
@@ -37395,7 +37395,7 @@ fn validate_snapshot_name(name: &str) -> Result<(), argos_common::XerjError> {
         || name.contains('\\')
         || name.contains('\0')
     {
-        return Err(argos_common::XerjError::invalid_mapping(format!(
+        return Err(argos_common::ArgosError::invalid_mapping(format!(
             "invalid snapshot name [{name}]: must not be '.' or '..' and must not contain '..', '/', '\\', or NUL"
         )));
     }
@@ -37433,7 +37433,7 @@ pub async fn get_snapshot_repo(
     match state.engine.snapshot_repos.get(&repo) {
         Some(r) => Json(json!({ repo.clone(): r.clone() })).into_response(),
         None => {
-            let e = argos_common::XerjError::index_not_found(format!("repository [{repo}] missing"));
+            let e = argos_common::ArgosError::index_not_found(format!("repository [{repo}] missing"));
             ApiError::new(e).into_response()
         }
     }
@@ -37446,7 +37446,7 @@ pub async fn delete_snapshot_repo(
     if state.engine.snapshot_repos.remove(&repo).is_some() {
         Json(json!({ "acknowledged": true })).into_response()
     } else {
-        let e = argos_common::XerjError::index_not_found(format!("repository [{repo}] missing"));
+        let e = argos_common::ArgosError::index_not_found(format!("repository [{repo}] missing"));
         ApiError::new(e).into_response()
     }
 }
@@ -37469,7 +37469,7 @@ pub async fn create_snapshot(
     let repo_config = match state.engine.snapshot_repos.get(&repo) {
         Some(cfg) => cfg.clone(),
         None => {
-            let e = argos_common::XerjError::index_not_found(format!("repository [{repo}] missing"));
+            let e = argos_common::ArgosError::index_not_found(format!("repository [{repo}] missing"));
             return ApiError::new(e).into_response();
         }
     };
@@ -37538,7 +37538,7 @@ pub async fn create_snapshot(
             state.engine.snapshots.insert(key, snap_info.clone());
             Json(json!({ "accepted": true, "snapshot": snap_info })).into_response()
         }
-        Err(e) => ApiError::new(argos_common::XerjError::from(e)).into_response(),
+        Err(e) => ApiError::new(argos_common::ArgosError::from(e)).into_response(),
     }
 }
 
@@ -37547,14 +37547,14 @@ pub async fn get_snapshot(
     Path((repo, snapshot)): Path<(String, String)>,
 ) -> impl IntoResponse {
     if !state.engine.snapshot_repos.contains_key(&repo) {
-        let e = argos_common::XerjError::index_not_found(format!("repository [{repo}] missing"));
+        let e = argos_common::ArgosError::index_not_found(format!("repository [{repo}] missing"));
         return ApiError::new(e).into_response();
     }
     let key = format!("{}/{}", repo, snapshot);
     match state.engine.snapshots.get(&key) {
         Some(info) => Json(json!({ "snapshots": [info.clone()] })).into_response(),
         None => {
-            let e = argos_common::XerjError::index_not_found(format!(
+            let e = argos_common::ArgosError::index_not_found(format!(
                 "snapshot [{snapshot}] missing in repository [{repo}]"
             ));
             ApiError::new(e).into_response()
@@ -37581,7 +37581,7 @@ pub async fn restore_snapshot(
     let repo_config = match state.engine.snapshot_repos.get(&repo) {
         Some(cfg) => cfg.clone(),
         None => {
-            let e = argos_common::XerjError::index_not_found(format!("repository [{repo}] missing"));
+            let e = argos_common::ArgosError::index_not_found(format!("repository [{repo}] missing"));
             return ApiError::new(e).into_response();
         }
     };
@@ -37665,7 +37665,7 @@ pub async fn restore_snapshot(
                 Json(json!({ "accepted": true })).into_response()
             }
         }
-        Err(e) => ApiError::new(argos_common::XerjError::from(e)).into_response(),
+        Err(e) => ApiError::new(argos_common::ArgosError::from(e)).into_response(),
     }
 }
 
@@ -38524,19 +38524,19 @@ async fn clone_index_to(state: &AppState, source: &str, target: &str) -> Result<
     let src_idx = state
         .engine
         .get_index(source)
-        .map_err(|e| ApiError::new(argos_common::XerjError::from(e)))?;
+        .map_err(|e| ApiError::new(argos_common::ArgosError::from(e)))?;
 
     // Create target index with same schema.
     let schema = src_idx.schema().await;
     state
         .engine
         .create_index(target, schema)
-        .map_err(|e| ApiError::new(argos_common::XerjError::from(e)))?;
+        .map_err(|e| ApiError::new(argos_common::ArgosError::from(e)))?;
 
     let dest_idx = state
         .engine
         .get_index(target)
-        .map_err(|e| ApiError::new(argos_common::XerjError::from(e)))?;
+        .map_err(|e| ApiError::new(argos_common::ArgosError::from(e)))?;
 
     // Copy EVERY document, and fail loudly if any copy fails.
     //
@@ -38560,7 +38560,7 @@ async fn clone_index_to(state: &AppState, source: &str, target: &str) -> Result<
     // rewritten to remove: a silently partial (or duplicated) copy answering
     // `{"acknowledged": true, "shards_acknowledged": true}`.
     src_idx.flush().await.map_err(|e| {
-        ApiError::new(argos_common::XerjError::internal(format!(
+        ApiError::new(argos_common::ArgosError::internal(format!(
             "clone of [{source}] into [{target}] was not attempted: flushing the source \
              failed ({e}); the copy needs a flushed source to page over it without \
              skipping or duplicating documents"
@@ -38588,12 +38588,12 @@ async fn clone_index_to(state: &AppState, source: &str, target: &str) -> Result<
             search_body["search_after"] = sa.clone();
         }
         let search_req = argos_query::parse_request(&search_body)
-            .map_err(|e| ApiError::new(argos_common::XerjError::invalid_query(e.to_string())))?;
+            .map_err(|e| ApiError::new(argos_common::ArgosError::invalid_query(e.to_string())))?;
 
         let results = src_idx
             .search(&search_req)
             .await
-            .map_err(|e| ApiError::new(argos_common::XerjError::from(e)))?;
+            .map_err(|e| ApiError::new(argos_common::ArgosError::from(e)))?;
 
         let batch = results.hits.len();
         if batch == 0 {
@@ -38610,7 +38610,7 @@ async fn clone_index_to(state: &AppState, source: &str, target: &str) -> Result<
                 .index_document(Some(hit.id), hit.source)
                 .await
                 .map_err(|e| {
-                    ApiError::new(argos_common::XerjError::internal(format!(
+                    ApiError::new(argos_common::ArgosError::internal(format!(
                         "clone of [{source}] into [{target}] failed after {copied} \
                          document(s): document [{id}] could not be written: {e}"
                     )))
@@ -38711,7 +38711,7 @@ pub async fn get_enrich_policy(
         }))
         .into_response(),
         None => {
-            let e = argos_common::XerjError::index_not_found(format!(
+            let e = argos_common::ArgosError::index_not_found(format!(
                 "enrich policy [{name}] not found"
             ));
             ApiError::new(e).into_response()
@@ -38727,7 +38727,7 @@ pub async fn delete_enrich_policy(
         Json(json!({ "acknowledged": true })).into_response()
     } else {
         let e =
-            argos_common::XerjError::index_not_found(format!("enrich policy [{name}] not found"));
+            argos_common::ArgosError::index_not_found(format!("enrich policy [{name}] not found"));
         ApiError::new(e).into_response()
     }
 }
@@ -38743,7 +38743,7 @@ pub async fn execute_enrich_policy(
     let policy = match state.engine.enrich_policies.get(&name) {
         Some(p) => p.value().clone(),
         None => {
-            let e = argos_common::XerjError::index_not_found(format!(
+            let e = argos_common::ArgosError::index_not_found(format!(
                 "enrich policy [{name}] not found"
             ));
             return ApiError::new(e).into_response();
@@ -38772,7 +38772,7 @@ pub async fn execute_enrich_policy(
     let dest = match state.engine.get_or_create_index(&enrich_index) {
         Ok(i) => i,
         Err(e) => {
-            return ApiError::new(argos_common::XerjError::from(e)).into_response();
+            return ApiError::new(argos_common::ArgosError::from(e)).into_response();
         }
     };
 
@@ -38812,7 +38812,7 @@ pub async fn execute_enrich_policy(
         // swallowed: a failed flush must not be followed by a copy that
         // reports `records: N` over a source it could not read consistently.
         if let Err(e) = src.flush().await {
-            return ApiError::new(argos_common::XerjError::internal(format!(
+            return ApiError::new(argos_common::ArgosError::internal(format!(
                 "enrich policy [{name}] was not executed against source [{src_name}]: flushing \
                  the source failed ({e}); the copy needs a flushed source to page over it \
                  without skipping or duplicating documents"
@@ -38842,14 +38842,14 @@ pub async fn execute_enrich_policy(
             let req = match parse_request(&search_body) {
                 Ok(r) => r,
                 Err(e) => {
-                    return ApiError::new(argos_common::XerjError::invalid_query(e.to_string()))
+                    return ApiError::new(argos_common::ArgosError::invalid_query(e.to_string()))
                         .into_response();
                 }
             };
             let result = match src.search(&req).await {
                 Ok(r) => r,
                 Err(e) => {
-                    return ApiError::new(argos_common::XerjError::from(e)).into_response();
+                    return ApiError::new(argos_common::ArgosError::from(e)).into_response();
                 }
             };
             let batch = result.hits.len();
@@ -38860,7 +38860,7 @@ pub async fn execute_enrich_policy(
             let last_id = result.hits.last().map(|h| json!([h.id]));
             for hit in result.hits {
                 if let Err(e) = dest.index_document(Some(hit.id.clone()), hit.source).await {
-                    return ApiError::new(argos_common::XerjError::from(e)).into_response();
+                    return ApiError::new(argos_common::ArgosError::from(e)).into_response();
                 }
                 materialised += 1;
             }
@@ -39404,7 +39404,7 @@ pub async fn get_watch(State(state): State<AppState>, Path(id): Path<String>) ->
         }))
         .into_response(),
         None => {
-            let e = argos_common::XerjError::index_not_found(format!("watch [{id}] not found"));
+            let e = argos_common::ArgosError::index_not_found(format!("watch [{id}] not found"));
             ApiError::new(e).into_response()
         }
     }
@@ -39429,7 +39429,7 @@ pub async fn delete_watch(
         }))
         .into_response()
     } else {
-        let e = argos_common::XerjError::index_not_found(format!("watch [{id}] not found"));
+        let e = argos_common::ArgosError::index_not_found(format!("watch [{id}] not found"));
         ApiError::new(e).into_response()
     }
 }
@@ -39787,7 +39787,7 @@ async fn write_fire(
     p: f64,
     rendered_question: &str,
     decide_resp: &Value,
-) -> Result<(), argos_common::XerjError> {
+) -> Result<(), argos_common::ArgosError> {
     let fires = state.engine.get_or_create_index(WATCHER_FIRES_INDEX)?;
     // `p` is always the RAW decide confidence. #1063's calibration landed on
     // main mid-flight (PR #1080): when the node has a fitted calibration the
@@ -39812,7 +39812,7 @@ async fn write_fire(
     fires
         .index_document(None, fire)
         .await
-        .map_err(argos_common::XerjError::from)?;
+        .map_err(argos_common::ArgosError::from)?;
     Ok(())
 }
 
@@ -40356,7 +40356,7 @@ pub async fn search_template(
                 match serde_json::from_str(&rendered) {
                     Ok(v) => v,
                     Err(e) => {
-                        let err = argos_common::XerjError::invalid_query(format!(
+                        let err = argos_common::ArgosError::invalid_query(format!(
                             "template rendered to invalid JSON: {e}"
                         ));
                         return ApiError::new(err).into_response();
@@ -40377,7 +40377,7 @@ pub async fn search_template(
                 match serde_json::from_str(&rendered_str) {
                     Ok(v) => v,
                     Err(e) => {
-                        let err = argos_common::XerjError::invalid_query(format!(
+                        let err = argos_common::ArgosError::invalid_query(format!(
                             "template rendered to invalid JSON: {e}"
                         ));
                         return ApiError::new(err).into_response();
@@ -40394,7 +40394,7 @@ pub async fn search_template(
                 match serde_json::from_str(&tmpl_str) {
                     Ok(v) => v,
                     Err(e) => {
-                        let err = argos_common::XerjError::invalid_query(format!(
+                        let err = argos_common::ArgosError::invalid_query(format!(
                             "stored template '{id}' rendered to invalid JSON: {e}"
                         ));
                         return ApiError::new(err).into_response();
@@ -40402,14 +40402,14 @@ pub async fn search_template(
                 }
             }
             None => {
-                let err = argos_common::XerjError::index_not_found(format!(
+                let err = argos_common::ArgosError::index_not_found(format!(
                     "search template with id '{id}' not found"
                 ));
                 return ApiError::new(err).into_response();
             }
         }
     } else {
-        return ApiError::new(argos_common::XerjError::invalid_query(
+        return ApiError::new(argos_common::ArgosError::invalid_query(
             "search template requires either `source` or `id`".to_string(),
         ))
         .into_response();
@@ -40420,7 +40420,7 @@ pub async fn search_template(
     // `build_search_request`, over the same `GuardedField` set, since this
     // path also skips it.
     if let Some(msg) = find_body_script_limit_violation(&search_body_val) {
-        return ApiError::new(argos_common::XerjError::invalid_query(msg)).into_response();
+        return ApiError::new(argos_common::ArgosError::invalid_query(msg)).into_response();
     }
     if let Some(msg) = find_invalid_agg_order_path(
         search_body_val
@@ -40448,7 +40448,7 @@ pub async fn search_template(
             })
         })
     }) {
-        return ApiError::new(argos_common::XerjError::invalid_query(msg)).into_response();
+        return ApiError::new(argos_common::ArgosError::invalid_query(msg)).into_response();
     }
 
     // A template that renders a `rerank` block: this minimal path does not run
@@ -40467,7 +40467,7 @@ pub async fn search_template(
 
     // Parse and execute as a normal search.
     let search_req = match argos_query::parse_request(&search_body_val)
-        .map_err(|e| argos_common::XerjError::invalid_query(e.to_string()))
+        .map_err(|e| argos_common::ArgosError::invalid_query(e.to_string()))
     {
         Ok(r) => r,
         Err(e) => return ApiError::new(e).into_response(),
@@ -40504,7 +40504,7 @@ pub async fn search_template(
                 merged_hits.extend(result.hits.into_iter().map(|h| (name.clone(), h)));
             }
             Err(e) => {
-                let err = argos_common::XerjError::from(e);
+                let err = argos_common::ArgosError::from(e);
                 match semantic_skips.take_skippable(&index, name, search_node.as_str(), err) {
                     Ok(()) => continue,
                     Err(err) => return ApiError::new(err).into_response(),
@@ -40762,7 +40762,7 @@ async fn msearch_template_impl(
         }
 
         let search_req = match argos_query::parse_request(&search_body_val)
-            .map_err(|e| argos_common::XerjError::invalid_query(e.to_string()))
+            .map_err(|e| argos_common::ArgosError::invalid_query(e.to_string()))
         {
             Ok(r) => r,
             Err(e) => {
@@ -40783,7 +40783,7 @@ async fn msearch_template_impl(
         let mut merged_hits: Vec<Value> = Vec::new();
         let mut total_count: u64 = 0;
         let mut script_failure: Option<String> = None;
-        let mut search_error: Option<argos_common::XerjError> = None;
+        let mut search_error: Option<argos_common::ArgosError> = None;
         // #2305: `*` / `_all` and alias expansion on this route.
         let mut semantic_skips = ExpandedSemanticSkips::default();
         let search_node = state.engine.node_id.clone();
@@ -40801,7 +40801,7 @@ async fn msearch_template_impl(
             let idx = match state.engine.get_index(idx_name) {
                 Ok(i) => i,
                 Err(e) => {
-                    search_error = Some(argos_common::XerjError::from(e));
+                    search_error = Some(argos_common::ArgosError::from(e));
                     break;
                 }
             };
@@ -40828,7 +40828,7 @@ async fn msearch_template_impl(
                     }
                 }
                 Err(e) => {
-                    let err = argos_common::XerjError::from(e);
+                    let err = argos_common::ArgosError::from(e);
                     match semantic_skips.take_skippable(
                         &index_name,
                         idx_name,
@@ -40912,14 +40912,14 @@ pub async fn render_template_api(
         match state.engine.search_templates.get(&id) {
             Some(tmpl) => render_template(&tmpl.to_string(), &params),
             None => {
-                let err = argos_common::XerjError::index_not_found(format!(
+                let err = argos_common::ArgosError::index_not_found(format!(
                     "search template '{id}' not found"
                 ));
                 return ApiError::new(err).into_response();
             }
         }
     } else {
-        return ApiError::new(argos_common::XerjError::invalid_query(
+        return ApiError::new(argos_common::ArgosError::invalid_query(
             "render template requires `source` or `id`".to_string(),
         ))
         .into_response();
@@ -40965,7 +40965,7 @@ pub async fn get_script(
         }))
         .into_response(),
         None => {
-            let err = argos_common::XerjError::index_not_found(format!("script '{id}' not found"));
+            let err = argos_common::ArgosError::index_not_found(format!("script '{id}' not found"));
             ApiError::new(err).into_response()
         }
     }
@@ -40978,7 +40978,7 @@ pub async fn delete_script(
     if state.engine.search_templates.remove(&id).is_some() {
         Json(json!({ "acknowledged": true })).into_response()
     } else {
-        let err = argos_common::XerjError::index_not_found(format!("script '{id}' not found"));
+        let err = argos_common::ArgosError::index_not_found(format!("script '{id}' not found"));
         ApiError::new(err).into_response()
     }
 }
@@ -41186,7 +41186,7 @@ pub async fn terms_enum(
     for (_, idx) in &handles {
         let result = match idx.search(&req).await {
             Ok(r) => r,
-            Err(e) => return ApiError::new(argos_common::XerjError::from(e)).into_response(),
+            Err(e) => return ApiError::new(argos_common::ArgosError::from(e)).into_response(),
         };
 
         for hit in &result.hits {
@@ -41914,7 +41914,7 @@ pub async fn security_create_api_key(
             roles,
         ),
     ) {
-        return ApiError::new(argos_common::XerjError::from(error)).into_response();
+        return ApiError::new(argos_common::ArgosError::from(error)).into_response();
     }
     state.engine.audit.append(
         "security.api_key.create",
@@ -42310,7 +42310,7 @@ pub async fn security_invalidate_api_key(
     let (invalidated, previously) = match state.engine.invalidate_api_keys(&target_ids, now_ms) {
         Ok(result) => result,
         Err(error) => {
-            return ApiError::new(argos_common::XerjError::from(error)).into_response();
+            return ApiError::new(argos_common::ArgosError::from(error)).into_response();
         }
     };
     state.engine.audit.append(
@@ -42410,7 +42410,7 @@ pub async fn security_put_privileges(
     Json(body): Json<Value>,
 ) -> impl IntoResponse {
     let Some(apps) = body.as_object() else {
-        return ApiError::new(argos_common::XerjError::invalid_query(
+        return ApiError::new(argos_common::ArgosError::invalid_query(
             "request body must be an object of {application: {privilege_name: {...}}}",
         ))
         .into_response();
@@ -43344,7 +43344,7 @@ pub async fn eql_search(
     });
 
     let req = match argos_query::parse_request(&search_body)
-        .map_err(|e| argos_common::XerjError::invalid_query(e.to_string()))
+        .map_err(|e| argos_common::ArgosError::invalid_query(e.to_string()))
     {
         Ok(r) => r,
         Err(e) => return ApiError::new(e).into_response(),
@@ -43368,7 +43368,7 @@ pub async fn eql_search(
                     }));
                 }
             }
-            Err(e) => return ApiError::new(argos_common::XerjError::from(e)).into_response(),
+            Err(e) => return ApiError::new(argos_common::ArgosError::from(e)).into_response(),
         }
     }
     // #567: order the merged events by the timestamp field ascending BEFORE
@@ -43534,7 +43534,7 @@ pub async fn get_mapping_field(
 ) -> impl IntoResponse {
     let idx = match state.engine.get_index(&index) {
         Ok(i) => i,
-        Err(e) => return ApiError::new(argos_common::XerjError::from(e)).into_response(),
+        Err(e) => return ApiError::new(argos_common::ArgosError::from(e)).into_response(),
     };
 
     let schema = idx.schema().await;
@@ -43616,11 +43616,11 @@ async fn set_index_block(
 ) -> axum::response::Response {
     let idx = match state.engine.get_index(&index) {
         Ok(i) => i,
-        Err(e) => return ApiError::new(argos_common::XerjError::from(e)).into_response(),
+        Err(e) => return ApiError::new(argos_common::ArgosError::from(e)).into_response(),
     };
 
     if !argos_engine::Index::BLOCK_NAMES.contains(&block.as_str()) {
-        let e = argos_common::XerjError::invalid_query(format!(
+        let e = argos_common::ArgosError::invalid_query(format!(
             "invalid index block: {block}; valid values are: {}",
             argos_engine::Index::BLOCK_NAMES.join(", ")
         ));
@@ -43628,7 +43628,7 @@ async fn set_index_block(
     }
 
     if let Err(e) = idx.set_block_state(&block, enabled).await {
-        return ApiError::new(argos_common::XerjError::from(e)).into_response();
+        return ApiError::new(argos_common::ArgosError::from(e)).into_response();
     }
     // Keep GET /_settings in step with what is actually enforced.
     sync_display_blocks(&state, &index).await;
@@ -43682,7 +43682,7 @@ pub async fn explain_doc(
                 break;
             }
             Ok(None) => {}
-            Err(e) => return ApiError::new(argos_common::XerjError::from(e)).into_response(),
+            Err(e) => return ApiError::new(argos_common::ArgosError::from(e)).into_response(),
         }
     }
     // On a hit, `index` is rebound to the concrete member (reported in
@@ -43715,7 +43715,7 @@ pub async fn explain_doc(
     let search_req = match argos_query::parse_request(&search_body) {
         Ok(r) => r,
         Err(e) => {
-            let ze = argos_common::XerjError::invalid_query(e.to_string());
+            let ze = argos_common::ArgosError::invalid_query(e.to_string());
             return ApiError::new(ze).into_response();
         }
     };
@@ -43765,7 +43765,7 @@ pub async fn explain_doc(
         // Deliberately NOT the same as `script_failure` above: there the
         // engine DID produce a hit list and only scoring was degraded, so the
         // verdict is real and the fault is reported alongside it.
-        Err(e) => return ApiError::new(argos_common::XerjError::from(e)).into_response(),
+        Err(e) => return ApiError::new(argos_common::ArgosError::from(e)).into_response(),
     };
 
     let score = if matched { 1.0_f64 } else { 0.0_f64 };
@@ -45421,7 +45421,7 @@ pub async fn async_search_submit(
     } else {
         match state.engine.get_or_create_index(&index) {
             Ok(i) => vec![(index.clone(), i)],
-            Err(e) => return ApiError::new(argos_common::XerjError::from(e)).into_response(),
+            Err(e) => return ApiError::new(argos_common::ArgosError::from(e)).into_response(),
         }
     };
 
@@ -45461,7 +45461,7 @@ pub async fn async_search_submit(
                 }
                 merged_hits.extend(result.hits.into_iter().map(|h| (name.clone(), h)));
             }
-            Err(e) => return ApiError::new(argos_common::XerjError::from(e)).into_response(),
+            Err(e) => return ApiError::new(argos_common::ArgosError::from(e)).into_response(),
         }
     }
     merged_hits.sort_by(|(_, a), (_, b)| {
@@ -45716,14 +45716,14 @@ pub async fn sql_query(
     let parsed = match parse_sql(&body.query) {
         Ok(p) => p,
         Err(e) => {
-            let err = argos_common::XerjError::invalid_query(format!("SQL parse error: {}", e));
+            let err = argos_common::ArgosError::invalid_query(format!("SQL parse error: {}", e));
             return ApiError::new(err).into_response();
         }
     };
 
     let idx = match state.engine.get_or_create_index(&parsed.index) {
         Ok(i) => i,
-        Err(e) => return ApiError::new(argos_common::XerjError::from(e)).into_response(),
+        Err(e) => return ApiError::new(argos_common::ArgosError::from(e)).into_response(),
     };
 
     let limit = body.fetch_size.or(parsed.limit).unwrap_or(10);
@@ -45742,7 +45742,7 @@ pub async fn sql_query(
 
     let result = match idx.search(&req).await {
         Ok(r) => r,
-        Err(e) => return ApiError::new(argos_common::XerjError::from(e)).into_response(),
+        Err(e) => return ApiError::new(argos_common::ArgosError::from(e)).into_response(),
     };
 
     // Build column metadata from first hit or requested fields.
@@ -46013,7 +46013,7 @@ pub async fn rank_eval(
         "expected_reciprocal_rank",
     ];
     if !KNOWN_METRICS.contains(&metric_name.as_str()) {
-        return ApiError::new(argos_common::XerjError::invalid_query(format!(
+        return ApiError::new(argos_common::ArgosError::invalid_query(format!(
             "unknown rank_eval metric [{metric_name}]; supported: precision, recall, dcg, \
              mean_reciprocal_rank, expected_reciprocal_rank"
         )))
@@ -46042,7 +46042,7 @@ pub async fn rank_eval(
     // used it); a faulted request contributes nothing to `metric_score`, and a
     // caller can now see that it did not.
     let record_failure =
-        |failures: &mut serde_json::Map<String, Value>, id: &str, err: argos_common::XerjError| {
+        |failures: &mut serde_json::Map<String, Value>, id: &str, err: argos_common::ArgosError| {
             let detail = ApiError::new(err)
                 .into_value()
                 .get("error")
@@ -46092,7 +46092,7 @@ pub async fn rank_eval(
                     record_failure(
                         &mut failures,
                         &req_spec.id,
-                        argos_common::XerjError::invalid_query(e.to_string()),
+                        argos_common::ArgosError::invalid_query(e.to_string()),
                     );
                     continue;
                 }
@@ -46101,7 +46101,7 @@ pub async fn rank_eval(
         let idx = match state.engine.get_index(&index) {
             Ok(i) => i,
             Err(e) => {
-                record_failure(&mut failures, &req_spec.id, argos_common::XerjError::from(e));
+                record_failure(&mut failures, &req_spec.id, argos_common::ArgosError::from(e));
                 continue;
             }
         };
@@ -46109,7 +46109,7 @@ pub async fn rank_eval(
         let result = match idx.search(&search_req).await {
             Ok(r) => r,
             Err(e) => {
-                record_failure(&mut failures, &req_spec.id, argos_common::XerjError::from(e));
+                record_failure(&mut failures, &req_spec.id, argos_common::ArgosError::from(e));
                 continue;
             }
         };
@@ -46261,7 +46261,7 @@ pub async fn index_recovery(
             }))
             .into_response()
         }
-        Err(e) => ApiError::new(argos_common::XerjError::from(e)).into_response(),
+        Err(e) => ApiError::new(argos_common::ArgosError::from(e)).into_response(),
     }
 }
 
@@ -46352,7 +46352,7 @@ pub async fn freeze_index(
             }))
             .into_response()
         }
-        Err(e) => ApiError::new(argos_common::XerjError::from(e)).into_response(),
+        Err(e) => ApiError::new(argos_common::ArgosError::from(e)).into_response(),
     }
 }
 
@@ -46369,7 +46369,7 @@ pub async fn unfreeze_index(
             }))
             .into_response()
         }
-        Err(e) => ApiError::new(argos_common::XerjError::from(e)).into_response(),
+        Err(e) => ApiError::new(argos_common::ArgosError::from(e)).into_response(),
     }
 }
 
@@ -46651,8 +46651,8 @@ pub async fn delete_ml_anomaly_detector(
 enum ScoreDetectorError {
     /// The detector's source index does not exist.
     IndexNotFound(String),
-    /// Query parse / search failure, already shaped as a `XerjError`.
-    Argos(argos_common::XerjError),
+    /// Query parse / search failure, already shaped as a `ArgosError`.
+    Argos(argos_common::ArgosError),
 }
 
 /// Core anomaly scoring shared by the on-demand `_score` endpoint and the
@@ -46705,7 +46705,7 @@ async fn score_detector_records(
     });
 
     let mut req = parse_request(&search_body).map_err(|e| {
-        ScoreDetectorError::Argos(argos_common::XerjError::invalid_query(e.to_string()))
+        ScoreDetectorError::Argos(argos_common::ArgosError::invalid_query(e.to_string()))
     })?;
     // Bypass the (body_hash, dataset_version) query cache so a re-scored,
     // live-updating index reflects buckets added since the last identical call.
@@ -46715,7 +46715,7 @@ async fn score_detector_records(
     let result = idx
         .search(&req)
         .await
-        .map_err(|e| ScoreDetectorError::Argos(argos_common::XerjError::from(e)))?;
+        .map_err(|e| ScoreDetectorError::Argos(argos_common::ArgosError::from(e)))?;
 
     let buckets = result
         .aggs
@@ -47558,7 +47558,7 @@ pub async fn get_transform(
             .into_response()
         }
         None => {
-            let e = argos_common::XerjError::index_not_found(format!("transform [{id}] not found"));
+            let e = argos_common::ArgosError::index_not_found(format!("transform [{id}] not found"));
             ApiError::new(e).into_response()
         }
     }
@@ -47571,7 +47571,7 @@ pub async fn delete_transform(
     if state.engine.transforms.remove(&id).is_some() {
         Json(json!({ "acknowledged": true })).into_response()
     } else {
-        let e = argos_common::XerjError::index_not_found(format!("transform [{id}] not found"));
+        let e = argos_common::ArgosError::index_not_found(format!("transform [{id}] not found"));
         ApiError::new(e).into_response()
     }
 }
@@ -47587,7 +47587,7 @@ pub async fn start_transform(
     let config = match state.engine.transforms.get(&id) {
         Some(c) => c.clone(),
         None => {
-            let e = argos_common::XerjError::index_not_found(format!("transform [{id}] not found"));
+            let e = argos_common::ArgosError::index_not_found(format!("transform [{id}] not found"));
             return ApiError::new(e).into_response();
         }
     };
@@ -47598,7 +47598,7 @@ pub async fn start_transform(
             if let Some(mut e) = state.engine.transforms.get_mut(&id) {
                 if let Some(o) = e.value_mut().as_object_mut() {
                     o.insert(
-                        "_xerj".to_string(),
+                        "_argos".to_string(),
                         json!({ "state": "started", "documents_processed": written }),
                     );
                 }
@@ -47609,7 +47609,7 @@ pub async fn start_transform(
         // return, rather than rewording a refusal into a config error.
         Err(TransformRunError::ScriptLimit(reason)) => script_limit_response(&reason),
         Err(TransformRunError::Failed(msg)) => {
-            let e = argos_common::XerjError::invalid_query(format!(
+            let e = argos_common::ArgosError::invalid_query(format!(
                 "transform [{id}] execution failed: {msg}"
             ));
             ApiError::new(e).into_response()
@@ -47624,18 +47624,18 @@ pub async fn stop_transform(
     if let Some(mut e) = state.engine.transforms.get_mut(&id) {
         if let Some(o) = e.value_mut().as_object_mut() {
             let processed = o
-                .get("_xerj")
+                .get("_argos")
                 .and_then(|x| x.get("documents_processed"))
                 .cloned()
                 .unwrap_or(json!(0));
             o.insert(
-                "_xerj".to_string(),
+                "_argos".to_string(),
                 json!({ "state": "stopped", "documents_processed": processed }),
             );
         }
         Json(json!({ "acknowledged": true })).into_response()
     } else {
-        let e = argos_common::XerjError::index_not_found(format!("transform [{id}] not found"));
+        let e = argos_common::ArgosError::index_not_found(format!("transform [{id}] not found"));
         ApiError::new(e).into_response()
     }
 }
@@ -47703,7 +47703,7 @@ pub async fn get_rollup_job(
             Json(json!({ "jobs": [v] })).into_response()
         }
         None => {
-            let e = argos_common::XerjError::index_not_found(format!("rollup job [{id}] not found"));
+            let e = argos_common::ArgosError::index_not_found(format!("rollup job [{id}] not found"));
             ApiError::new(e).into_response()
         }
     }
@@ -47716,7 +47716,7 @@ pub async fn delete_rollup_job(
     if state.engine.rollup_jobs.remove(&id).is_some() {
         Json(json!({ "acknowledged": true })).into_response()
     } else {
-        let e = argos_common::XerjError::index_not_found(format!("rollup job [{id}] not found"));
+        let e = argos_common::ArgosError::index_not_found(format!("rollup job [{id}] not found"));
         ApiError::new(e).into_response()
     }
 }
@@ -47732,7 +47732,7 @@ pub async fn start_rollup_job(
     let config = match state.engine.rollup_jobs.get(&id) {
         Some(c) => c.clone(),
         None => {
-            let e = argos_common::XerjError::index_not_found(format!("rollup job [{id}] not found"));
+            let e = argos_common::ArgosError::index_not_found(format!("rollup job [{id}] not found"));
             return ApiError::new(e).into_response();
         }
     };
@@ -47742,7 +47742,7 @@ pub async fn start_rollup_job(
             if let Some(mut e) = state.engine.rollup_jobs.get_mut(&id) {
                 if let Some(o) = e.value_mut().as_object_mut() {
                     o.insert(
-                        "_xerj".to_string(),
+                        "_argos".to_string(),
                         json!({ "state": "started", "documents_processed": written }),
                     );
                 }
@@ -47750,7 +47750,7 @@ pub async fn start_rollup_job(
             Json(json!({ "started": true })).into_response()
         }
         Err(msg) => {
-            let e = argos_common::XerjError::invalid_query(format!(
+            let e = argos_common::ArgosError::invalid_query(format!(
                 "rollup job [{id}] execution failed: {msg}"
             ));
             ApiError::new(e).into_response()
@@ -47765,18 +47765,18 @@ pub async fn stop_rollup_job(
     if let Some(mut e) = state.engine.rollup_jobs.get_mut(&id) {
         if let Some(o) = e.value_mut().as_object_mut() {
             let processed = o
-                .get("_xerj")
+                .get("_argos")
                 .and_then(|x| x.get("documents_processed"))
                 .cloned()
                 .unwrap_or(json!(0));
             o.insert(
-                "_xerj".to_string(),
+                "_argos".to_string(),
                 json!({ "state": "stopped", "documents_processed": processed }),
             );
         }
         Json(json!({ "stopped": true })).into_response()
     } else {
-        let e = argos_common::XerjError::index_not_found(format!("rollup job [{id}] not found"));
+        let e = argos_common::ArgosError::index_not_found(format!("rollup job [{id}] not found"));
         ApiError::new(e).into_response()
     }
 }
@@ -48426,7 +48426,7 @@ pub async fn put_legacy_template(
     }
     match state.engine.put_legacy_template(name, body) {
         Ok(()) => Json(json!({ "acknowledged": true })).into_response(),
-        Err(e) => ApiError::new(argos_common::XerjError::from(e)).into_response(),
+        Err(e) => ApiError::new(argos_common::ArgosError::from(e)).into_response(),
     }
 }
 
@@ -48514,7 +48514,7 @@ pub async fn get_legacy_template(
         }
         None => {
             let e =
-                argos_common::XerjError::index_not_found(format!("index template [{name}] missing"));
+                argos_common::ArgosError::index_not_found(format!("index template [{name}] missing"));
             ApiError::new(e).into_response()
         }
     }
@@ -48528,10 +48528,10 @@ pub async fn delete_legacy_template(
         Ok(true) => Json(json!({ "acknowledged": true })).into_response(),
         Ok(false) => {
             let e =
-                argos_common::XerjError::index_not_found(format!("index template [{name}] missing"));
+                argos_common::ArgosError::index_not_found(format!("index template [{name}] missing"));
             ApiError::new(e).into_response()
         }
-        Err(e) => ApiError::new(argos_common::XerjError::from(e)).into_response(),
+        Err(e) => ApiError::new(argos_common::ArgosError::from(e)).into_response(),
     }
 }
 

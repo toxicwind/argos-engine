@@ -7,12 +7,12 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
-use argos_common::XerjError;
+use argos_common::ArgosError;
 
 use crate::ingest::{HourBucket, LogIngester, LogRecord};
 
 /// Result alias.
-pub type Result<T> = std::result::Result<T, XerjError>;
+pub type Result<T> = std::result::Result<T, ArgosError>;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Query types
@@ -174,7 +174,7 @@ impl<'a> LogQueryExecutor<'a> {
 
         // Validate
         if query.from > query.to {
-            return Err(XerjError::invalid_query("from > to in time range"));
+            return Err(ArgosError::invalid_query("from > to in time range"));
         }
 
         // Determine which hour buckets overlap with the time range

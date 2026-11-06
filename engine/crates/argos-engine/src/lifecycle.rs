@@ -514,11 +514,11 @@ async fn execute_action(
             if has_conditions {
                 let Some(facts) = gather_index_facts(engine, index_name, state_age_ms).await else {
                     return Err(EngineError::Common(
-                        argos_common::XerjError::index_not_found(index_name),
+                        argos_common::ArgosError::index_not_found(index_name),
                     ));
                 };
                 let met = conditions_met(&rollover.conditions, &facts)
-                    .map_err(|e| EngineError::Common(argos_common::XerjError::invalid_query(e)))?;
+                    .map_err(|e| EngineError::Common(argos_common::ArgosError::invalid_query(e)))?;
                 if !met {
                     return Ok(ActionOutcome::Waiting);
                 }
@@ -535,7 +535,7 @@ async fn execute_action(
             if let Some(reason) = delete_block_reason(engine, index_name, state_entered_at_ms) {
                 // An Err here surfaces as `failed: true` + this message in
                 // explain — visible refusal, not a silent skip (#204).
-                return Err(EngineError::Common(argos_common::XerjError::invalid_query(
+                return Err(EngineError::Common(argos_common::ArgosError::invalid_query(
                     format!("refusing lifecycle delete of '{index_name}': {reason}"),
                 )));
             }
@@ -554,7 +554,7 @@ async fn execute_action(
             Ok(ActionOutcome::Done)
         }
         LifecycleAction::ReplicaCount(_) => Err(EngineError::Common(
-            argos_common::XerjError::internal(format!(
+            argos_common::ArgosError::internal(format!(
                 "the 'replica_count' lifecycle action is not supported: ARGOS is a \
                  single-shard, single-node engine with no per-index configurable \
                  replica count to change (number_of_replicas is accepted in index \
@@ -793,7 +793,7 @@ mod tests {
         assert!(matches!(
             engine.get_index("logs-1"),
             Err(EngineError::Common(
-                argos_common::XerjError::ClusterStateUnavailable
+                argos_common::ArgosError::ClusterStateUnavailable
             ))
         ));
         engine.data_streams.insert(
@@ -812,7 +812,7 @@ mod tests {
         assert!(matches!(
             direct,
             Err(EngineError::Common(
-                argos_common::XerjError::ClusterStateUnavailable
+                argos_common::ArgosError::ClusterStateUnavailable
             ))
         ));
         assert_eq!(
@@ -837,7 +837,7 @@ mod tests {
         assert!(matches!(
             result,
             Err(EngineError::Common(
-                argos_common::XerjError::ClusterStateUnavailable
+                argos_common::ArgosError::ClusterStateUnavailable
             ))
         ));
         assert!(dir.path().join("logs-1").is_dir());

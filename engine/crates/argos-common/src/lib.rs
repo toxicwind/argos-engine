@@ -17,7 +17,7 @@
 //! - [`code_query`] — query shaping shared by `argos search` and the
 //!   `argos_search` MCP tool (multi-word glue-token stripping, #1364)
 //! - [`feedback`] — the bug/UX-report invitation shared by every `--help`
-//! - [`error`]   — Unified error type ([`XerjError`])
+//! - [`error`]   — Unified error type ([`ArgosError`])
 //! - [`types`]   — Core domain types (documents, fields, IDs)
 //! - [`calibration`] — probability calibration for the decide surface:
 //!   isotonic (PAVA) and temperature (Platt) scaling, reliability curves, ECE
@@ -69,7 +69,7 @@ pub mod xccode;
 
 // Convenience re-exports at the crate root
 pub use config::Config;
-pub use error::XerjError;
+pub use error::ArgosError;
 pub use types::{DocId, Document, FieldConfig, FieldType, IndexName, Schema, SegmentId, SeqNo};
 
 /// Name of the catalog index `argos autoindex` maintains on every node it
@@ -81,5 +81,5 @@ pub use types::{DocId, Document, FieldConfig, FieldType, IndexName, Schema, Segm
 /// from `argos gain`.
 pub const AUTOINDEX_CATALOG_INDEX: &str = "autoindex-catalog";
 
-/// Crate-level result alias — uses [`XerjError`] as the error type.
-pub type Result<T> = std::result::Result<T, XerjError>;
+/// Crate-level result alias — uses [`ArgosError`] as the error type.
+pub type Result<T> = std::result::Result<T, ArgosError>;

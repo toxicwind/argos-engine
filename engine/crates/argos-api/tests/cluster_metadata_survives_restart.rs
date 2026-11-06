@@ -939,7 +939,7 @@ async fn cluster_state_format1_fence_refuses_every_current_metadata_mutation() {
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{response}");
     assert_eq!(response["error"]["type"], "cluster_state_unavailable");
 
-    let restore_err: argos_common::XerjError = engine
+    let restore_err: argos_common::ArgosError = engine
         .restore_snapshot(
             snapshot_repo.to_str().expect("UTF-8 snapshot path"),
             "ready",
@@ -950,7 +950,7 @@ async fn cluster_state_format1_fence_refuses_every_current_metadata_mutation() {
         .into();
     assert!(matches!(
         restore_err,
-        argos_common::XerjError::ClusterStateUnavailable
+        argos_common::ArgosError::ClusterStateUnavailable
     ));
 
     assert_eq!(

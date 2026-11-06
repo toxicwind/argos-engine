@@ -110,7 +110,7 @@ data_dir = "{data}"
     let config_path = cfg_dir.join(format!("argos-{es_port}.toml"));
     std::fs::write(&config_path, config).unwrap();
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_xerj"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_argos"))
         .arg("--config")
         .arg(&config_path)
         .arg("--insecure")

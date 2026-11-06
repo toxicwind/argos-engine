@@ -45,7 +45,7 @@
 use std::collections::{HashMap, HashSet};
 
 use serde_json::Value;
-use argos_common::XerjError;
+use argos_common::ArgosError;
 
 use super::Index;
 use argos_storage::doc_values::{Column, KeywordColumn, NumericColumn};
@@ -85,7 +85,7 @@ pub struct GraphExpandRequest {
     /// Node ids to expand from. Deduped internally; clipped to
     /// GRAPH_MAX_FRONTIER (clip counted, never silent).
     pub frontier: Vec<String>,
-    /// 1 or 2. 0 or >2 → XerjError::InvalidQuery (see module docs).
+    /// 1 or 2. 0 or >2 → ArgosError::InvalidQuery (see module docs).
     pub hops: u8,
     pub direction: GraphDirection,
     /// Edge-type allowlist; None = all types.
@@ -243,7 +243,7 @@ impl Index {
             } else {
                 GRAPH_HOPS_CAP_REASON.to_string()
             };
-            return Err(XerjError::invalid_query(reason));
+            return Err(ArgosError::invalid_query(reason));
         }
 
         let mut stats = GraphExpandStats::default();
@@ -260,7 +260,7 @@ impl Index {
             }
         }
         if frontier.is_empty() {
-            return Err(XerjError::invalid_query(
+            return Err(ArgosError::invalid_query(
                 "graph expansion requires a non-empty frontier (after dedup)",
             ));
         }

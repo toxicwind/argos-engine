@@ -282,7 +282,7 @@ fn lone_surrogate_escape_reason(bytes: &[u8]) -> Option<&'static str> {
 /// The one place a bulk item's per-item `status` is derived from an engine
 /// error. Every `Err` arm in this module routes through here.
 ///
-/// It defers to `XerjError::http_status()` (409 version conflict, 404 not
+/// It defers to `ArgosError::http_status()` (409 version conflict, 404 not
 /// found, 403 index blocked, 400 bad mapping/query, 429 exhausted …) and only
 /// overrides one case: the disk flood-stage block reports itself as
 /// `read_only_allow_delete`, which ES answers **429**, not the 403 the other
@@ -294,7 +294,7 @@ fn lone_surrogate_escape_reason(bytes: &[u8]) -> Option<&'static str> {
 /// through `_ => 500` and a blocked bulk looked like a server fault.
 fn engine_error_http_status(error: &EngineError) -> u16 {
     match error {
-        EngineError::Common(argos_common::XerjError::IndexBlocked { block_type, .. })
+        EngineError::Common(argos_common::ArgosError::IndexBlocked { block_type, .. })
             if block_type.contains("read_only_allow_delete") =>
         {
             429
@@ -2922,7 +2922,7 @@ async fn execute_bulk_action(
             // Partial update: merge `doc` fields into the existing document.
             let idx = engine.get_or_create_index(index)?;
             let id = doc_id.ok_or_else(|| {
-                crate::EngineError::Common(argos_common::XerjError::invalid_query(
+                crate::EngineError::Common(argos_common::ArgosError::invalid_query(
                     "update action requires _id",
                 ))
             })?;
@@ -2941,14 +2941,14 @@ async fn execute_bulk_action(
             {
                 Some(resp) => Ok(resp),
                 None => Err(crate::EngineError::Common(
-                    argos_common::XerjError::document_not_found(&id, index),
+                    argos_common::ArgosError::document_not_found(&id, index),
                 )),
             }
         }
         "delete" => {
             let idx = engine.get_index(index)?;
             let id = doc_id.ok_or_else(|| {
-                crate::EngineError::Common(argos_common::XerjError::invalid_query(
+                crate::EngineError::Common(argos_common::ArgosError::invalid_query(
                     "delete action requires _id",
                 ))
             })?;
@@ -2961,7 +2961,7 @@ async fn execute_bulk_action(
             })
         }
         other => Err(crate::EngineError::Common(
-            argos_common::XerjError::invalid_query(format!("unknown bulk action: {other}")),
+            argos_common::ArgosError::invalid_query(format!("unknown bulk action: {other}")),
         )),
     }
 }
@@ -3855,7 +3855,7 @@ mod parse_admission_tests {
             (2, r#"{"delete":{"_id":"x"}}"#, None, 1),
             (3, r#"{"update":{"_id":"y"}}"#, Some(r#"{"doc":{}}"#), 2),
         ];
-        let error = EngineError::Common(argos_common::XerjError::circuit_breaking(
+        let error = EngineError::Common(argos_common::ArgosError::circuit_breaking(
             "[parent] real memory circuit breaker tripped",
         ));
         let items = refuse_every_action(&pairs, Some("logs"), &error);

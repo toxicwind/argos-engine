@@ -1039,7 +1039,7 @@ impl Engine {
         let storage_available = cluster_state_status.is_writable();
 
         // Cloned before `config` is moved into the Arc below — the WAL tap
-        // owns a live, runtime-editable copy (PUT /_xerj/wal_tap) rather than
+        // owns a live, runtime-editable copy (PUT /_argos/wal_tap) rather than
         // reading the frozen boot config.
         let wal_tap_config = config.wal_tap.clone();
 
@@ -1048,7 +1048,7 @@ impl Engine {
         // `min_retained_generations` — which `store_config_from` reads out of
         // this `Config` when every index opens a few lines below. Freezing the
         // *file's* floor into the `Arc` while the tap ran with a different one
-        // is how a floor set through `PUT /_xerj/wal_tap` survived a restart
+        // is how a floor set through `PUT /_argos/wal_tap` survived a restart
         // in `_stats` and still reached no `WalWriter`.
         let wal_tap = Arc::new(crate::wal_tap::WalTap::new(&data_dir, wal_tap_config));
         config.wal_tap = wal_tap.config();
@@ -1606,13 +1606,13 @@ impl Engine {
         // indistinguishable. See `crate::index_guard`.
         if !crate::index_guard::visible(name) {
             return Err(EngineError::Common(
-                argos_common::XerjError::index_not_found(name),
+                argos_common::ArgosError::index_not_found(name),
             ));
         }
 
         if self.indices.contains_key(name) {
             return Err(EngineError::Common(
-                argos_common::XerjError::index_already_exists(name),
+                argos_common::ArgosError::index_already_exists(name),
             ));
         }
 
@@ -1624,7 +1624,7 @@ impl Engine {
         // instead (issue #206).
         if let Some(f) = self.failed_indices.get(name) {
             return Err(EngineError::Common(
-                argos_common::XerjError::index_unavailable(name, f.reason.clone()),
+                argos_common::ArgosError::index_unavailable(name, f.reason.clone()),
             ));
         }
 
@@ -1650,13 +1650,13 @@ impl Engine {
 
         if self.indices.contains_key(name) {
             return Err(EngineError::Common(
-                argos_common::XerjError::index_already_exists(name),
+                argos_common::ArgosError::index_already_exists(name),
             ));
         }
 
         if let Some(f) = self.failed_indices.get(name) {
             return Err(EngineError::Common(
-                argos_common::XerjError::index_unavailable(name, f.reason.clone()),
+                argos_common::ArgosError::index_unavailable(name, f.reason.clone()),
             ));
         }
 
@@ -2240,7 +2240,7 @@ impl Engine {
             .pipeline_refusals_unreadable
             .load(std::sync::atomic::Ordering::SeqCst)
         {
-            return Err(EngineError::Common(argos_common::XerjError::internal(
+            return Err(EngineError::Common(argos_common::ArgosError::internal(
                 format!(
                     "{} could not be read at boot, so its markers are not in memory and \
                      rewriting it here would erase every refusal it still holds; every \
@@ -2258,12 +2258,12 @@ impl Engine {
             .map(|e| (e.key().clone(), e.value().clone()))
             .collect();
         let bytes = serde_json::to_vec_pretty(&snapshot).map_err(|e| {
-            argos_common::XerjError::internal(format!(
+            argos_common::ArgosError::internal(format!(
                 "could not serialise the ingest-pipeline refusal markers: {e}"
             ))
         })?;
         crate::index::write_file_atomic(&self.pipeline_refusals_path(), &bytes).map_err(|e| {
-            EngineError::Common(argos_common::XerjError::internal(format!(
+            EngineError::Common(argos_common::ArgosError::internal(format!(
                 "could not persist {}: {e}",
                 self.pipeline_refusals_path().display()
             )))
@@ -2699,7 +2699,7 @@ impl Engine {
             "refusing a cluster-metadata write because the boot-time format fence is latched"
         );
         Err(EngineError::Common(
-            argos_common::XerjError::cluster_state_unavailable(),
+            argos_common::ArgosError::cluster_state_unavailable(),
         ))
     }
 
@@ -3375,7 +3375,7 @@ impl Engine {
         // from the map. See `crate::index_guard`.
         if !crate::index_guard::visible(name) {
             return Err(EngineError::Common(
-                argos_common::XerjError::index_not_found(name),
+                argos_common::ArgosError::index_not_found(name),
             ));
         }
         if let Some(handle) = self.cluster_handle() {
@@ -3384,7 +3384,7 @@ impl Engine {
             // back as acknowledged once the not-found is swallowed.
             if !self.indices.contains_key(name) && !self.failed_indices.contains_key(name) {
                 return Err(EngineError::Common(
-                    argos_common::XerjError::index_not_found(name),
+                    argos_common::ArgosError::index_not_found(name),
                 ));
             }
             let effect = handle
@@ -3430,7 +3430,7 @@ impl Engine {
                 // for; anything else is a genuine 404.
                 if !self.failed_indices.contains_key(name) {
                     return Err(EngineError::Common(
-                        argos_common::XerjError::index_not_found(name),
+                        argos_common::ArgosError::index_not_found(name),
                     ));
                 }
                 // Drop the bookkeeping only after the bytes are gone. Removing
@@ -3517,7 +3517,7 @@ impl Engine {
         let dir_canon = dir.canonicalize().map_err(EngineError::Io)?;
         let root_canon = self.data_dir.canonicalize().map_err(EngineError::Io)?;
         if !dir_canon.starts_with(&root_canon) {
-            return Err(EngineError::Common(argos_common::XerjError::storage(
+            return Err(EngineError::Common(argos_common::ArgosError::storage(
                 format!("refusing to delete index [{name}] outside data_dir (canonical)"),
             )));
         }
@@ -3575,7 +3575,7 @@ impl Engine {
         self.ensure_cluster_state_writable()?;
         if !crate::index_guard::visible(name) || !self.failed_indices.contains_key(name) {
             return Err(EngineError::Common(
-                argos_common::XerjError::index_not_found(name),
+                argos_common::ArgosError::index_not_found(name),
             ));
         }
         let index_name = IndexName::new(name).map_err(EngineError::Common)?;
@@ -3594,7 +3594,7 @@ impl Engine {
                     self.record_failed_index(name, reason.clone());
                     warn!(name, error = %reason, "retry of failed index did not succeed");
                     return Err(EngineError::Common(
-                        argos_common::XerjError::index_unavailable(name, reason),
+                        argos_common::ArgosError::index_unavailable(name, reason),
                     ));
                 }
                 if let Some(m) = self.index_mappings.get(name) {
@@ -3611,7 +3611,7 @@ impl Engine {
                 self.record_failed_index(name, reason.clone());
                 warn!(name, error = %reason, "retry of failed index did not succeed");
                 Err(EngineError::Common(
-                    argos_common::XerjError::index_unavailable(name, reason),
+                    argos_common::ArgosError::index_unavailable(name, reason),
                 ))
             }
         }
@@ -3687,7 +3687,7 @@ impl Engine {
         // on-disk index into a misleading 404.
         if !self.cluster_state_boot.is_writable() {
             return Err(EngineError::Common(
-                argos_common::XerjError::cluster_state_unavailable(),
+                argos_common::ArgosError::cluster_state_unavailable(),
             ));
         }
         // Check if name is an alias — if so, resolve to the first backing index.
@@ -3695,7 +3695,7 @@ impl Engine {
             if let Some(real_name) = aliased.first() {
                 if !crate::index_guard::visible(real_name) {
                     return Err(EngineError::Common(
-                        argos_common::XerjError::index_not_found(name),
+                        argos_common::ArgosError::index_not_found(name),
                     ));
                 }
                 return self
@@ -3707,7 +3707,7 @@ impl Engine {
         }
         if !crate::index_guard::visible(name) {
             return Err(EngineError::Common(
-                argos_common::XerjError::index_not_found(name),
+                argos_common::ArgosError::index_not_found(name),
             ));
         }
         self.indices
@@ -3723,10 +3723,10 @@ impl Engine {
     /// issue #206's stuck state stayed invisible, so a failed index answers
     /// 503 `no_shard_available_action_exception` carrying the open error and
     /// the three commands that act on it.
-    fn missing_index_error(&self, name: &str) -> argos_common::XerjError {
+    fn missing_index_error(&self, name: &str) -> argos_common::ArgosError {
         match self.failed_indices.get(name) {
-            Some(f) => argos_common::XerjError::index_unavailable(name, f.reason.clone()),
-            None => argos_common::XerjError::index_not_found(name),
+            Some(f) => argos_common::ArgosError::index_unavailable(name, f.reason.clone()),
+            None => argos_common::ArgosError::index_not_found(name),
         }
     }
 
@@ -3741,7 +3741,7 @@ impl Engine {
     pub fn get_or_create_index(&self, name: &str) -> Result<Arc<Index>> {
         if !crate::index_guard::visible(name) {
             return Err(EngineError::Common(
-                argos_common::XerjError::index_not_found(name),
+                argos_common::ArgosError::index_not_found(name),
             ));
         }
         if let Ok(idx) = self.get_index(name) {
@@ -3753,7 +3753,7 @@ impl Engine {
         // with the open reason and the operator's options instead (issue #206).
         if let Some(f) = self.failed_indices.get(name) {
             return Err(EngineError::Common(
-                argos_common::XerjError::index_unavailable(name, f.reason.clone()),
+                argos_common::ArgosError::index_unavailable(name, f.reason.clone()),
             ));
         }
         // Auto-create. A matching template supplies the mapping and settings
@@ -3956,7 +3956,7 @@ impl Engine {
 
     /// Push the tap's live retention floor onto every open index's WAL shards.
     ///
-    /// Returns the number of indices it reached, so the `PUT /_xerj/wal_tap`
+    /// Returns the number of indices it reached, so the `PUT /_argos/wal_tap`
     /// handler can report what actually happened instead of guessing.
     ///
     /// #320. A floor set through the API previously reached nothing: it lived
@@ -4156,7 +4156,7 @@ impl Engine {
         self.ensure_cluster_state_writable()?;
         if self.data_streams.contains_key(name) {
             return Err(EngineError::Common(
-                argos_common::XerjError::index_already_exists(name),
+                argos_common::ArgosError::index_already_exists(name),
             ));
         }
         let backing_name = format!(".ds-{}-000001", name);
@@ -4211,7 +4211,7 @@ impl Engine {
         let mut ds = self
             .data_streams
             .get_mut(name)
-            .ok_or_else(|| EngineError::Common(argos_common::XerjError::index_not_found(name)))?;
+            .ok_or_else(|| EngineError::Common(argos_common::ArgosError::index_not_found(name)))?;
 
         ds.generation += 1;
         let new_backing = format!(".ds-{}-{:06}", name, ds.generation);
@@ -4256,7 +4256,7 @@ impl Engine {
             .data_streams
             .remove(name)
             .map(|(_, v)| v)
-            .ok_or_else(|| EngineError::Common(argos_common::XerjError::index_not_found(name)))?;
+            .ok_or_else(|| EngineError::Common(argos_common::ArgosError::index_not_found(name)))?;
 
         // Destroy the backing indices FIRST, and only then record the removal.
         // The two orderings fail differently and only one of them is
@@ -5104,7 +5104,7 @@ impl Engine {
                     // ES: restore of an index absent from the snapshot fails
                     // loud (snapshot_restore_exception). Mirror that. The
                     // repo's filesystem path is deliberately NOT echoed.
-                    return Err(EngineError::Common(argos_common::XerjError::invalid_query(
+                    return Err(EngineError::Common(argos_common::ArgosError::invalid_query(
                         format!("[{name}] no index matches [{pat}] in snapshot"),
                     )));
                 }
@@ -5156,7 +5156,7 @@ impl Engine {
             // data_dir.
             if !dst_dir.starts_with(&self.data_dir) {
                 return Err(EngineError::Common(
-                    argos_common::XerjError::invalid_mapping(format!(
+                    argos_common::ArgosError::invalid_mapping(format!(
                         "refusing to restore index [{idx_name}] outside data_dir"
                     )),
                 ));
@@ -5177,7 +5177,7 @@ impl Engine {
             if let Ok(dst_canon) = dst_dir.canonicalize() {
                 if !dst_canon.starts_with(&data_dir_canon) {
                     return Err(EngineError::Common(
-                        argos_common::XerjError::invalid_mapping(format!(
+                        argos_common::ArgosError::invalid_mapping(format!(
                             "refusing to restore index [{idx_name}] outside data_dir (canonical)"
                         )),
                     ));
@@ -5275,7 +5275,7 @@ fn validate_snapshot_path(
 ) -> Result<std::path::PathBuf> {
     if repo_path.is_empty() {
         return Err(EngineError::Common(
-            argos_common::XerjError::invalid_mapping(
+            argos_common::ArgosError::invalid_mapping(
                 "snapshot repository location must not be empty",
             ),
         ));
@@ -5299,7 +5299,7 @@ fn validate_snapshot_path(
         .any(|c| matches!(c, std::path::Component::ParentDir))
     {
         return Err(EngineError::Common(
-            argos_common::XerjError::invalid_mapping(format!(
+            argos_common::ArgosError::invalid_mapping(format!(
                 "snapshot repository location [{repo_path}] must not contain '..' path components"
             )),
         ));
@@ -5318,7 +5318,7 @@ fn validate_snapshot_path(
     allowed_bases.extend(hub_packs.and_then(trusted_hub_pack_root));
     if !allowed_bases.iter().any(|base| repo_base.starts_with(base)) {
         return Err(EngineError::Common(
-            argos_common::XerjError::invalid_mapping(format!(
+            argos_common::ArgosError::invalid_mapping(format!(
                 "snapshot repository location [{repo_path}] is outside data_dir and not in \
                  limits.snapshot_repo_allowlist; refusing (set the allowlist to permit external \
                  snapshot roots)"
@@ -5331,7 +5331,7 @@ fn validate_snapshot_path(
         || name.contains('\\')
         || name.contains('\0')
     {
-        return Err(EngineError::Common(argos_common::XerjError::invalid_mapping(
+        return Err(EngineError::Common(argos_common::ArgosError::invalid_mapping(
             format!("invalid snapshot name [{name}]: must not be empty or contain '..', '/', '\\', or NUL"),
         )));
     }
@@ -5347,7 +5347,7 @@ fn validate_snapshot_path(
     if let Ok(snap_canon) = snap_dir.canonicalize() {
         if !snap_canon.starts_with(&repo_canon) {
             return Err(EngineError::Common(
-                argos_common::XerjError::invalid_mapping(format!(
+                argos_common::ArgosError::invalid_mapping(format!(
                     "snapshot [{name}] resolves outside its repository; refusing"
                 )),
             ));
@@ -5360,7 +5360,7 @@ fn validate_snapshot_path(
         let snap_lex = snap_dir.to_path_buf();
         if !snap_lex.starts_with(&repo_canon) {
             return Err(EngineError::Common(
-                argos_common::XerjError::invalid_mapping(format!(
+                argos_common::ArgosError::invalid_mapping(format!(
                     "snapshot [{name}] resolves outside its repository; refusing"
                 )),
             ));

@@ -359,7 +359,7 @@ fn handle(mut stream: TcpStream, state: &Arc<Mutex<MockState>>) {
             // past the `illegal_argument_exception` guard — that one only sees
             // *declared* mappings, and `started` was never declared — and is
             // refused by the `idx.schema()` guard, which returns
-            // `XerjError::invalid_mapping` and therefore a 400
+            // `ArgosError::invalid_mapping` and therefore a 400
             // `mapper_parsing_exception`.
             //
             // A correct product never reaches this branch (see

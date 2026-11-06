@@ -42,7 +42,7 @@ fn sorted_req(field: &str, size: usize) -> argos_query::ast::SearchRequest {
 
 fn reason_of(err: &argos_engine::EngineError) -> String {
     match err {
-        argos_engine::EngineError::Common(argos_common::XerjError::InvalidQuery { reason }) => {
+        argos_engine::EngineError::Common(argos_common::ArgosError::InvalidQuery { reason }) => {
             reason.clone()
         }
         other => panic!("expected EngineError::Common(InvalidQuery), got: {other:?}"),

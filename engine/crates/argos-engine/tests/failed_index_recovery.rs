@@ -24,7 +24,7 @@
 use tempfile::TempDir;
 use argos_common::config::Config;
 use argos_common::types::Schema;
-use argos_common::XerjError;
+use argos_common::ArgosError;
 use argos_engine::{Engine, EngineError};
 
 fn config_for(dir: &TempDir) -> Config {
@@ -55,13 +55,13 @@ async fn data_dir_with_one_broken_index(names: &[&str], break_me: &str) -> (Temp
     (dir, good)
 }
 
-fn argos_error(e: EngineError) -> XerjError {
+fn argos_error(e: EngineError) -> ArgosError {
     e.into()
 }
 
 /// `Index` is not `Debug`, so `unwrap_err()` is unavailable on the
 /// index-returning calls. Take the error explicitly instead.
-fn err_of<T>(r: Result<T, EngineError>, what: &str) -> XerjError {
+fn err_of<T>(r: Result<T, EngineError>, what: &str) -> ArgosError {
     match r {
         Ok(_) => panic!("{what} must not succeed"),
         Err(e) => argos_error(e),
@@ -106,7 +106,7 @@ async fn reads_and_writes_to_a_failed_index_say_unavailable_not_not_found() {
     // the open error.
     let e = err_of(engine.get_index("broken"), "get_index on a failed index");
     assert!(
-        matches!(e, XerjError::IndexUnavailable { .. }),
+        matches!(e, ArgosError::IndexUnavailable { .. }),
         "get_index on a failed index must not report not-found: {e:?}"
     );
     assert_eq!(e.http_status(), 503);
@@ -119,7 +119,7 @@ async fn reads_and_writes_to_a_failed_index_say_unavailable_not_not_found() {
         "auto-create over a failed index",
     );
     assert!(
-        matches!(e, XerjError::IndexUnavailable { .. }),
+        matches!(e, ArgosError::IndexUnavailable { .. }),
         "auto-create must refuse a failed index: {e:?}"
     );
     // …and the refusal must not have created anything.
@@ -129,7 +129,7 @@ async fn reads_and_writes_to_a_failed_index_say_unavailable_not_not_found() {
     // Explicit create is refused for the same reason, with the same message.
     let e = argos_error(engine.create_index("broken", Schema::empty()).unwrap_err());
     assert!(
-        matches!(e, XerjError::IndexUnavailable { .. }),
+        matches!(e, ArgosError::IndexUnavailable { .. }),
         "create over a failed index must name the real cause: {e:?}"
     );
 }
@@ -156,7 +156,7 @@ async fn a_failed_index_can_be_deleted_without_a_restart() {
 
     // A name that was never an index is still a plain 404.
     let e = argos_error(engine.delete_index("never-existed").await.unwrap_err());
-    assert!(matches!(e, XerjError::IndexNotFound { .. }), "{e:?}");
+    assert!(matches!(e, ArgosError::IndexNotFound { .. }), "{e:?}");
 }
 
 /// The failed-index arm of `delete_index` drops its bookkeeping only after the
@@ -239,7 +239,7 @@ async fn retry_reports_the_live_reason_and_succeeds_once_the_cause_is_fixed() {
     // attempt is counted so a flapping directory is visible as one.
     let e = argos_error(engine.retry_failed_index("broken").unwrap_err());
     assert!(
-        matches!(e, XerjError::IndexUnavailable { .. }),
+        matches!(e, ArgosError::IndexUnavailable { .. }),
         "a retry that did not work must fail loudly: {e:?}"
     );
     let after = engine.list_failed_indices();
@@ -262,5 +262,5 @@ async fn retry_reports_the_live_reason_and_succeeds_once_the_cause_is_fixed() {
 
     // Retrying a name that is not a failed index is a 404, not a silent ok.
     let e = argos_error(engine.retry_failed_index("broken").unwrap_err());
-    assert!(matches!(e, XerjError::IndexNotFound { .. }), "{e:?}");
+    assert!(matches!(e, ArgosError::IndexNotFound { .. }), "{e:?}");
 }

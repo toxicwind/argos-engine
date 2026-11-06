@@ -332,7 +332,7 @@ fn run(cfg: BrainCfg) -> Result<i32> {
     };
     if records_live == 0 {
         eprintln!(
-            "\nxerj brain: nothing indexable under {} — {} files seen, 0 records live.\n\
+            "\nargos brain: nothing indexable under {} — {} files seen, 0 records live.\n\
              autoindex reads text, markdown, html, pdf, docx, csv, json/ndjson, xml,\n\
              yaml, logs and sql dumps; unreadable files are junk-filed, never guessed.\n\
              point it at the folder where your notes actually live.",

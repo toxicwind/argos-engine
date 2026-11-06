@@ -42,7 +42,7 @@ fn stdout_pipe_without_a_reader_dies_on_sigpipe_instead_of_aborting() {
     let (reader, writer) = std::io::pipe().expect("create pipe");
     drop(reader);
 
-    let child = Command::new(env!("CARGO_BIN_EXE_xerj"))
+    let child = Command::new(env!("CARGO_BIN_EXE_argos"))
         .arg("--help")
         .stdout(Stdio::from(writer))
         .stderr(Stdio::piped())
@@ -63,7 +63,7 @@ fn stdout_pipe_without_a_reader_dies_on_sigpipe_instead_of_aborting() {
 fn reader_leaving_mid_stream_dies_on_sigpipe_instead_of_aborting() {
     const PEEK: usize = 8;
 
-    let full = Command::new(env!("CARGO_BIN_EXE_xerj"))
+    let full = Command::new(env!("CARGO_BIN_EXE_argos"))
         .arg("--help")
         .output()
         .expect("run argos --help");
@@ -84,7 +84,7 @@ fn reader_leaving_mid_stream_dies_on_sigpipe_instead_of_aborting() {
         full.stdout.len()
     );
 
-    let child = Command::new(env!("CARGO_BIN_EXE_xerj"))
+    let child = Command::new(env!("CARGO_BIN_EXE_argos"))
         .arg("--help")
         .stdout(Stdio::from(writer))
         .stderr(Stdio::piped())

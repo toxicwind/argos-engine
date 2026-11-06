@@ -34,7 +34,7 @@ use std::time::{Duration, Instant};
 use serde_json::Value;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use argos_common::config::Config;
-use argos_common::XerjError;
+use argos_common::ArgosError;
 
 use crate::segment_cache_budget::{SegmentHydrationBudget, SegmentHydrationBudgetSnapshot};
 
@@ -439,10 +439,10 @@ impl ResourceGovernor {
     /// Ingest admission. Returns a 429 `circuit_breaking_exception` when the
     /// process is at/over the memtable budget or the RSS watermark. This is
     /// the parent breaker that turns the OOM into a survivable 429.
-    pub fn check_ingest_admission(&self) -> Result<(), XerjError> {
+    pub fn check_ingest_admission(&self) -> Result<(), ArgosError> {
         if self.memtable_tripped.load(Ordering::Relaxed) {
             let used = self.memtable_used_bytes.load(Ordering::Relaxed);
-            return Err(XerjError::circuit_breaking(format!(
+            return Err(ArgosError::circuit_breaking(format!(
                 "[parent] memtable byte budget exceeded: used={}MB, limit={}MB across all \
                  indices; writes rejected to prevent an out-of-memory kill (raise \
                  limits.max_process_memory_mb or ARGOS_MAX_PROCESS_MEMORY_MB — the auto \
@@ -472,7 +472,7 @@ impl ResourceGovernor {
                 available: self.available_commit_bytes.load(Ordering::Relaxed),
                 reserve: self.commit_reserve_bytes,
             });
-            return Err(XerjError::circuit_breaking(memory_breaker_reason(
+            return Err(ArgosError::circuit_breaking(memory_breaker_reason(
                 rss,
                 relation,
                 watermark,
@@ -490,7 +490,7 @@ impl ResourceGovernor {
     /// probe, plus reservations already held, and rechecks after the atomic
     /// add so two bulks cannot both pass the same snapshot. A watermark of
     /// `0`, or a zero request, reserves nothing. The guard releases on drop.
-    pub(crate) fn reserve_analyze(&self, bytes: u64) -> Result<AnalyzeReservation, XerjError> {
+    pub(crate) fn reserve_analyze(&self, bytes: u64) -> Result<AnalyzeReservation, ArgosError> {
         if bytes == 0 || self.memory_watermark_bytes.load(Ordering::Relaxed) == 0 {
             return Ok(AnalyzeReservation::none());
         }
@@ -535,7 +535,7 @@ impl ResourceGovernor {
     pub(crate) fn admit_bulk_parse(
         &self,
         body_bytes: u64,
-    ) -> Result<AnalyzeReservation, XerjError> {
+    ) -> Result<AnalyzeReservation, ArgosError> {
         self.check_ingest_admission()?;
         self.reserve_analyze(body_bytes)
     }
@@ -546,12 +546,12 @@ impl ResourceGovernor {
             .max(current_process_memory_bytes())
     }
 
-    fn analyze_reservation_refused(&self, request: u64) -> XerjError {
+    fn analyze_reservation_refused(&self, request: u64) -> ArgosError {
         const MIB: u64 = 1024 * 1024;
         let observed = self.observed_process_memory();
         let reserved = self.analyze_reserved.load(Ordering::Relaxed);
         let watermark = self.memory_watermark_bytes.load(Ordering::Relaxed);
-        XerjError::circuit_breaking(format!(
+        ArgosError::circuit_breaking(format!(
             "[parent] real memory circuit breaker tripped: rss={}MB plus {}MB already reserved \
              for analysis plus {}MB for this batch would reach watermark={}MB ({}% of \
              limit={}MB); writes rejected to prevent an out-of-memory kill (raise \
@@ -961,12 +961,12 @@ impl ResourceGovernor {
     /// `read_only_allow_delete` cluster block (HTTP 429) when the data-dir
     /// filesystem is over the flood-stage watermark. `index` names the
     /// blocked index for the ES `root_cause`.
-    pub fn check_disk_block(&self, index: &str) -> Result<(), XerjError> {
+    pub fn check_disk_block(&self, index: &str) -> Result<(), ArgosError> {
         if self.disk_blocked.load(Ordering::Relaxed) {
             // The `read_only_allow_delete` substring drives the 429 status in
             // the ES error mapper (flood-stage rejections are 429, unlike an
             // explicit 403 write block). Mirrors ES's flood-stage message.
-            return Err(XerjError::index_blocked(
+            return Err(ArgosError::index_blocked(
                 index,
                 format!(
                     "read_only_allow_delete (disk usage {}% exceeded flood-stage watermark [{}%])",
@@ -1052,9 +1052,9 @@ impl ResourceGovernor {
     /// query whose *estimated* peak allocation (`bytes`) exceeds the budget,
     /// before the allocation is made, with a 429 `circuit_breaking_exception`.
     /// `label` names the allocation site (e.g. "hydrate", "terms-agg").
-    pub fn check_query_alloc(&self, bytes: u64, label: &str) -> Result<(), XerjError> {
+    pub fn check_query_alloc(&self, bytes: u64, label: &str) -> Result<(), ArgosError> {
         if self.max_query_memory_bytes != 0 && bytes > self.max_query_memory_bytes {
-            return Err(XerjError::circuit_breaking(format!(
+            return Err(ArgosError::circuit_breaking(format!(
                 "[request] query allocation ({}) would exceed limits.max_query_memory_mb={}MB \
                  at [{label}]; reduce size/aggregation cardinality",
                 human_bytes(bytes),
@@ -1094,16 +1094,16 @@ impl ResourceGovernor {
     /// or above the limit waits up to [`SEARCH_HEADROOM_WAIT`] for the drain
     /// before it is rejected, instead of failing in milliseconds against a
     /// transient peak.
-    pub async fn acquire_search(&self) -> Result<SearchPermit, XerjError> {
+    pub async fn acquire_search(&self) -> Result<SearchPermit, ArgosError> {
         let permit = Arc::clone(&self.search_pool)
             .acquire_owned()
             .await
-            .map_err(|_| XerjError::internal("global search pool closed — shutting down"))?;
+            .map_err(|_| ArgosError::internal("global search pool closed — shutting down"))?;
         let pressure = if self.memory_breaker_engaged() || self.check_search_hard_limit().is_err() {
             let p = Arc::clone(&self.search_pressure)
                 .acquire_owned()
                 .await
-                .map_err(|_| XerjError::internal("search pressure gate closed — shutting down"))?;
+                .map_err(|_| ArgosError::internal("search pressure gate closed — shutting down"))?;
             // RSS may have crossed the hard limit while this search queued.
             self.wait_for_search_headroom().await?;
             Some(p)
@@ -1123,7 +1123,7 @@ impl ResourceGovernor {
     /// passes or [`Self::search_headroom_wait`] runs out (#2427). The sampler
     /// drains rebuildable state while the breaker is engaged; this gives that
     /// drain time to work before the search is turned away.
-    async fn wait_for_search_headroom(&self) -> Result<(), XerjError> {
+    async fn wait_for_search_headroom(&self) -> Result<(), ArgosError> {
         let deadline = tokio::time::Instant::now() + self.search_headroom_wait;
         loop {
             match self.check_search_hard_limit() {
@@ -1154,11 +1154,11 @@ impl ResourceGovernor {
         self.memory_limit_bytes.max(watermark)
     }
 
-    fn check_search_hard_limit(&self) -> Result<(), XerjError> {
+    fn check_search_hard_limit(&self) -> Result<(), ArgosError> {
         let limit = self.search_hard_limit_bytes();
         let rss = self.search_admission_rss();
         if limit != 0 && rss >= limit {
-            return Err(XerjError::circuit_breaking(format!(
+            return Err(ArgosError::circuit_breaking(format!(
                 "[parent] Data too large: process memory [{rss}/{}] is at or above the memory limit [{limit}/{}] after waiting for the memory breaker to drain; search rejected",
                 human_bytes(rss),
                 human_bytes(limit)
@@ -1188,12 +1188,12 @@ impl ResourceGovernor {
     /// concurrency to `max_concurrent_bulks` (default 8), preventing N
     /// concurrent bulks from each materializing ~300 B/action of parse-phase
     /// heap before the memtable admission check fires.
-    pub async fn acquire_bulk(&self) -> Result<tokio::sync::OwnedSemaphorePermit, XerjError> {
+    pub async fn acquire_bulk(&self) -> Result<tokio::sync::OwnedSemaphorePermit, ArgosError> {
         self.bulk_pool
             .clone()
             .acquire_owned()
             .await
-            .map_err(|_| XerjError::internal("global bulk pool closed — shutting down"))
+            .map_err(|_| ArgosError::internal("global bulk pool closed — shutting down"))
     }
 
     /// Configured global bulk-concurrency cap.
@@ -3297,7 +3297,7 @@ mod tests {
         // 429 + the CircuitBreaking variant (the ES mapper stamps the
         // `circuit_breaking_exception` type; the Display is the bare reason).
         assert_eq!(err.http_status(), 429);
-        assert!(matches!(err, XerjError::CircuitBreaking { .. }));
+        assert!(matches!(err, ArgosError::CircuitBreaking { .. }));
         let rendered = format!("{err}");
         assert!(
             rendered.contains("memtable byte budget exceeded"),

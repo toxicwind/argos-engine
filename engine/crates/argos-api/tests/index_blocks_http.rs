@@ -22,7 +22,7 @@
 //!
 //! 3. **A blocked bulk answered 500.** Three inline `match`es in `bulk.rs`
 //!    listed the errors their authors had in mind and sent everything else to
-//!    `_ => 500`, so a plain write block — a 403 in `XerjError::http_status()`
+//!    `_ => 500`, so a plain write block — a 403 in `ArgosError::http_status()`
 //!    and a `cluster_block_exception` in ES — was reported to clients as a
 //!    server fault.
 //!

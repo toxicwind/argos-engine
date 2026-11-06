@@ -1,6 +1,6 @@
 //! Unified error type for argos.
 //!
-//! All crates in the workspace convert their internal errors into [`XerjError`]
+//! All crates in the workspace convert their internal errors into [`ArgosError`]
 //! before they cross an API boundary. This keeps error handling consistent
 //! from storage internals through to HTTP responses.
 
@@ -12,7 +12,7 @@ use thiserror::Error;
 /// useful HTTP status codes and log messages without fragmenting error handling
 /// across dozens of leaf types.
 #[derive(Debug, Error)]
-pub enum XerjError {
+pub enum ArgosError {
     // ── Index lifecycle ────────────────────────────────────────────────────
     /// The requested index does not exist.
     #[error("index not found: {name}")]
@@ -31,7 +31,7 @@ pub enum XerjError {
     InvalidIndexName { index: String, reason: String },
 
     /// The index directory exists but could not be opened, so the index
-    /// cannot serve. Deliberately distinct from [`XerjError::IndexNotFound`]:
+    /// cannot serve. Deliberately distinct from [`ArgosError::IndexNotFound`]:
     /// the name is real, the data is still on disk, and the operator's move is
     /// to fix the cause and retry — or to delete it. Reporting these as 404
     /// "not found" is what made a failed index un-inspectable and
@@ -164,7 +164,7 @@ pub enum XerjError {
     Internal { reason: String },
 }
 
-impl XerjError {
+impl ArgosError {
     // ── Constructors (ergonomic helpers) ──────────────────────────────────
 
     pub fn index_not_found(name: impl Into<String>) -> Self {
@@ -366,7 +366,7 @@ impl XerjError {
 
 // ── Standard library conversions ──────────────────────────────────────────────
 
-impl From<std::io::Error> for XerjError {
+impl From<std::io::Error> for ArgosError {
     fn from(e: std::io::Error) -> Self {
         Self::StorageError {
             reason: e.to_string(),
@@ -375,7 +375,7 @@ impl From<std::io::Error> for XerjError {
     }
 }
 
-impl From<serde_json::Error> for XerjError {
+impl From<serde_json::Error> for ArgosError {
     fn from(e: serde_json::Error) -> Self {
         Self::SerializationError {
             reason: e.to_string(),
@@ -383,7 +383,7 @@ impl From<serde_json::Error> for XerjError {
     }
 }
 
-impl From<toml::de::Error> for XerjError {
+impl From<toml::de::Error> for ArgosError {
     fn from(e: toml::de::Error) -> Self {
         Self::ConfigError {
             reason: e.to_string(),
@@ -391,7 +391,7 @@ impl From<toml::de::Error> for XerjError {
     }
 }
 
-impl From<anyhow::Error> for XerjError {
+impl From<anyhow::Error> for ArgosError {
     fn from(e: anyhow::Error) -> Self {
         Self::Internal {
             reason: e.to_string(),

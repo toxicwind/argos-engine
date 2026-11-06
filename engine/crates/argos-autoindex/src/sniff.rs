@@ -5175,7 +5175,7 @@ mod text_family_tests {
             // Task list — `- [ ] x` is invalid YAML (flow sequence then scalar).
             "- [ ] drain the pool\n- [x] raise the limit\n- [ ] verify p99\n",
             // Fenced code block.
-            "# How to\nRun this:\n```sh\nxerj autoindex .\n```\nThen read the catalog.\n",
+            "# How to\nRun this:\n```sh\nargos autoindex .\n```\nThen read the catalog.\n",
             // Table.
             "| stage | owner |\n|---|---|\n| build | core |\n| ship | ops |\n",
             // Headings and paragraphs.

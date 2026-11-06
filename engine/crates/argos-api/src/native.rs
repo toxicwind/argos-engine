@@ -200,7 +200,7 @@ pub async fn create_index(
         state.engine.create_index(&name_str, schema)
     };
     if let Err(e) = create_result {
-        let argos_err: argos_common::XerjError = e.into();
+        let argos_err: argos_common::ArgosError = e.into();
         return native_error(
             argos_err,
             Some(&request_id),
@@ -232,7 +232,7 @@ pub async fn get_index(
     let idx = match state.engine.get_index(&name) {
         Ok(i) => i,
         Err(e) => {
-            let argos_err: argos_common::XerjError = e.into();
+            let argos_err: argos_common::ArgosError = e.into();
             return native_error(
                 argos_err,
                 Some(&request_id),
@@ -272,7 +272,7 @@ pub async fn delete_index(
     let request_id = Uuid::new_v4().to_string();
 
     if let Err(e) = state.engine.delete_index(&name).await {
-        let argos_err: argos_common::XerjError = e.into();
+        let argos_err: argos_common::ArgosError = e.into();
         return native_error(
             argos_err,
             Some(&request_id),
@@ -343,7 +343,7 @@ async fn index_one_doc(
             })
         }
         Err(e) => {
-            let argos_err: argos_common::XerjError = e.into();
+            let argos_err: argos_common::ArgosError = e.into();
             Err(native_error(
                 argos_err,
                 Some(request_id),
@@ -513,7 +513,7 @@ pub async fn ingest_docs(
     let idx = match state.engine.get_index(&name) {
         Ok(i) => i,
         Err(e) => {
-            let argos_err: argos_common::XerjError = e.into();
+            let argos_err: argos_common::ArgosError = e.into();
             return native_error(
                 argos_err,
                 Some(&request_id),
@@ -581,7 +581,7 @@ pub async fn get_doc(
     let idx = match state.engine.get_index(&name) {
         Ok(i) => i,
         Err(e) => {
-            let argos_err: argos_common::XerjError = e.into();
+            let argos_err: argos_common::ArgosError = e.into();
             return native_error(
                 argos_err,
                 Some(&request_id),
@@ -602,11 +602,11 @@ pub async fn get_doc(
             Json(resp).into_response()
         }
         Ok(None) => {
-            let e = argos_common::XerjError::document_not_found(&id, &name);
+            let e = argos_common::ArgosError::document_not_found(&id, &name);
             native_error(e, Some(&request_id), started.elapsed().as_millis() as u64).into_response()
         }
         Err(e) => {
-            let argos_err: argos_common::XerjError = e.into();
+            let argos_err: argos_common::ArgosError = e.into();
             native_error(
                 argos_err,
                 Some(&request_id),
@@ -631,7 +631,7 @@ pub async fn delete_doc(
     let idx = match state.engine.get_index(&name) {
         Ok(i) => i,
         Err(e) => {
-            let argos_err: argos_common::XerjError = e.into();
+            let argos_err: argos_common::ArgosError = e.into();
             return native_error(
                 argos_err,
                 Some(&request_id),
@@ -672,7 +672,7 @@ pub async fn delete_doc(
             Json(resp).into_response()
         }
         Err(e) => {
-            let argos_err: argos_common::XerjError = e.into();
+            let argos_err: argos_common::ArgosError = e.into();
             native_error(
                 argos_err,
                 Some(&request_id),
@@ -698,7 +698,7 @@ pub async fn search(
     let idx = match state.engine.get_index(&name) {
         Ok(i) => i,
         Err(e) => {
-            let argos_err: argos_common::XerjError = e.into();
+            let argos_err: argos_common::ArgosError = e.into();
             return native_error(
                 argos_err,
                 Some(&request_id),
@@ -721,7 +721,7 @@ pub async fn search(
         } else {
             crate::judge_stage::unsupported_reason("the native search API")
         };
-        let error = argos_common::XerjError::invalid_query(reason);
+        let error = argos_common::ArgosError::invalid_query(reason);
         return native_error(
             error,
             Some(&request_id),
@@ -731,7 +731,7 @@ pub async fn search(
     }
 
     if !native_fields_supported(req.fields.as_deref()) {
-        let error = argos_common::XerjError::invalid_query(
+        let error = argos_common::ArgosError::invalid_query(
             "native search only supports the `_passage` pseudo-field; remove `fields` and read \
              values from `_source`, request only `_passage`, or use the \
              Elasticsearch-compatible `_search` endpoint",
@@ -776,7 +776,7 @@ pub async fn search(
     let search_req = match parse_request(&query_body) {
         Ok(r) => r,
         Err(e) => {
-            let ze = argos_common::XerjError::invalid_query(e.to_string());
+            let ze = argos_common::ArgosError::invalid_query(e.to_string());
             return native_error(ze, Some(&request_id), started.elapsed().as_millis() as u64)
                 .into_response();
         }
@@ -826,7 +826,7 @@ pub async fn search(
             Json(resp).into_response()
         }
         Err(e) => {
-            let argos_err: argos_common::XerjError = e.into();
+            let argos_err: argos_common::ArgosError = e.into();
             native_error(
                 argos_err,
                 Some(&request_id),
@@ -853,7 +853,7 @@ pub async fn flush_index(
     let request_id = Uuid::new_v4().to_string();
 
     if let Err(e) = state.engine.flush_index(&name).await {
-        let argos_err: argos_common::XerjError = e.into();
+        let argos_err: argos_common::ArgosError = e.into();
         return native_error(
             argos_err,
             Some(&request_id),
@@ -911,7 +911,7 @@ pub async fn embedding_execution_identity(State(state): State<AppState>) -> impl
         Ok(Err(error)) => {
             tracing::warn!(error = %error, "embedding execution identity is unavailable");
             native_error(
-                argos_common::XerjError::embedding(
+                argos_common::ArgosError::embedding(
                     "embedding execution identity is unavailable; verify the configured embedding \
                      backend and local assets in the server logs. Asset-read failures are cached \
                      for this server lifetime; restart the server after fixing the assets",
@@ -924,7 +924,7 @@ pub async fn embedding_execution_identity(State(state): State<AppState>) -> impl
         Err(error) => {
             tracing::error!(error = %error, "embedding identity worker failed");
             native_error(
-                argos_common::XerjError::embedding(
+                argos_common::ArgosError::embedding(
                     "embedding execution identity worker failed; inspect the server logs and \
                      restart the server before retrying",
                 ),
@@ -1190,7 +1190,7 @@ pub async fn admin_backup(State(state): State<AppState>, body: Bytes) -> impl In
             Ok(r) => r,
             Err(e) => {
                 return native_error(
-                    argos_common::XerjError::invalid_document_json(format!(
+                    argos_common::ArgosError::invalid_document_json(format!(
                         "backup request body is not valid BackupRequest JSON: {e}"
                     )),
                     Some(&request_id),
@@ -1228,7 +1228,7 @@ pub async fn admin_backup(State(state): State<AppState>, body: Bytes) -> impl In
             (StatusCode::CREATED, Json(resp)).into_response()
         }
         Err(e) => {
-            let argos_err: argos_common::XerjError = e.into();
+            let argos_err: argos_common::ArgosError = e.into();
             native_error(
                 argos_err,
                 Some(&request_id),
@@ -1451,7 +1451,7 @@ pub async fn get_schema(
     let idx = match state.engine.get_index(&name) {
         Ok(i) => i,
         Err(e) => {
-            let argos_err: argos_common::XerjError = e.into();
+            let argos_err: argos_common::ArgosError = e.into();
             return native_error(
                 argos_err,
                 Some(&request_id),
@@ -1489,7 +1489,7 @@ pub async fn evolve_schema(
     let idx = match state.engine.get_index(&name) {
         Ok(i) => i,
         Err(e) => {
-            let argos_err: argos_common::XerjError = e.into();
+            let argos_err: argos_common::ArgosError = e.into();
             return native_error(
                 argos_err,
                 Some(&request_id),
@@ -1504,7 +1504,7 @@ pub async fn evolve_schema(
         match idx.add_field(field).await {
             Ok(()) => added += 1,
             Err(e) => {
-                let argos_err: argos_common::XerjError = e.into();
+                let argos_err: argos_common::ArgosError = e.into();
                 return native_error(
                     argos_err,
                     Some(&request_id),
@@ -1544,7 +1544,7 @@ pub async fn bulk_ingest(
     let idx = match state.engine.get_index(&name) {
         Ok(i) => i,
         Err(e) => {
-            let argos_err: argos_common::XerjError = e.into();
+            let argos_err: argos_common::ArgosError = e.into();
             return native_error(
                 argos_err,
                 Some(&request_id),
@@ -1603,7 +1603,7 @@ pub async fn ingest_logs(
     let idx = match state.engine.get_or_create_index(&name) {
         Ok(i) => i,
         Err(e) => {
-            let argos_err: argos_common::XerjError = e.into();
+            let argos_err: argos_common::ArgosError = e.into();
             return native_error(
                 argos_err,
                 Some(&request_id),
@@ -1689,7 +1689,7 @@ pub async fn ingest_otlp(
     let idx = match state.engine.get_or_create_index(&name) {
         Ok(i) => i,
         Err(e) => {
-            let argos_err: argos_common::XerjError = e.into();
+            let argos_err: argos_common::ArgosError = e.into();
             return native_error(
                 argos_err,
                 Some(&request_id),
@@ -1911,7 +1911,7 @@ pub async fn ingest_syslog(
     let idx = match state.engine.get_or_create_index(&name) {
         Ok(i) => i,
         Err(e) => {
-            let argos_err: argos_common::XerjError = e.into();
+            let argos_err: argos_common::ArgosError = e.into();
             return native_error(
                 argos_err,
                 Some(&request_id),
@@ -2260,7 +2260,7 @@ pub async fn turbo_ingest(
     let idx = match state.engine.get_index(&name) {
         Ok(i) => i,
         Err(e) => {
-            let argos_err: argos_common::XerjError = e.into();
+            let argos_err: argos_common::ArgosError = e.into();
             return native_error(
                 argos_err,
                 Some(&request_id),
@@ -2327,7 +2327,7 @@ pub async fn turbo_ingest(
             (StatusCode::OK, Json(resp)).into_response()
         }
         Err(e) => {
-            let argos_err: argos_common::XerjError = e.into();
+            let argos_err: argos_common::ArgosError = e.into();
             native_error(
                 argos_err,
                 Some(&request_id),
@@ -2358,7 +2358,7 @@ pub async fn get_index_encodings(
     let idx = match state.engine.get_index(&name) {
         Ok(i) => i,
         Err(e) => {
-            let argos_err: argos_common::XerjError = e.into();
+            let argos_err: argos_common::ArgosError = e.into();
             return native_error(
                 argos_err,
                 Some(&request_id),
@@ -2526,7 +2526,7 @@ pub async fn enrich_index(
     let idx = match state.engine.get_index(&name) {
         Ok(i) => i,
         Err(e) => {
-            let argos_err: argos_common::XerjError = e.into();
+            let argos_err: argos_common::ArgosError = e.into();
             return native_error(
                 argos_err,
                 Some(&request_id),
@@ -2541,7 +2541,7 @@ pub async fn enrich_index(
         Some(n) => n.to_string(),
         None => {
             return native_error(
-                argos_common::XerjError::invalid_query("enrich request must include a 'name' field"),
+                argos_common::ArgosError::invalid_query("enrich request must include a 'name' field"),
                 Some(&request_id),
                 started.elapsed().as_millis() as u64,
             )
@@ -2553,7 +2553,7 @@ pub async fn enrich_index(
         Some(f) => f.to_string(),
         None => {
             return native_error(
-                argos_common::XerjError::invalid_query(
+                argos_common::ArgosError::invalid_query(
                     "enrich request must include a 'match_field' field",
                 ),
                 Some(&request_id),
@@ -2567,7 +2567,7 @@ pub async fn enrich_index(
         Some(o) => o.clone(),
         None => {
             return native_error(
-                argos_common::XerjError::invalid_query(
+                argos_common::ArgosError::invalid_query(
                     "enrich request must include a 'lookup' object",
                 ),
                 Some(&request_id),
@@ -2631,7 +2631,7 @@ pub async fn explain_plan(
     let idx = match state.engine.get_index(&name) {
         Ok(i) => i,
         Err(e) => {
-            let argos_err: argos_common::XerjError = e.into();
+            let argos_err: argos_common::ArgosError = e.into();
             return native_error(
                 argos_err,
                 Some(&request_id),
@@ -2648,7 +2648,7 @@ pub async fn explain_plan(
             Ok(v) => v,
             Err(e) => {
                 return native_error(
-                    argos_common::XerjError::invalid_query(format!("invalid JSON: {e}")),
+                    argos_common::ArgosError::invalid_query(format!("invalid JSON: {e}")),
                     Some(&request_id),
                     started.elapsed().as_millis() as u64,
                 )
@@ -2659,7 +2659,7 @@ pub async fn explain_plan(
 
     // Parse the query node.
     let search_req = match argos_query::parse_request(&body_val)
-        .map_err(|e| argos_common::XerjError::invalid_query(e.to_string()))
+        .map_err(|e| argos_common::ArgosError::invalid_query(e.to_string()))
     {
         Ok(r) => r,
         Err(e) => {
@@ -2806,7 +2806,7 @@ pub async fn put_pipeline(
     // fault, with no hint of where the body belongs. Name the endpoint that
     // accepts it instead (issue #204).
     if body.get("stages").is_none() && body.get("processors").is_some() {
-        let e = argos_common::XerjError::config(format!(
+        let e = argos_common::ArgosError::config(format!(
             "pipeline [{name}]: this body is Elasticsearch-shaped (`processors`), which \
              this endpoint does not accept — it takes argos's `stages` form. `GET \
              /_ingest/pipeline/{name}` renders every stored pipeline in Elasticsearch \
@@ -2834,12 +2834,12 @@ pub async fn put_pipeline(
         // The definition does not compile — same 500 this surface has always
         // returned, and nothing was stored.
         Ok(Some(compile_err)) => {
-            let ze = argos_common::XerjError::internal(compile_err.to_string());
+            let ze = argos_common::ArgosError::internal(compile_err.to_string());
             native_error(ze, Some(&request_id), started.elapsed().as_millis() as u64)
                 .into_response()
         }
         Err(e) => {
-            let ze = argos_common::XerjError::internal(e.to_string());
+            let ze = argos_common::ArgosError::internal(e.to_string());
             native_error(ze, Some(&request_id), started.elapsed().as_millis() as u64)
                 .into_response()
         }
@@ -2882,7 +2882,7 @@ pub async fn ingest_with_pipeline(
     {
         Ok(p) => p,
         Err(e) => {
-            let ze = argos_common::XerjError::internal(e.to_string());
+            let ze = argos_common::ArgosError::internal(e.to_string());
             return native_error(ze, Some(&request_id), started.elapsed().as_millis() as u64)
                 .into_response();
         }

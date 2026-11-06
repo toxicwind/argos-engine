@@ -31,12 +31,12 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, trace};
-use argos_common::XerjError;
+use argos_common::ArgosError;
 
 use crate::distance::{compute_distance, DistanceMetric};
 
 /// Result alias.
-pub type Result<T> = std::result::Result<T, XerjError>;
+pub type Result<T> = std::result::Result<T, ArgosError>;
 
 // ── On-disk format constants ─────────────────────────────────────────────────
 //
@@ -70,13 +70,13 @@ fn u8_to_metric(b: u8) -> Result<DistanceMetric> {
 }
 
 #[inline]
-fn io_to_xerj(e: std::io::Error) -> XerjError {
-    XerjError::storage(format!("HNSW persistence I/O: {e}"))
+fn io_to_argos(e: std::io::Error) -> ArgosError {
+    ArgosError::storage(format!("HNSW persistence I/O: {e}"))
 }
 
 #[inline]
-fn corrupt(msg: &str) -> XerjError {
-    XerjError::storage(format!("HNSW graph corrupt: {msg}"))
+fn corrupt(msg: &str) -> ArgosError {
+    ArgosError::storage(format!("HNSW graph corrupt: {msg}"))
 }
 
 /// Dot product with eight independent accumulators.
@@ -742,22 +742,22 @@ fn encode_graph_bytes(
     graph: &impl GraphStorageRead,
 ) -> Result<(Vec<u8>, usize)> {
     let mut buffer = Vec::with_capacity(1024 * 1024);
-    buffer.write_all(HNSW_MAGIC).map_err(io_to_xerj)?;
+    buffer.write_all(HNSW_MAGIC).map_err(io_to_argos)?;
     buffer
         .write_u32::<LittleEndian>(HNSW_FORMAT_VERSION)
-        .map_err(io_to_xerj)?;
+        .map_err(io_to_argos)?;
     buffer
         .write_u32::<LittleEndian>(params.m as u32)
-        .map_err(io_to_xerj)?;
+        .map_err(io_to_argos)?;
     buffer
         .write_u32::<LittleEndian>(params.ef_construction as u32)
-        .map_err(io_to_xerj)?;
+        .map_err(io_to_argos)?;
     buffer
         .write_u8(metric_to_u8(params.metric))
-        .map_err(io_to_xerj)?;
+        .map_err(io_to_argos)?;
     buffer
         .write_u32::<LittleEndian>(graph.dimension() as u32)
-        .map_err(io_to_xerj)?;
+        .map_err(io_to_argos)?;
 
     // Derive the entry header from live topology rather than trusting the
     // stored entry metadata: after an external-ID reuse the stored pair can
@@ -767,10 +767,10 @@ fn encode_graph_bytes(
     let entry_id = live_entry.map(|(slot, _)| graph.external_id(slot));
     buffer
         .write_u64::<LittleEndian>(entry_id.unwrap_or(u64::MAX))
-        .map_err(io_to_xerj)?;
+        .map_err(io_to_argos)?;
     buffer
         .write_u32::<LittleEndian>(live_entry.map_or(0, |(_, layer)| layer) as u32)
-        .map_err(io_to_xerj)?;
+        .map_err(io_to_argos)?;
 
     // Live slots only (a reused external ID orphans its old slot).
     let live: Vec<u32> = (0..graph.node_count() as u32)
@@ -778,42 +778,42 @@ fn encode_graph_bytes(
         .collect();
     buffer
         .write_u32::<LittleEndian>(live.len() as u32)
-        .map_err(io_to_xerj)?;
+        .map_err(io_to_argos)?;
     for &slot in &live {
         buffer
             .write_u64::<LittleEndian>(graph.external_id(slot))
-            .map_err(io_to_xerj)?;
+            .map_err(io_to_argos)?;
         buffer
             .write_u32::<LittleEndian>(graph.layer_count(slot).saturating_sub(1) as u32)
-            .map_err(io_to_xerj)?;
+            .map_err(io_to_argos)?;
         for &value in graph.vector(slot) {
             buffer
                 .write_f32::<LittleEndian>(value)
-                .map_err(io_to_xerj)?;
+                .map_err(io_to_argos)?;
         }
         for layer in 0..graph.layer_count(slot) {
             let neighbors = graph.neighbors(slot, layer);
             buffer
                 .write_u32::<LittleEndian>(neighbors.len() as u32)
-                .map_err(io_to_xerj)?;
+                .map_err(io_to_argos)?;
             for &neighbor in neighbors {
                 buffer
                     .write_u64::<LittleEndian>(graph.external_id(neighbor))
-                    .map_err(io_to_xerj)?;
+                    .map_err(io_to_argos)?;
             }
         }
     }
 
     buffer
         .write_u32::<LittleEndian>(graph.tombstone_count() as u32)
-        .map_err(io_to_xerj)?;
+        .map_err(io_to_argos)?;
     for tombstone in graph.tombstone_ids() {
         buffer
             .write_u64::<LittleEndian>(tombstone)
-            .map_err(io_to_xerj)?;
+            .map_err(io_to_argos)?;
     }
     let crc = crc32fast::hash(&buffer);
-    buffer.write_u32::<LittleEndian>(crc).map_err(io_to_xerj)?;
+    buffer.write_u32::<LittleEndian>(crc).map_err(io_to_argos)?;
     Ok((buffer, live.len()))
 }
 
@@ -927,7 +927,7 @@ impl HnswIndex {
 
     fn insert_at_level(&self, id: u64, vector: Vec<f32>, node_level: usize) -> Result<()> {
         if vector.len() != self.params.dim {
-            return Err(XerjError::invalid_mapping(format!(
+            return Err(ArgosError::invalid_mapping(format!(
                 "HNSW insert: vector dim {} != index dim {}",
                 vector.len(),
                 self.params.dim
@@ -1033,7 +1033,7 @@ impl HnswIndex {
         filter: &dyn Fn(u64) -> bool,
     ) -> Result<Vec<(u64, f32)>> {
         if query.len() != self.params.dim {
-            return Err(XerjError::invalid_query(format!(
+            return Err(ArgosError::invalid_query(format!(
                 "HNSW search: query dim {} != index dim {}",
                 query.len(),
                 self.params.dim
@@ -1129,7 +1129,7 @@ impl HnswIndex {
     /// complete new file (caller falls back to WAL replay when absent).
     pub fn save_to(&self, path: &Path) -> Result<()> {
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(io_to_xerj)?;
+            std::fs::create_dir_all(parent).map_err(io_to_argos)?;
         }
         let g = self.inner.read().unwrap();
         let (buf, node_count) = encode_graph_bytes(&self.params, &g.read_view())?;
@@ -1144,7 +1144,7 @@ impl HnswIndex {
         // after recovery silently degraded to permanent-stale/brute.
         // write_file_durable fsyncs the temp file, renames, then fsyncs
         // the parent directory so the rename itself survives power loss.
-        argos_common::fsio::write_file_durable(path, &buf).map_err(io_to_xerj)?;
+        argos_common::fsio::write_file_durable(path, &buf).map_err(io_to_argos)?;
         debug!(
             path = %path.display(),
             bytes = buf.len(),
@@ -1158,7 +1158,7 @@ impl HnswIndex {
     /// Returns `Err(...)` on any inconsistency so the caller can fall
     /// back to WAL replay rather than silently load a corrupt graph.
     pub fn load_from(path: &Path) -> Result<Self> {
-        let bytes = std::fs::read(path).map_err(io_to_xerj)?;
+        let bytes = std::fs::read(path).map_err(io_to_argos)?;
         if bytes.len() < HNSW_MAGIC.len() + 4 + 4 {
             return Err(corrupt("file too small"));
         }
@@ -1166,7 +1166,7 @@ impl HnswIndex {
         let payload_len = bytes.len() - 4;
         let stored_crc = (&bytes[payload_len..])
             .read_u32::<LittleEndian>()
-            .map_err(io_to_xerj)?;
+            .map_err(io_to_argos)?;
         let computed_crc = crc32fast::hash(&bytes[..payload_len]);
         if stored_crc != computed_crc {
             return Err(corrupt(&format!(
@@ -1176,26 +1176,26 @@ impl HnswIndex {
 
         let mut cur = std::io::Cursor::new(&bytes[..payload_len]);
         let mut magic = [0u8; 8];
-        cur.read_exact(&mut magic).map_err(io_to_xerj)?;
+        cur.read_exact(&mut magic).map_err(io_to_argos)?;
         if &magic != HNSW_MAGIC {
             return Err(corrupt(&format!(
                 "bad magic: expected {HNSW_MAGIC:?}, got {magic:?}"
             )));
         }
-        let format_ver = cur.read_u32::<LittleEndian>().map_err(io_to_xerj)?;
+        let format_ver = cur.read_u32::<LittleEndian>().map_err(io_to_argos)?;
         if !(1..=HNSW_FORMAT_VERSION).contains(&format_ver) {
             return Err(corrupt(&format!(
                 "unsupported format version {format_ver}, this build supports 1..={HNSW_FORMAT_VERSION}"
             )));
         }
 
-        let m = cur.read_u32::<LittleEndian>().map_err(io_to_xerj)? as usize;
-        let ef_construction = cur.read_u32::<LittleEndian>().map_err(io_to_xerj)? as usize;
-        let metric = u8_to_metric(cur.read_u8().map_err(io_to_xerj)?)?;
-        let dim = cur.read_u32::<LittleEndian>().map_err(io_to_xerj)? as usize;
-        let ep_raw = cur.read_u64::<LittleEndian>().map_err(io_to_xerj)?;
-        let entry_layer = cur.read_u32::<LittleEndian>().map_err(io_to_xerj)? as usize;
-        let num_nodes = cur.read_u32::<LittleEndian>().map_err(io_to_xerj)? as usize;
+        let m = cur.read_u32::<LittleEndian>().map_err(io_to_argos)? as usize;
+        let ef_construction = cur.read_u32::<LittleEndian>().map_err(io_to_argos)? as usize;
+        let metric = u8_to_metric(cur.read_u8().map_err(io_to_argos)?)?;
+        let dim = cur.read_u32::<LittleEndian>().map_err(io_to_argos)? as usize;
+        let ep_raw = cur.read_u64::<LittleEndian>().map_err(io_to_argos)?;
+        let entry_layer = cur.read_u32::<LittleEndian>().map_err(io_to_argos)? as usize;
+        let num_nodes = cur.read_u32::<LittleEndian>().map_err(io_to_argos)? as usize;
 
         let params = HnswParams {
             m,
@@ -1208,18 +1208,18 @@ impl HnswIndex {
         let mut g = SlabGraphStorage::new(dim, metric);
         let mut raw_neighbors: Vec<Vec<Vec<u64>>> = Vec::with_capacity(num_nodes);
         for _ in 0..num_nodes {
-            let id = cur.read_u64::<LittleEndian>().map_err(io_to_xerj)?;
-            let max_layer = cur.read_u32::<LittleEndian>().map_err(io_to_xerj)? as usize;
+            let id = cur.read_u64::<LittleEndian>().map_err(io_to_argos)?;
+            let max_layer = cur.read_u32::<LittleEndian>().map_err(io_to_argos)? as usize;
             let mut vector = vec![0f32; dim];
             for v in vector.iter_mut() {
-                *v = cur.read_f32::<LittleEndian>().map_err(io_to_xerj)?;
+                *v = cur.read_f32::<LittleEndian>().map_err(io_to_argos)?;
             }
             let mut neighbors: Vec<Vec<u64>> = Vec::with_capacity(max_layer + 1);
             for _ in 0..=max_layer {
-                let nn = cur.read_u32::<LittleEndian>().map_err(io_to_xerj)? as usize;
+                let nn = cur.read_u32::<LittleEndian>().map_err(io_to_argos)? as usize;
                 let mut layer = Vec::with_capacity(nn);
                 for _ in 0..nn {
-                    layer.push(cur.read_u64::<LittleEndian>().map_err(io_to_xerj)?);
+                    layer.push(cur.read_u64::<LittleEndian>().map_err(io_to_argos)?);
                 }
                 neighbors.push(layer);
             }
@@ -1255,9 +1255,9 @@ impl HnswIndex {
         // v2+: read trailing tombstone block. v1 files have no
         // tombstones and we treat the set as empty.
         if format_ver >= 2 {
-            let num_t = cur.read_u32::<LittleEndian>().map_err(io_to_xerj)? as usize;
+            let num_t = cur.read_u32::<LittleEndian>().map_err(io_to_argos)? as usize;
             for _ in 0..num_t {
-                let t = cur.read_u64::<LittleEndian>().map_err(io_to_xerj)?;
+                let t = cur.read_u64::<LittleEndian>().map_err(io_to_argos)?;
                 if let Some(&slot) = g.slot_of.get(&t) {
                     g.tomb[slot as usize] = true;
                 }
@@ -1725,7 +1725,7 @@ mod tests {
                 (2, vec![0.0, 0.0, 1.0, 0.0]),
             ])
             .unwrap_err();
-        assert!(matches!(err, XerjError::InvalidMapping { .. }));
+        assert!(matches!(err, ArgosError::InvalidMapping { .. }));
         assert_eq!(idx.len(), 1, "only the pre-error item was inserted");
     }
 
@@ -1757,7 +1757,7 @@ mod tests {
     fn dimension_mismatch_errors() {
         let idx = make_index(4);
         let err = idx.insert(0, vec![1.0, 0.0]).unwrap_err();
-        assert!(matches!(err, XerjError::InvalidMapping { .. }));
+        assert!(matches!(err, ArgosError::InvalidMapping { .. }));
     }
 
     #[test]

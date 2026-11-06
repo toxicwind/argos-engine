@@ -1187,7 +1187,7 @@ async fn health_recovers_once_the_target_accepts_again() {
     );
 }
 
-/// `PUT /_xerj/wal_tap` advertises "runtime config, no restart". That implied
+/// `PUT /_argos/wal_tap` advertises "runtime config, no restart". That implied
 /// a durability that did not exist: the value lived only in an in-memory
 /// `RwLock`, so a restart reverted the tap to the file config — normally
 /// `enabled = false` — while cursors froze and WAL pruning carried on.

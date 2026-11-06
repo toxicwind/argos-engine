@@ -139,7 +139,7 @@ fn run_until_exit(config_body: &str, dir: &std::path::Path, extra_args: &[&str])
     let config_path = dir.join("argos.toml");
     std::fs::write(&config_path, config_body).unwrap();
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_xerj"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_argos"))
         .arg("--config")
         .arg(&config_path)
         .args(extra_args)
@@ -280,7 +280,7 @@ data_dir = "{data}"
         )
         .unwrap();
 
-        let mut child = Command::new(env!("CARGO_BIN_EXE_xerj"))
+        let mut child = Command::new(env!("CARGO_BIN_EXE_argos"))
             .arg("--config")
             .arg(&config_path)
             .stdout(Stdio::null())
@@ -344,7 +344,7 @@ data_dir = "{data}"
     )
     .unwrap();
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_xerj"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_argos"))
         .arg("--config")
         .arg(&config_path)
         .env("ARGOS_ALLOW_INSECURE_NETWORK_BIND", "true")
@@ -399,7 +399,7 @@ data_dir = "{data}"
     )
     .unwrap();
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_xerj"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_argos"))
         .arg("--config")
         .arg(&config_path)
         .env("ARGOS_ALLOW_INSECURE_NETWORK_BIND", "maybe")
@@ -459,7 +459,7 @@ data_dir = "{data}"
     )
     .unwrap();
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_xerj"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_argos"))
         .arg("--config")
         .arg(&config_path)
         .arg("--bind")
@@ -542,7 +542,7 @@ auth_secret = "0123456789abcdef0123456789abcdef"
     )
     .unwrap();
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_xerj"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_argos"))
         .arg("--config")
         .arg(&config_path)
         .env("ARGOS_LOG", "info")
@@ -684,7 +684,7 @@ data_dir = "{data}"
     )
     .unwrap();
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_xerj"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_argos"))
         .arg("--config")
         .arg(&config_path)
         .arg("--bind")

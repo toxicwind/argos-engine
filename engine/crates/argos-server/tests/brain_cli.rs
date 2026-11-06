@@ -86,7 +86,7 @@ impl Drop for ServerGuard {
 }
 
 fn run_brain(args: &[&str], home: &Path, browser: &Path) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_xerj"))
+    Command::new(env!("CARGO_BIN_EXE_argos"))
         .arg("brain")
         .args(args)
         // Isolate ~/.argos (autoindex resume journal) into the test root.
@@ -319,7 +319,7 @@ fn brain_refuses_an_empty_folder_before_touching_a_server() {
 
 #[test]
 fn brain_help_is_stranger_readable() {
-    let out = Command::new(env!("CARGO_BIN_EXE_xerj"))
+    let out = Command::new(env!("CARGO_BIN_EXE_argos"))
         .args(["brain", "--help"])
         .output()
         .unwrap();

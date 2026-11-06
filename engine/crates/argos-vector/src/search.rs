@@ -3,13 +3,13 @@
 //! [`VectorSearcher`] wraps an [`HnswIndex`] and handles query normalization,
 //! filtered search, and result formatting.
 
-use argos_common::XerjError;
+use argos_common::ArgosError;
 
 use crate::distance::DistanceMetric;
 use crate::hnsw::HnswIndex;
 
 /// Result alias.
-pub type Result<T> = std::result::Result<T, XerjError>;
+pub type Result<T> = std::result::Result<T, ArgosError>;
 
 /// A single search result.
 #[derive(Debug, Clone, PartialEq)]

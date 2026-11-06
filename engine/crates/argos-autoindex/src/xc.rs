@@ -750,7 +750,7 @@ fn dir_stats(target: &Path) -> (String, u64, u64) {
 }
 
 /// What to do with a local source's root `.argosignore` once the clone exists.
-enum XerjignoreCarry {
+enum ArgosignoreCarry {
     /// Unpinned `corpus add <name> <path>`: the working tree is what the
     /// caller pointed at. Copy when the clone's bytes differ.
     Copy,
@@ -760,7 +760,7 @@ enum XerjignoreCarry {
 
 /// Ignore files are a few lines. Above this, refuse rather than pour a
 /// symlink-to-a-dataset into the clone.
-const XERJIGNORE_CARRY_MAX_BYTES: u64 = 1024 * 1024;
+const ARGOSIGNORE_CARRY_MAX_BYTES: u64 = 1024 * 1024;
 
 /// Filesystem root of a local checkout named by `url`, if `url` is one.
 ///
@@ -799,11 +799,11 @@ fn file_url_path(rest: &str) -> Option<PathBuf> {
 /// differ. For a pin, leave the recorded tree alone and say the file was not
 /// copied. Remote URLs and a missing file are silent. Nested `.argosignore`
 /// files are not carried.
-fn settle_local_xerjignore(url: &str, target: &Path, repo_name: &str, mode: XerjignoreCarry) {
+fn settle_local_argosignore(url: &str, target: &Path, repo_name: &str, mode: ArgosignoreCarry) {
     let Some(source) = local_checkout_root(url) else {
         return;
     };
-    let src = source.join(crate::ignore_rules::XERJIGNORE);
+    let src = source.join(crate::ignore_rules::ARGOSIGNORE);
     let src_meta = match std::fs::metadata(&src) {
         Ok(m) => m,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return,
@@ -822,9 +822,9 @@ fn settle_local_xerjignore(url: &str, target: &Path, repo_name: &str, mode: Xerj
         );
         return;
     }
-    if src_meta.len() > XERJIGNORE_CARRY_MAX_BYTES {
+    if src_meta.len() > ARGOSIGNORE_CARRY_MAX_BYTES {
         eprintln!(
-            "  [ignore] {repo_name}: {} is {} bytes, over the {XERJIGNORE_CARRY_MAX_BYTES} byte carry limit, and was NOT copied into the clone, so indexing will not see those rules",
+            "  [ignore] {repo_name}: {} is {} bytes, over the {ARGOSIGNORE_CARRY_MAX_BYTES} byte carry limit, and was NOT copied into the clone, so indexing will not see those rules",
             src.display(),
             src_meta.len()
         );
@@ -840,7 +840,7 @@ fn settle_local_xerjignore(url: &str, target: &Path, repo_name: &str, mode: Xerj
             return;
         }
     };
-    let dest = target.join(crate::ignore_rules::XERJIGNORE);
+    let dest = target.join(crate::ignore_rules::ARGOSIGNORE);
     let same = match std::fs::metadata(&dest) {
         Ok(m) if m.is_file() && m.len() == src_bytes.len() as u64 => {
             std::fs::read(&dest).ok().as_deref() == Some(src_bytes.as_slice())
@@ -851,7 +851,7 @@ fn settle_local_xerjignore(url: &str, target: &Path, repo_name: &str, mode: Xerj
         return;
     }
     match mode {
-        XerjignoreCarry::Copy => {
+        ArgosignoreCarry::Copy => {
             // A committed symlink must not be written through: that would
             // change the link target instead of the clone's ignore file.
             if std::fs::symlink_metadata(&dest)
@@ -877,7 +877,7 @@ fn settle_local_xerjignore(url: &str, target: &Path, repo_name: &str, mode: Xerj
                 ),
             }
         }
-        XerjignoreCarry::WarnPinned => eprintln!(
+        ArgosignoreCarry::WarnPinned => eprintln!(
             "  [ignore] {repo_name}: source .argosignore at {} differs from the pinned checkout and was NOT copied (a pinned rebuild stays at the recorded sha)",
             src.display()
         ),
@@ -1201,14 +1201,14 @@ fn run_corpus_add(args: &[String]) -> i32 {
         // After the checkout exists and before the manifest counts files.
         // A pin warns instead of copying; an unpinned local path copies.
         let carry_ignore = |checkout: &Path| {
-            settle_local_xerjignore(
+            settle_local_argosignore(
                 &url,
                 checkout,
                 &repo_name,
                 if sha.is_empty() {
-                    XerjignoreCarry::Copy
+                    ArgosignoreCarry::Copy
                 } else {
-                    XerjignoreCarry::WarnPinned
+                    ArgosignoreCarry::WarnPinned
                 },
             );
         };
@@ -5495,7 +5495,7 @@ precedence = ["a", "b"]
     /// built-in rules alone. Re-adding refreshes it; `file://` is the same
     /// local checkout; a source with no ignore file does not gain one.
     #[test]
-    fn corpus_add_copies_an_untracked_root_xerjignore_from_a_local_path() {
+    fn corpus_add_copies_an_untracked_root_argosignore_from_a_local_path() {
         let home = tempfile::tempdir().unwrap();
         let _h = code_home(home.path());
         let origin = home.path().join("widget");
@@ -5574,7 +5574,7 @@ precedence = ["a", "b"]
     /// `git clone` checks out the committed bytes. A pinned `--from` rebuild
     /// must not copy the working tree over the recorded sha.
     #[test]
-    fn corpus_add_copies_uncommitted_xerjignore_edits_but_a_pin_does_not() {
+    fn corpus_add_copies_uncommitted_argosignore_edits_but_a_pin_does_not() {
         let home = tempfile::tempdir().unwrap();
         let _h = code_home(home.path());
 

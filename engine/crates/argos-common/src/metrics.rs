@@ -25,7 +25,7 @@ use prometheus::{
     IntCounterVec, IntGauge, Opts, Registry,
 };
 
-use crate::error::XerjError;
+use crate::error::ArgosError;
 
 // ═════════════════════════════════════════════════════════════════════════════
 // Process-global metrics handle
@@ -138,7 +138,7 @@ pub struct Metrics {
 
 impl Metrics {
     /// Create a new `Metrics` instance with its own isolated registry.
-    pub fn new() -> Result<Self, XerjError> {
+    pub fn new() -> Result<Self, ArgosError> {
         let registry = Registry::new();
         Self::with_registry(registry)
     }
@@ -147,31 +147,31 @@ impl Metrics {
     ///
     /// Use this when you need to merge argos metrics into an existing
     /// Prometheus registry (e.g., alongside application-level metrics).
-    pub fn with_registry(registry: Registry) -> Result<Self, XerjError> {
+    pub fn with_registry(registry: Registry) -> Result<Self, ArgosError> {
         // ── Counters ──────────────────────────────────────────────────────────
         let docs_indexed = IntCounter::with_opts(Opts::new(
             "argos_docs_indexed_total",
             "Total number of documents successfully indexed",
         ))
-        .map_err(|e| XerjError::internal(format!("metrics: {e}")))?;
+        .map_err(|e| ArgosError::internal(format!("metrics: {e}")))?;
 
         let queries_executed = IntCounter::with_opts(Opts::new(
             "argos_queries_executed_total",
             "Total number of search queries executed",
         ))
-        .map_err(|e| XerjError::internal(format!("metrics: {e}")))?;
+        .map_err(|e| ArgosError::internal(format!("metrics: {e}")))?;
 
         let bytes_written = IntCounter::with_opts(Opts::new(
             "argos_bytes_written_total",
             "Total on-disk bytes written to segment (.seg) files by flush and merge",
         ))
-        .map_err(|e| XerjError::internal(format!("metrics: {e}")))?;
+        .map_err(|e| ArgosError::internal(format!("metrics: {e}")))?;
 
         let bytes_read = IntCounter::with_opts(Opts::new(
             "argos_bytes_read_total",
             "Total on-disk bytes read from segment (.seg) files at open-time validation (reader-cache misses only)",
         ))
-        .map_err(|e| XerjError::internal(format!("metrics: {e}")))?;
+        .map_err(|e| ArgosError::internal(format!("metrics: {e}")))?;
 
         let docs_indexed_by_index = IntCounterVec::new(
             Opts::new(
@@ -180,7 +180,7 @@ impl Metrics {
             ),
             &["index"],
         )
-        .map_err(|e| XerjError::internal(format!("metrics: {e}")))?;
+        .map_err(|e| ArgosError::internal(format!("metrics: {e}")))?;
 
         let queries_by_index = IntCounterVec::new(
             Opts::new(
@@ -189,7 +189,7 @@ impl Metrics {
             ),
             &["index"],
         )
-        .map_err(|e| XerjError::internal(format!("metrics: {e}")))?;
+        .map_err(|e| ArgosError::internal(format!("metrics: {e}")))?;
 
         // ── Histograms ────────────────────────────────────────────────────────
         // Latency buckets: 500µs → 30s (15 buckets)
@@ -200,7 +200,7 @@ impl Metrics {
             HistogramOpts::new("argos_query_latency_seconds", "End-to-end query latency")
                 .buckets(latency_buckets.clone()),
         )
-        .map_err(|e| XerjError::internal(format!("metrics: {e}")))?;
+        .map_err(|e| ArgosError::internal(format!("metrics: {e}")))?;
 
         let index_latency = Histogram::with_opts(
             HistogramOpts::new(
@@ -209,7 +209,7 @@ impl Metrics {
             )
             .buckets(latency_buckets.clone()),
         )
-        .map_err(|e| XerjError::internal(format!("metrics: {e}")))?;
+        .map_err(|e| ArgosError::internal(format!("metrics: {e}")))?;
 
         // Flush/merge duration buckets: 10ms → ~5min
         let duration_buckets =
@@ -222,7 +222,7 @@ impl Metrics {
             )
             .buckets(duration_buckets.clone()),
         )
-        .map_err(|e| XerjError::internal(format!("metrics: {e}")))?;
+        .map_err(|e| ArgosError::internal(format!("metrics: {e}")))?;
 
         let merge_duration = Histogram::with_opts(
             HistogramOpts::new(
@@ -231,13 +231,13 @@ impl Metrics {
             )
             .buckets(duration_buckets),
         )
-        .map_err(|e| XerjError::internal(format!("metrics: {e}")))?;
+        .map_err(|e| ArgosError::internal(format!("metrics: {e}")))?;
 
         let wal_write_latency = Histogram::with_opts(
             HistogramOpts::new("argos_wal_write_latency_seconds", "WAL write latency")
                 .buckets(latency_buckets),
         )
-        .map_err(|e| XerjError::internal(format!("metrics: {e}")))?;
+        .map_err(|e| ArgosError::internal(format!("metrics: {e}")))?;
 
         let query_latency_by_type = HistogramVec::new(
             histogram_opts!(
@@ -247,50 +247,50 @@ impl Metrics {
             ),
             &["query_type"],
         )
-        .map_err(|e| XerjError::internal(format!("metrics: {e}")))?;
+        .map_err(|e| ArgosError::internal(format!("metrics: {e}")))?;
 
         // ── Gauges ────────────────────────────────────────────────────────────
         let segment_count = IntGauge::with_opts(Opts::new(
             "argos_segment_count",
             "Number of open segments across all indices",
         ))
-        .map_err(|e| XerjError::internal(format!("metrics: {e}")))?;
+        .map_err(|e| ArgosError::internal(format!("metrics: {e}")))?;
 
         let doc_count = IntGauge::with_opts(Opts::new(
             "argos_doc_count",
             "Total live documents across all indices",
         ))
-        .map_err(|e| XerjError::internal(format!("metrics: {e}")))?;
+        .map_err(|e| ArgosError::internal(format!("metrics: {e}")))?;
 
         let memory_usage = IntGauge::with_opts(Opts::new(
             "argos_memory_usage_bytes",
             "Approximate engine memory usage in bytes",
         ))
-        .map_err(|e| XerjError::internal(format!("metrics: {e}")))?;
+        .map_err(|e| ArgosError::internal(format!("metrics: {e}")))?;
 
         let active_searches = IntGauge::with_opts(Opts::new(
             "argos_active_searches",
             "Number of searches currently in flight",
         ))
-        .map_err(|e| XerjError::internal(format!("metrics: {e}")))?;
+        .map_err(|e| ArgosError::internal(format!("metrics: {e}")))?;
 
         let wal_size_bytes = IntGauge::with_opts(Opts::new(
             "argos_wal_size_bytes",
             "Current WAL size on disk in bytes",
         ))
-        .map_err(|e| XerjError::internal(format!("metrics: {e}")))?;
+        .map_err(|e| ArgosError::internal(format!("metrics: {e}")))?;
 
         let query_cache_hits = IntGauge::with_opts(Opts::new(
             "argos_query_cache_hits",
             "Cumulative internal query-result cache hits across all indices",
         ))
-        .map_err(|e| XerjError::internal(format!("metrics: {e}")))?;
+        .map_err(|e| ArgosError::internal(format!("metrics: {e}")))?;
 
         let query_cache_misses = IntGauge::with_opts(Opts::new(
             "argos_query_cache_misses",
             "Cumulative internal query-result cache misses across all indices",
         ))
-        .map_err(|e| XerjError::internal(format!("metrics: {e}")))?;
+        .map_err(|e| ArgosError::internal(format!("metrics: {e}")))?;
 
         let rerank_requests = IntCounterVec::new(
             Opts::new(
@@ -300,13 +300,13 @@ impl Metrics {
             ),
             &["outcome"],
         )
-        .map_err(|e| XerjError::internal(format!("metrics: {e}")))?;
+        .map_err(|e| ArgosError::internal(format!("metrics: {e}")))?;
 
         let rerank_documents_judged = IntCounter::with_opts(Opts::new(
             "argos_rerank_documents_judged_total",
             "Documents the rerank provider returned a verdict for",
         ))
-        .map_err(|e| XerjError::internal(format!("metrics: {e}")))?;
+        .map_err(|e| ArgosError::internal(format!("metrics: {e}")))?;
 
         let rerank_provider_tokens = IntCounterVec::new(
             Opts::new(
@@ -315,14 +315,14 @@ impl Metrics {
             ),
             &["kind"],
         )
-        .map_err(|e| XerjError::internal(format!("metrics: {e}")))?;
+        .map_err(|e| ArgosError::internal(format!("metrics: {e}")))?;
 
         // ── Register everything ───────────────────────────────────────────────
         macro_rules! reg {
             ($metric:expr) => {
                 registry
                     .register(Box::new($metric.clone()))
-                    .map_err(|e| XerjError::internal(format!("metrics register: {e}")))?;
+                    .map_err(|e| ArgosError::internal(format!("metrics register: {e}")))?;
             };
         }
 
@@ -393,14 +393,14 @@ impl Metrics {
     /// Encode all metrics to the Prometheus text exposition format.
     ///
     /// The returned string can be served directly from `/metrics`.
-    pub fn gather_text(&self) -> Result<String, XerjError> {
+    pub fn gather_text(&self) -> Result<String, ArgosError> {
         use prometheus::Encoder;
         let encoder = prometheus::TextEncoder::new();
         let mut buf = Vec::new();
         encoder
             .encode(&self.gather(), &mut buf)
-            .map_err(|e| XerjError::internal(format!("metrics encode: {e}")))?;
-        String::from_utf8(buf).map_err(|e| XerjError::internal(format!("metrics utf8: {e}")))
+            .map_err(|e| ArgosError::internal(format!("metrics encode: {e}")))?;
+        String::from_utf8(buf).map_err(|e| ArgosError::internal(format!("metrics utf8: {e}")))
     }
 
     // ── Ergonomic recording helpers ───────────────────────────────────────────

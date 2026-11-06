@@ -49,7 +49,7 @@
 //! count at "one per indexed directory" instead of "one per directory on disk".
 
 use crate::cli::IndexCfg;
-use crate::ignore_rules::{is_hidden_name, IgnoreOptions, IgnoreStack, GITIGNORE, XERJIGNORE};
+use crate::ignore_rules::{is_hidden_name, IgnoreOptions, IgnoreStack, GITIGNORE, ARGOSIGNORE};
 use crate::progress::{self, Progress};
 use crate::walk::FileEntry;
 use anyhow::{Context, Result};
@@ -220,7 +220,7 @@ impl ChangeSet {
         // editing one invalidates that subtree, not one file.
         let ignore_file = path
             .file_name()
-            .is_some_and(|name| name == GITIGNORE || name == XERJIGNORE);
+            .is_some_and(|name| name == GITIGNORE || name == ARGOSIGNORE);
         match std::fs::symlink_metadata(path) {
             Ok(md) if md.is_dir() => self.dirs.push(path.to_path_buf()),
             Ok(_) if ignore_file => {
@@ -286,7 +286,7 @@ fn is_interesting(root: &Path, path: &Path) -> bool {
         }
         let last = components.peek().is_none();
         let ignore_file =
-            last && (component.as_os_str() == GITIGNORE || component.as_os_str() == XERJIGNORE);
+            last && (component.as_os_str() == GITIGNORE || component.as_os_str() == ARGOSIGNORE);
         if !ignore_file {
             return false;
         }

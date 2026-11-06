@@ -40,7 +40,7 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 use crate::calibration::CalibrationMethod;
-use crate::error::XerjError;
+use crate::error::ArgosError;
 
 // ═════════════════════════════════════════════════════════════════════════════
 // Top-level Config
@@ -135,10 +135,10 @@ impl Config {
     ///
     /// Missing keys fall back to their `Default` values, so a minimal config
     /// only needs to override what differs from the defaults.
-    pub fn load(path: impl AsRef<Path>) -> Result<Self, XerjError> {
+    pub fn load(path: impl AsRef<Path>) -> Result<Self, ArgosError> {
         let path = path.as_ref();
         let raw = std::fs::read_to_string(path).map_err(|e| {
-            XerjError::config(format!("cannot read config file {}: {}", path.display(), e))
+            ArgosError::config(format!("cannot read config file {}: {}", path.display(), e))
         })?;
 
         let config: Config = toml::from_str(&raw)?;
@@ -151,7 +151,7 @@ impl Config {
     /// Named `from_toml_str` rather than `from_str` to avoid shadowing the
     /// `std::str::FromStr::from_str` convention (clippy::should_implement_trait):
     /// this parses TOML specifically and also runs cross-field validation.
-    pub fn from_toml_str(s: &str) -> Result<Self, XerjError> {
+    pub fn from_toml_str(s: &str) -> Result<Self, ArgosError> {
         let config: Config = toml::from_str(s)?;
         config.validate()?;
         Ok(config)
@@ -161,7 +161,7 @@ impl Config {
     ///
     /// Individual field validation (range checks, enum values) is done via
     /// serde; this method handles rules that span multiple fields.
-    pub fn validate(&self) -> Result<(), XerjError> {
+    pub fn validate(&self) -> Result<(), ArgosError> {
         // Server ports must be unique
         let ports = [
             self.server.rest_port,
@@ -170,7 +170,7 @@ impl Config {
         ];
         let unique: std::collections::HashSet<_> = ports.iter().collect();
         if unique.len() != ports.len() {
-            return Err(XerjError::config(
+            return Err(ArgosError::config(
                 "rest_port, grpc_port, and es_compat_port must all be distinct",
             ));
         }
@@ -180,17 +180,17 @@ impl Config {
         // leave the operator believing forwarding headers are honoured when
         // they are not — or, worse, the reverse.)
         crate::net::TrustedProxies::parse(&self.server.trusted_proxies)
-            .map_err(|why| XerjError::config(format!("server.trusted_proxies: {why}")))?;
+            .map_err(|why| ArgosError::config(format!("server.trusted_proxies: {why}")))?;
 
         // TLS: if enabled, paths must be supplied
         if self.tls.enabled {
             if self.tls.cert_path.is_empty() {
-                return Err(XerjError::config(
+                return Err(ArgosError::config(
                     "tls.cert_path is required when tls.enabled = true",
                 ));
             }
             if self.tls.key_path.is_empty() {
-                return Err(XerjError::config(
+                return Err(ArgosError::config(
                     "tls.key_path is required when tls.enabled = true",
                 ));
             }
@@ -198,26 +198,26 @@ impl Config {
 
         // Storage: WAL batch interval sanity (documented range: 1..=10000).
         if self.storage.wal_batch_ms == 0 {
-            return Err(XerjError::config("storage.wal_batch_ms must be > 0"));
+            return Err(ArgosError::config("storage.wal_batch_ms must be > 0"));
         }
         if self.storage.wal_batch_ms > 10_000 {
-            return Err(XerjError::config(
+            return Err(ArgosError::config(
                 "storage.wal_batch_ms must be <= 10000 (10 s)",
             ));
         }
 
         // Merge: min_segments must be >= 2
         if self.merge.min_segments < 2 {
-            return Err(XerjError::config("merge.min_segments must be >= 2"));
+            return Err(ArgosError::config("merge.min_segments must be >= 2"));
         }
 
         // WAL tap: the target URL is a credential boundary, not just a URL.
         // Refusing it at boot is the only way a `user:pass@host` in the config
         // file never reaches the log line or the two endpoints that echo it.
         if let Err(reason) = WalTapConfig::check_target_url(&self.wal_tap.target_url) {
-            return Err(XerjError::config(reason));
+            return Err(ArgosError::config(reason));
         }
-        // …and the numeric knobs, with the same bounds `PUT /_xerj/wal_tap`
+        // …and the numeric knobs, with the same bounds `PUT /_argos/wal_tap`
         // enforces. Without this the file was the way *around* the API's
         // validation: `PUT {"min_retained_generations": 100}` is a `400`
         // because the knob costs `n × storage.wal_max_size_mb` per WAL shard
@@ -230,20 +230,20 @@ impl Config {
         // out-of-range value is a typo the operator wants to hear about now,
         // at boot, not as a disk-full page later.
         if let Err(reason) = self.wal_tap.check_limits() {
-            return Err(XerjError::config(reason));
+            return Err(ArgosError::config(reason));
         }
 
         // Rerank: the endpoint is where document text gets POSTed, and it is
-        // echoed by `GET /_xerj/rerank`. Same two rules as the WAL tap target.
+        // echoed by `GET /_argos/rerank`. Same two rules as the WAL tap target.
         if let Err(reason) = RerankProviderConfig::check_endpoint(&self.rerank.endpoint) {
-            return Err(XerjError::config(reason));
+            return Err(ArgosError::config(reason));
         }
 
         // Hub: a public node validates every corpus name against the
         // catalogue, so a public node with no catalogue answers 404 to
         // everything while appearing to be up. Refuse that at boot.
         if self.hub.public && self.hub.catalogue_path.trim().is_empty() {
-            return Err(XerjError::config(
+            return Err(ArgosError::config(
                 "hub.public = true requires hub.catalogue_path: the public routes validate \
                  every corpus name against the catalogue, and with none every request \
                  would be a 404",
@@ -256,7 +256,7 @@ impl Config {
         // value is a typo the operator wants to hear about now, and the check
         // must not start passing quietly if the knob is ever wired.
         if !CompressionConfig::BLOCK_SIZE_DOCS_RANGE.contains(&self.compression.block_size_docs) {
-            return Err(XerjError::config(format!(
+            return Err(ArgosError::config(format!(
                 "compression.block_size_docs must be in {}..={}, got {}",
                 CompressionConfig::BLOCK_SIZE_DOCS_RANGE.start(),
                 CompressionConfig::BLOCK_SIZE_DOCS_RANGE.end(),
@@ -266,40 +266,40 @@ impl Config {
 
         // Vector: hnsw_ef_construction >= hnsw_m
         if self.vector.hnsw_ef_construction < self.vector.hnsw_m {
-            return Err(XerjError::config(
+            return Err(ArgosError::config(
                 "vector.hnsw_ef_construction must be >= vector.hnsw_m",
             ));
         }
 
         // Vector: max_dimensions must be power-of-two-friendly and > 0
         if self.vector.max_dimensions == 0 {
-            return Err(XerjError::config("vector.max_dimensions must be > 0"));
+            return Err(ArgosError::config("vector.max_dimensions must be > 0"));
         }
 
         // A zero HTTP timeout fails every embedding request before it is sent
         // (the `wal_tap.request_timeout_secs` rule).
         if self.embedding.timeout_ms == 0 {
-            return Err(XerjError::config("embedding.timeout_ms must be at least 1"));
+            return Err(ArgosError::config("embedding.timeout_ms must be at least 1"));
         }
 
         if !(1..=i32::MAX as usize).contains(&self.limits.max_result_window) {
-            return Err(XerjError::config(
+            return Err(ArgosError::config(
                 "limits.max_result_window must be in 1..=2147483647",
             ));
         }
 
         if !(1..=4096).contains(&self.embedding.onnx_scheduling_window) {
-            return Err(XerjError::config(
+            return Err(ArgosError::config(
                 "embedding.onnx_scheduling_window must be in 1..=4096",
             ));
         }
         if !(1..=2).contains(&self.embedding.onnx_session_pool_size) {
-            return Err(XerjError::config(
+            return Err(ArgosError::config(
                 "embedding.onnx_session_pool_size must be in 1..=2",
             ));
         }
         if !(1..=64).contains(&self.embedding.neural_window_concurrency) {
-            return Err(XerjError::config(
+            return Err(ArgosError::config(
                 "embedding.neural_window_concurrency must be in 1..=64",
             ));
         }
@@ -332,7 +332,7 @@ impl Config {
         if self.storage.backend == StorageBackendType::S3
             && self.storage.s3_bucket.trim().is_empty()
         {
-            return Err(XerjError::config(
+            return Err(ArgosError::config(
                 "storage.backend = \"s3\" requires storage.s3_bucket to name an existing \
                  bucket — ARGOS never creates one, so there is no default to fall back to. \
                  The single-writer contract and the remaining limits are in \
@@ -347,7 +347,7 @@ impl Config {
         // policy for its read amplification — the same silent substitution the
         // `storage.backend` guard above exists to prevent (#207).
         if self.merge.strategy != MergeStrategy::SizeTiered {
-            return Err(XerjError::config(
+            return Err(ArgosError::config(
                 "merge.strategy: the log_structured merge policy is not implemented in this \
                  build; only \"size_tiered\" is supported",
             ));
@@ -364,7 +364,7 @@ impl Config {
         // store full-precision vectors while claiming a 32× saving — it stays
         // rejected until a BinaryQuantizer lands.
         if self.vector.default_quantization == VectorQuantization::Binary {
-            return Err(XerjError::config(
+            return Err(ArgosError::config(
                 "vector.default_quantization: binary (1-bit) quantization is not implemented in \
                  this build; only \"none\" and \"scalar8\" are supported",
             ));
@@ -372,7 +372,7 @@ impl Config {
 
         // Limits: concurrency must be > 0
         if self.limits.max_concurrent_searches == 0 {
-            return Err(XerjError::config(
+            return Err(ArgosError::config(
                 "limits.max_concurrent_searches must be > 0",
             ));
         }
@@ -383,7 +383,7 @@ impl Config {
         // refuses to boot instead of silently mis-weighting the one document
         // class the operator marked as authoritative.
         if !self.decisions.human_weight.is_finite() || self.decisions.human_weight <= 0.0 {
-            return Err(XerjError::config(format!(
+            return Err(ArgosError::config(format!(
                 "decisions.human_weight must be a positive number (got {}); it multiplies the \
                  vote weight of history documents carrying human: true, and 1.0 disables the \
                  boost",
@@ -396,7 +396,7 @@ impl Config {
         if !self.decisions.escalate_below.is_finite()
             || !(0.0..=1.0).contains(&self.decisions.escalate_below)
         {
-            return Err(XerjError::config(format!(
+            return Err(ArgosError::config(format!(
                 "decisions.escalate_below must be in 0.0..=1.0 (got {}); it is the winning \
                  vote-share floor below which tier 1 escalates to the local decision tier, and \
                  0.0 disables confidence escalation",
@@ -425,7 +425,7 @@ impl Config {
             ];
             let collision = listeners.iter().find(|(_, p)| *p == cluster_port);
             if let Some((name, _)) = collision {
-                return Err(XerjError::config(format!(
+                return Err(ArgosError::config(format!(
                     "cluster.port ({cluster_port}) collides with server.{name} — the cluster \
                      transport would fail to bind and the node would silently degrade to \
                      single-node mode (issue #1171)"
@@ -436,7 +436,7 @@ impl Config {
         // Logging: format must be one of the two supported line formats.
         let fmt = self.logging.format.as_str();
         if !fmt.eq_ignore_ascii_case("text") && !fmt.eq_ignore_ascii_case("json") {
-            return Err(XerjError::config(format!(
+            return Err(ArgosError::config(format!(
                 "logging.format must be \"text\" or \"json\" (got {fmt:?})"
             )));
         }
@@ -2118,15 +2118,15 @@ impl EngineConfig {
     /// silently clamped typo is the bug class in #204.
     pub const MAX_WORKERS: usize = 4096;
 
-    pub fn validate(&self) -> Result<(), crate::XerjError> {
+    pub fn validate(&self) -> Result<(), crate::ArgosError> {
         if self.ingest_shards == 0 || !self.ingest_shards.is_power_of_two() {
-            return Err(crate::XerjError::config(format!(
+            return Err(crate::ArgosError::config(format!(
                 "engine.ingest_shards must be a power of 2, got {}",
                 self.ingest_shards
             )));
         }
         if self.ingest_shards > 256 {
-            return Err(crate::XerjError::config(format!(
+            return Err(crate::ArgosError::config(format!(
                 "engine.ingest_shards max is 256, got {}",
                 self.ingest_shards
             )));
@@ -2140,7 +2140,7 @@ impl EngineConfig {
             ("engine.search_workers", self.search_workers),
         ] {
             if value == 0 || value > Self::MAX_WORKERS {
-                return Err(crate::XerjError::config(format!(
+                return Err(crate::ArgosError::config(format!(
                     "{name} must be in the range 1..={}, got {value}",
                     Self::MAX_WORKERS
                 )));
@@ -2149,21 +2149,21 @@ impl EngineConfig {
         // A zero deadline would fail every flush; a missing deadline is the
         // #1635 hang. Refuse both rather than clamping.
         if !(1..=Self::MAX_FLUSH_TIMEOUT_SECS).contains(&self.flush_admit_timeout_secs) {
-            return Err(crate::XerjError::config(format!(
+            return Err(crate::ArgosError::config(format!(
                 "engine.flush_admit_timeout_secs must be from 1 to {} seconds, got {}",
                 Self::MAX_FLUSH_TIMEOUT_SECS,
                 self.flush_admit_timeout_secs
             )));
         }
         if !(1..=Self::MAX_FLUSH_TIMEOUT_SECS).contains(&self.flush_timeout_secs) {
-            return Err(crate::XerjError::config(format!(
+            return Err(crate::ArgosError::config(format!(
                 "engine.flush_timeout_secs must be from 1 to {} seconds, got {}",
                 Self::MAX_FLUSH_TIMEOUT_SECS,
                 self.flush_timeout_secs
             )));
         }
         if self.flush_timeout_secs < self.flush_admit_timeout_secs {
-            return Err(crate::XerjError::config(format!(
+            return Err(crate::ArgosError::config(format!(
                 "engine.flush_timeout_secs ({}) must be at least \
                  engine.flush_admit_timeout_secs ({}) so a flush can finish \
                  waiting for admission",
@@ -2273,12 +2273,12 @@ impl ClusterConfig {
     }
 
     /// Fail-closed validation: cluster mode requires a usable shared secret.
-    pub fn validate(&self) -> Result<(), crate::XerjError> {
+    pub fn validate(&self) -> Result<(), crate::ArgosError> {
         if !self.enabled {
             return Ok(());
         }
         match self.effective_auth_secret() {
-            None => Err(crate::XerjError::config(format!(
+            None => Err(crate::ArgosError::config(format!(
                 "cluster.enabled = true requires a shared secret: set cluster.auth_secret \
                  or the {} environment variable. Refusing to start an unauthenticated \
                  cluster transport — anyone able to reach cluster.port could otherwise \
@@ -2286,7 +2286,7 @@ impl ClusterConfig {
                 Self::AUTH_SECRET_ENV
             ))),
             Some(s) if s.chars().count() < Self::MIN_AUTH_SECRET_LEN => {
-                Err(crate::XerjError::config(format!(
+                Err(crate::ArgosError::config(format!(
                     "cluster auth secret is too short ({} chars, minimum {}); \
                      generate one with `openssl rand -hex 32`",
                     s.chars().count(),
@@ -2308,20 +2308,20 @@ impl ClusterConfig {
     /// ~200 ms, and the only diagnostic lands in the *rejecting* node's
     /// log (`unknown peer: …`), never its own. Refusing at config load
     /// turns that silent runtime churn into a boot-time error.
-    fn validate_peers(&self) -> Result<(), crate::XerjError> {
+    fn validate_peers(&self) -> Result<(), crate::ArgosError> {
         for peer in &self.peers {
             match peer.split_once('=') {
                 Some((id, addr)) => {
                     let addr = addr.trim();
                     if let Err(e) = addr.parse::<std::net::SocketAddr>() {
-                        return Err(crate::XerjError::config(format!(
+                        return Err(crate::ArgosError::config(format!(
                             "cluster.peers entry {peer:?} has an unparseable address ({e}); \
                              expected \"<host:port>=<host:port>\" with the same address on both \
                              sides of the '='"
                         )));
                     }
                     if id.trim() != addr {
-                        return Err(crate::XerjError::config(format!(
+                        return Err(crate::ArgosError::config(format!(
                             "cluster.peers entry {peer:?}: the label must equal the address. \
                              Node ids in the cluster are socket addresses and replies are \
                              routed by looking the sender's id up in the peer list, so a label \
@@ -2332,7 +2332,7 @@ impl ClusterConfig {
                     }
                 }
                 None => {
-                    return Err(crate::XerjError::config(format!(
+                    return Err(crate::ArgosError::config(format!(
                         "cluster.peers entry {peer:?} is malformed: expected \
                          \"<host:port>=<host:port>\" (the label must equal the address)"
                     )))
@@ -2429,13 +2429,13 @@ impl Default for LifecycleConfig {
 ///   soon as their entries are durable in a segment, whether or not the tap
 ///   has shipped them — coupling the two would let a slow remote fill the
 ///   local disk. A tap that falls that far behind loses entries and *says
-///   so*: `gaps` in `GET /_xerj/wal_tap/_stats`, plus a warning per gap.
+///   so*: `gaps` in `GET /_argos/wal_tap/_stats`, plus a warning per gap.
 ///   `min_retained_generations` buys a **bounded** amount of slack; it is a
 ///   floor, not a lease, so a stalled target still cannot fill the disk.
 /// - **System indices are never shipped**, whatever the allowlist says.
-/// - **Runtime edits are durable.** `PUT /_xerj/wal_tap` persists the patched
+/// - **Runtime edits are durable.** `PUT /_argos/wal_tap` persists the patched
 ///   configuration next to the cursors and re-applies it over the file
-///   config on the next boot (`DELETE /_xerj/wal_tap` drops the overlay and
+///   config on the next boot (`DELETE /_argos/wal_tap` drops the overlay and
 ///   reverts to this file). Otherwise a restart would silently revert to
 ///   `enabled = false` while the cursors froze and WAL pruning continued.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2483,7 +2483,7 @@ pub struct WalTapConfig {
     /// a dead follower wedges a leader's disk.
     ///
     /// Unlike every other field here, this one does not live in the tap: it
-    /// lives in each index's `WalWriter`. `PUT /_xerj/wal_tap` therefore
+    /// lives in each index's `WalWriter`. `PUT /_argos/wal_tap` therefore
     /// pushes it onto the open writers itself
     /// (`Engine::apply_wal_retention_floor`) and reports how many it reached,
     /// rather than acknowledging a value that reaches nothing.
@@ -2524,7 +2524,7 @@ impl WalTapConfig {
     /// Range-check every numeric knob, returning the operator message.
     ///
     /// Shared by `Config::validate` (the config file, at boot) and
-    /// `PUT /_xerj/wal_tap` (the API), so the file cannot be used to get a
+    /// `PUT /_argos/wal_tap` (the API), so the file cannot be used to get a
     /// value past the bound the API enforces.
     pub fn check_limits(&self) -> Result<(), String> {
         if !Self::POLL_INTERVAL_MS_RANGE.contains(&self.poll_interval_ms) {
@@ -2577,7 +2577,7 @@ impl WalTapConfig {
     ///    so it is `target_auth` wearing a disguise. `target_auth` is
     ///    write-only precisely so that "can call the admin API" never becomes
     ///    "holds the target's credential", and `target_url` is echoed by
-    ///    `GET /_xerj/wal_tap`, by `_stats`, and by the boot log. Accepting
+    ///    `GET /_argos/wal_tap`, by `_stats`, and by the boot log. Accepting
     ///    userinfo would defeat that in one line of config.
     pub fn check_target_url(url: &str) -> Result<(), String> {
         let trimmed = url.trim();
@@ -2599,8 +2599,8 @@ impl WalTapConfig {
         let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
         if authority.contains('@') {
             return Err("wal_tap.target_url must not carry credentials in the URL \
-                 (user:password@host): target_url is echoed by GET /_xerj/wal_tap, by \
-                 /_xerj/wal_tap/_stats and in the server log. Put the credential in \
+                 (user:password@host): target_url is echoed by GET /_argos/wal_tap, by \
+                 /_argos/wal_tap/_stats and in the server log. Put the credential in \
                  wal_tap.target_auth, which is write-only."
                 .to_string());
         }
@@ -2728,7 +2728,7 @@ pub struct RerankProviderConfig {
     /// environment holds (default: `true` — but inert without a key).
     pub enabled: bool,
     /// Provider API key (default: empty → fall back to `TYPESAFE_API_KEY`).
-    /// Never echoed by any endpoint; `GET /_xerj/rerank` reports only whether
+    /// Never echoed by any endpoint; `GET /_argos/rerank` reports only whether
     /// one is set and where it came from.
     pub api_key: String,
     /// Provider endpoint (default: empty → `TYPESAFE_ENDPOINT`, then
@@ -2823,7 +2823,7 @@ impl RerankProviderConfig {
         if authority.contains('@') {
             return Err(
                 "rerank.endpoint must not carry credentials in the URL (user:password@host): \
-                 the endpoint is echoed by GET /_xerj/rerank. Put the credential in \
+                 the endpoint is echoed by GET /_argos/rerank. Put the credential in \
                  rerank.api_key, which is never echoed."
                     .to_string(),
             );
@@ -2988,7 +2988,7 @@ mod tests {
     }
 
     /// #320 — the config file must not be the way around the bounds
-    /// `PUT /_xerj/wal_tap` enforces.
+    /// `PUT /_argos/wal_tap` enforces.
     ///
     /// `min_retained_generations` is refused above 64 by the API because the
     /// knob costs `n × storage.wal_max_size_mb` per WAL shard per index

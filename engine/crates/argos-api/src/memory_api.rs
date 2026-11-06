@@ -1691,7 +1691,7 @@ mod tests {
     fn a_flood_stage_store_failure_names_the_disk_and_the_data_dir() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().to_string_lossy();
-        let inner = crate::error::ApiError::new(argos_common::XerjError::index_blocked(
+        let inner = crate::error::ApiError::new(argos_common::ArgosError::index_blocked(
             ".argos-memory-notes",
             "read_only_allow_delete (disk usage 96% exceeded flood-stage watermark [95%])",
         ))

@@ -141,7 +141,7 @@ pub const MAX_FIELDS: usize = 64;
 /// Ceiling on one `rerank.fields` entry, in characters — a field path.
 pub const MAX_FIELD_NAME_CHARS: usize = 256;
 
-/// What `GET /_xerj/rerank` says leaves the node, as `data_egress`.
+/// What `GET /_argos/rerank` says leaves the node, as `data_egress`.
 ///
 /// A privacy statement an operator — or an agent quoting it to one — will rely
 /// on, so it is complete rather than flattering: reranking is the only
@@ -154,7 +154,7 @@ pub const DATA_EGRESS: &str = "A search that carries a `rerank` block sends the 
      that sends document text off the node. Two other features send text off the node, both \
      operator configuration and off by default: `[embedding] default_endpoint` \
      (`--embed-mode proxy`) sends document text at write time and query text at search time \
-     to an external embeddings API, and the WAL tap (`PUT /_xerj/wal_tap`) replays every \
+     to an external embeddings API, and the WAL tap (`PUT /_argos/wal_tap`) replays every \
      write on tapped indices to an external `_bulk` endpoint. The node's other outbound \
      connections carry no document or query text: the one-time HuggingFace model download \
      for `--embed-mode neural`, Raft messages (index names, mappings, shard assignments) \
@@ -902,7 +902,7 @@ pub fn apply_scores(
     scored
 }
 
-/// Where a resolved setting came from. Reported by `GET /_xerj/rerank` so an
+/// Where a resolved setting came from. Reported by `GET /_argos/rerank` so an
 /// operator can tell which of two places is actually in force — without the
 /// endpoint ever having to print the value itself.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

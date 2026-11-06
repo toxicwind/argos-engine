@@ -1,4 +1,4 @@
-//! Issue #320 — `PUT /_xerj/wal_tap` must not acknowledge a retention floor
+//! Issue #320 — `PUT /_argos/wal_tap` must not acknowledge a retention floor
 //! it does not apply.
 //!
 //! `wal_tap.min_retained_generations` is the knob whose entire purpose is
@@ -87,11 +87,11 @@ async fn a_retention_floor_set_over_http_reaches_the_live_wal_writers() {
     let (status, body) = request(
         &app,
         "PUT",
-        "/_xerj/wal_tap",
+        "/_argos/wal_tap",
         json!({"min_retained_generations": 3}),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "PUT /_xerj/wal_tap: {body}");
+    assert_eq!(status, StatusCode::OK, "PUT /_argos/wal_tap: {body}");
     assert_eq!(body["wal_tap"]["min_retained_generations"], 3);
     assert_eq!(
         body["retention_floor_applied_to_indices"], 1,
@@ -168,7 +168,7 @@ async fn a_retention_floor_set_over_http_reaches_the_live_wal_writers() {
     );
 }
 
-/// `DELETE /_xerj/wal_tap` reverts to the config file, and that has to reach
+/// `DELETE /_argos/wal_tap` reverts to the config file, and that has to reach
 /// the writers as well — otherwise clearing an expensive floor would leave the
 /// disk cost behind with nothing in the API to show for it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -181,7 +181,7 @@ async fn deleting_the_runtime_config_releases_the_retention_floor() {
     let (status, _) = request(
         &app,
         "PUT",
-        "/_xerj/wal_tap",
+        "/_argos/wal_tap",
         json!({"min_retained_generations": 5}),
     )
     .await;
@@ -198,7 +198,7 @@ async fn deleting_the_runtime_config_releases_the_retention_floor() {
         "the floor must be on every shard before DELETE can be shown to clear it, got {held:?}"
     );
 
-    let (status, body) = request(&app, "DELETE", "/_xerj/wal_tap", json!({})).await;
+    let (status, body) = request(&app, "DELETE", "/_argos/wal_tap", json!({})).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["source"], "config_file");
     assert_eq!(body["wal_tap"]["min_retained_generations"], 0);
@@ -227,7 +227,7 @@ async fn an_absurd_retry_cap_is_refused_at_the_api() {
         let (status, body) = request(
             &app,
             "PUT",
-            "/_xerj/wal_tap",
+            "/_argos/wal_tap",
             json!({"max_retry_backoff_secs": bad}),
         )
         .await;
@@ -241,7 +241,7 @@ async fn an_absurd_retry_cap_is_refused_at_the_api() {
     let (status, body) = request(
         &app,
         "PUT",
-        "/_xerj/wal_tap",
+        "/_argos/wal_tap",
         json!({"max_retry_backoff_secs": 86_400}),
     )
     .await;

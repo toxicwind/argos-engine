@@ -1,10 +1,10 @@
 //! Compression codecs: LZ4, Zstd, and passthrough.
 
 use argos_common::config::CompressionLevel as ConfigLevel;
-use argos_common::XerjError;
+use argos_common::ArgosError;
 
 /// Result alias for codec operations.
-pub type Result<T> = std::result::Result<T, XerjError>;
+pub type Result<T> = std::result::Result<T, ArgosError>;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Trait
@@ -83,7 +83,7 @@ impl Codec for NoneCodec {
 
     fn decompress(&self, data: &[u8], output_len: usize) -> Result<Vec<u8>> {
         if data.len() != output_len {
-            return Err(XerjError::internal(format!(
+            return Err(ArgosError::internal(format!(
                 "NoneCodec: expected {output_len} bytes, got {}",
                 data.len()
             )));
@@ -112,7 +112,7 @@ impl Codec for Lz4Codec {
 
     fn decompress(&self, data: &[u8], _output_len: usize) -> Result<Vec<u8>> {
         lz4_flex::decompress_size_prepended(data)
-            .map_err(|e| XerjError::internal(format!("LZ4 decompress: {e}")))
+            .map_err(|e| ArgosError::internal(format!("LZ4 decompress: {e}")))
     }
 
     fn name(&self) -> &'static str {
@@ -163,12 +163,12 @@ impl Default for ZstdCodec {
 impl Codec for ZstdCodec {
     fn compress(&self, data: &[u8]) -> Result<Vec<u8>> {
         zstd::bulk::compress(data, self.level)
-            .map_err(|e| XerjError::internal(format!("Zstd compress: {e}")))
+            .map_err(|e| ArgosError::internal(format!("Zstd compress: {e}")))
     }
 
     fn decompress(&self, data: &[u8], output_len: usize) -> Result<Vec<u8>> {
         zstd::bulk::decompress(data, output_len)
-            .map_err(|e| XerjError::internal(format!("Zstd decompress: {e}")))
+            .map_err(|e| ArgosError::internal(format!("Zstd decompress: {e}")))
     }
 
     fn name(&self) -> &'static str {

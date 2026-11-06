@@ -544,7 +544,7 @@ impl WalWriter {
     /// Seeded by [`crate::index_store::IndexStore::open`] from
     /// `wal_tap.min_retained_generations`, and re-set **live** by
     /// [`IndexStore::set_wal_min_retained_generations`] when an operator
-    /// changes it through `PUT /_xerj/wal_tap`.
+    /// changes it through `PUT /_argos/wal_tap`.
     ///
     /// [`IndexStore::set_wal_min_retained_generations`]:
     /// crate::index_store::IndexStore::set_wal_min_retained_generations

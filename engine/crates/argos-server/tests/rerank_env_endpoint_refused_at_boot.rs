@@ -2,7 +2,7 @@
 //! without an `http(s)://` scheme, stops the node from starting — and that the
 //! rule holds whichever place the value came from. The first draft validated
 //! the config file only: `TYPESAFE_ENDPOINT='http://user:pw@…'` booted fine,
-//! `GET /_xerj/rerank` showed the stripped URL, and `reqwest` would have sent
+//! `GET /_argos/rerank` showed the stripped URL, and `reqwest` would have sent
 //! the userinfo as Basic auth beside the bearer key. This drives the real
 //! binary with the variable set and checks it refuses, and that a clean value
 //! still boots.
@@ -73,7 +73,7 @@ fn boot_with_env_endpoint(dir: &std::path::Path, endpoint: &str, timeout: Durati
     let config_path = dir.join("argos.toml");
     std::fs::write(&config_path, config(dir, rest, grpc, es)).unwrap();
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_xerj"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_argos"))
         .arg("--config")
         .arg(&config_path)
         .arg("--insecure")

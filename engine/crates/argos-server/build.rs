@@ -3,7 +3,7 @@
 //! We deliberately do NOT depend on a host `protoc` binary. `protox` is a
 //! pure-Rust protobuf compiler that parses the `.proto` file and produces a
 //! `FileDescriptorSet`, which `tonic-build` then turns into the prost message
-//! types plus the `XerjSearch` client/server stubs via `compile_fds`. This
+//! types plus the `ArgosSearch` client/server stubs via `compile_fds`. This
 //! keeps the build hermetic and portable across the whole cross-compile
 //! matrix (musl / aarch64 / windows / macos) where `protoc` is not
 //! guaranteed to be installed.
@@ -23,7 +23,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Pure-Rust parse → FileDescriptorSet (no `protoc` process spawned).
     let file_descriptors = protox::compile([&proto_file], [&proto_root])?;
 
-    // FileDescriptorSet → Rust (messages + XerjSearch client & server).
+    // FileDescriptorSet → Rust (messages + ArgosSearch client & server).
     tonic_build::configure()
         .build_client(true)
         .build_server(true)

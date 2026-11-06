@@ -37,7 +37,7 @@ type HmacSha256 = Hmac<Sha256>;
 // ── Wire constants ────────────────────────────────────────────────────────────
 
 /// Magic bytes that open the receiver's handshake.
-pub const WIRE_MAGIC: &[u8; 8] = b"XERJCLUS";
+pub const WIRE_MAGIC: &[u8; 8] = b"ARGOCLUS";
 
 /// Wire version. Bumped whenever the authenticated framing changes.
 pub const WIRE_VERSION: u8 = 1;

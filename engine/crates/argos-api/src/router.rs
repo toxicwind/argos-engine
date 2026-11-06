@@ -248,7 +248,7 @@ pub fn build_es_compat_router(state: AppState) -> Router {
 }
 
 /// [`build_es_compat_router`] over a [`hub_api::HubShared`] the caller also
-/// hands to the gRPC `XerjHub` service, so the two surfaces count one client
+/// hands to the gRPC `ArgosHub` service, so the two surfaces count one client
 /// against ONE hub rate-limit budget (and share one query-slot pool and one
 /// catalogue cache) instead of each granting the full allowance.
 pub fn build_es_compat_router_with_hub(
@@ -890,16 +890,16 @@ pub fn build_es_compat_router_with_hub(
         // cluster has no Elasticsearch endpoint, and hanging it off `_ccr/*`
         // would make those honest 501s a lie.
         .route(
-            "/_xerj/wal_tap",
+            "/_argos/wal_tap",
             get(wal_tap_api::get_wal_tap)
                 .put(wal_tap_api::put_wal_tap)
                 .delete(wal_tap_api::delete_wal_tap),
         )
-        .route("/_xerj/wal_tap/_stats", get(wal_tap_api::wal_tap_stats))
+        .route("/_argos/wal_tap/_stats", get(wal_tap_api::wal_tap_stats))
         // ── Rerank provider status ─────────────────────────────────────────────────
         // Whether a rerank provider is configured — never the key. Superuser
-        // only: it inherits the `/_xerj/*` rule in `authz.rs`.
-        .route("/_xerj/rerank", get(crate::rerank_stage::rerank_status))
+        // only: it inherits the `/_argos/*` rule in `authz.rs`.
+        .route("/_argos/rerank", get(crate::rerank_stage::rerank_status))
         // ── Legacy index templates (v1) ────────────────────────────────────────────
         .route(
             "/_template/:name",
@@ -965,7 +965,7 @@ pub fn build_es_compat_router_with_hub(
         // authentication, authorization and the audit log (the three
         // `*_unless_public_hub` wrappers below). The rate limit is a layer on
         // the sub-router itself, so it holds in both modes. `hub` is the
-        // same `HubShared` the gRPC `XerjHub` service holds, so a client has
+        // same `HubShared` the gRPC `ArgosHub` service holds, so a client has
         // one budget across both listeners, not one per listener.
         .merge(hub_api::routes(hub))
         // ── Share links ───────────────────────────────────────────────────────
@@ -1135,7 +1135,7 @@ async fn storage_fence_middleware(
         return next.run(req).await;
     }
 
-    crate::error::ApiError::from(argos_common::XerjError::cluster_state_unavailable())
+    crate::error::ApiError::from(argos_common::ArgosError::cluster_state_unavailable())
         .into_response()
 }
 

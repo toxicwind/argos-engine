@@ -103,7 +103,7 @@ fn run(config_body: &str, dir: &std::path::Path, wait: Duration) -> Outcome {
     let config_path = dir.join("argos.toml");
     std::fs::write(&config_path, config_body).unwrap();
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_xerj"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_argos"))
         .arg("--config")
         .arg(&config_path)
         .arg("--insecure")

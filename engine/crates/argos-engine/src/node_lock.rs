@@ -208,7 +208,7 @@ pub fn data_dir_lock_held(dir: &Path) -> bool {
 }
 
 fn config_err(reason: String) -> EngineError {
-    EngineError::Common(argos_common::XerjError::config(reason))
+    EngineError::Common(argos_common::ArgosError::config(reason))
 }
 
 fn in_use(data_dir: &Path, lock_path: &Path, holder: &str) -> EngineError {

@@ -8,7 +8,7 @@
 //!
 //! ```text
 //! receiver → sender   (handshake, sent immediately on accept)
-//!   [8]  magic "XERJCLUS"
+//!   [8]  magic "ARGOCLUS"
 //!   [1]  wire version (1)
 //!   [32] challenge — fresh random bytes, per connection
 //!

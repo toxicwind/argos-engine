@@ -12,10 +12,10 @@
 //!
 //! ```sh
 //! docker run -d --name minio -p 13370:9000 \
-//!   -e MINIO_ROOT_USER=xerjtest -e MINIO_ROOT_PASSWORD=xerjtest12345 \
+//!   -e MINIO_ROOT_USER=argostest -e MINIO_ROOT_PASSWORD=argostest12345 \
 //!   quay.io/minio/minio:latest server /data
 //! ARGOS_MINIO_ENDPOINT=http://127.0.0.1:13370 \
-//! ARGOS_MINIO_ACCESS_KEY=xerjtest ARGOS_MINIO_SECRET_KEY=xerjtest12345 \
+//! ARGOS_MINIO_ACCESS_KEY=argostest ARGOS_MINIO_SECRET_KEY=argostest12345 \
 //!   cargo test -p argos-autoindex --test objwatch_minio
 //! ```
 //!

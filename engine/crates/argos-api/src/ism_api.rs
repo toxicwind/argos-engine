@@ -77,19 +77,19 @@ pub async fn put_ism_policy(
         Ok(p) => p,
         Err(e) => {
             let err =
-                argos_common::XerjError::invalid_query(format!("invalid ISM policy body: {e}"));
+                argos_common::ArgosError::invalid_query(format!("invalid ISM policy body: {e}"));
             return ApiError::new(err).into_response();
         }
     };
     if let Err(reason) = policy.validate() {
-        let err = argos_common::XerjError::invalid_query(format!("invalid ISM policy: {reason}"));
+        let err = argos_common::ArgosError::invalid_query(format!("invalid ISM policy: {reason}"));
         return ApiError::new(err).into_response();
     }
     if let Err(error) = state
         .engine
         .put_ism_policy(policy_id.clone(), policy.clone())
     {
-        return ApiError::new(argos_common::XerjError::from(error)).into_response();
+        return ApiError::new(argos_common::ArgosError::from(error)).into_response();
     }
     Json(json!({
         "_id": policy_id,
@@ -116,7 +116,7 @@ pub async fn get_ism_policy(
         .into_response(),
         None => {
             let e =
-                argos_common::XerjError::index_not_found(format!("policy [{policy_id}] not found"));
+                argos_common::ArgosError::index_not_found(format!("policy [{policy_id}] not found"));
             ApiError::new(e).into_response()
         }
     }
@@ -185,10 +185,10 @@ pub async fn delete_ism_policy(
         Ok(true) => Json(json!({ "_id": policy_id, "result": "deleted" })).into_response(),
         Ok(false) => {
             let e =
-                argos_common::XerjError::index_not_found(format!("policy [{policy_id}] not found"));
+                argos_common::ArgosError::index_not_found(format!("policy [{policy_id}] not found"));
             ApiError::new(e).into_response()
         }
-        Err(error) => ApiError::new(argos_common::XerjError::from(error)).into_response(),
+        Err(error) => ApiError::new(argos_common::ArgosError::from(error)).into_response(),
     }
 }
 
@@ -217,10 +217,10 @@ pub async fn add_ism_policy(
 /// not two).
 pub async fn attach_policy(state: &AppState, index: &str, policy_id: &str) -> Response {
     if let Err(error) = state.engine.ensure_cluster_state_writable() {
-        return ApiError::new(argos_common::XerjError::from(error)).into_response();
+        return ApiError::new(argos_common::ArgosError::from(error)).into_response();
     }
     if state.engine.get_index(index).is_err() {
-        let e = argos_common::XerjError::index_not_found(index);
+        let e = argos_common::ArgosError::index_not_found(index);
         return ApiError::new(e).into_response();
     }
     let Some(policy) = state
@@ -229,7 +229,7 @@ pub async fn attach_policy(state: &AppState, index: &str, policy_id: &str) -> Re
         .get(policy_id)
         .map(|e| e.value().clone())
     else {
-        let e = argos_common::XerjError::index_not_found(format!("policy [{policy_id}] not found"));
+        let e = argos_common::ArgosError::index_not_found(format!("policy [{policy_id}] not found"));
         return ApiError::new(e).into_response();
     };
     let managed = ManagedIndexState::new(
@@ -245,7 +245,7 @@ pub async fn attach_policy(state: &AppState, index: &str, policy_id: &str) -> Re
         .managed_indices
         .insert(index.to_string(), managed);
     if let Err(error) = state.engine.persist_managed_indices() {
-        return ApiError::new(argos_common::XerjError::from(error)).into_response();
+        return ApiError::new(argos_common::ArgosError::from(error)).into_response();
     }
 
     Json(json!({
@@ -287,7 +287,7 @@ pub async fn remove_ism_policy(
         // identically whichever surface the operator used (#282).
         match state.engine.detach_lifecycle(&index) {
             Ok(_) => Json(single_index_success()).into_response(),
-            Err(error) => ApiError::new(argos_common::XerjError::from(error)).into_response(),
+            Err(error) => ApiError::new(argos_common::ArgosError::from(error)).into_response(),
         }
     } else {
         Json(not_managed_failure(
@@ -330,7 +330,7 @@ pub async fn change_ism_policy(
     Json(body): Json<ChangePolicyBody>,
 ) -> impl IntoResponse {
     if let Err(error) = state.engine.ensure_cluster_state_writable() {
-        return ApiError::new(argos_common::XerjError::from(error)).into_response();
+        return ApiError::new(argos_common::ArgosError::from(error)).into_response();
     }
     let Some(mut managed) = state
         .engine
@@ -367,7 +367,7 @@ pub async fn change_ism_policy(
         .get(&body.policy_id)
         .map(|e| e.value().clone())
     else {
-        let e = argos_common::XerjError::index_not_found(format!(
+        let e = argos_common::ArgosError::index_not_found(format!(
             "policy [{}] not found",
             body.policy_id
         ));
@@ -377,7 +377,7 @@ pub async fn change_ism_policy(
     let target_state = match &body.state {
         Some(s) if new_policy.state(s).is_some() => s.clone(),
         Some(s) => {
-            let e = argos_common::XerjError::invalid_query(format!(
+            let e = argos_common::ArgosError::invalid_query(format!(
                 "state '{s}' does not exist in policy '{}'",
                 body.policy_id
             ));
@@ -396,7 +396,7 @@ pub async fn change_ism_policy(
     managed.last_updated_ms = lifecycle::now_ms();
     state.engine.managed_indices.insert(index, managed);
     if let Err(error) = state.engine.persist_managed_indices() {
-        return ApiError::new(argos_common::XerjError::from(error)).into_response();
+        return ApiError::new(argos_common::ArgosError::from(error)).into_response();
     }
 
     Json(single_index_success()).into_response()
@@ -427,7 +427,7 @@ pub async fn retry_ism_index(
     body: OptionalJson<RetryBody>,
 ) -> impl IntoResponse {
     if let Err(error) = state.engine.ensure_cluster_state_writable() {
-        return ApiError::new(argos_common::XerjError::from(error)).into_response();
+        return ApiError::new(argos_common::ArgosError::from(error)).into_response();
     }
     let body = body.0.unwrap_or_default();
     let Some(mut managed) = state
@@ -458,14 +458,14 @@ pub async fn retry_ism_index(
             .get(&managed.policy_id)
             .map(|e| e.value().clone())
         else {
-            let e = argos_common::XerjError::index_not_found(format!(
+            let e = argos_common::ArgosError::index_not_found(format!(
                 "policy [{}] not found",
                 managed.policy_id
             ));
             return ApiError::new(e).into_response();
         };
         if policy.state(s).is_none() {
-            let e = argos_common::XerjError::invalid_query(format!(
+            let e = argos_common::ArgosError::invalid_query(format!(
                 "state '{s}' does not exist in policy '{}'",
                 managed.policy_id
             ));
@@ -480,7 +480,7 @@ pub async fn retry_ism_index(
     managed.last_updated_ms = lifecycle::now_ms();
     state.engine.managed_indices.insert(index, managed);
     if let Err(error) = state.engine.persist_managed_indices() {
-        return ApiError::new(argos_common::XerjError::from(error)).into_response();
+        return ApiError::new(argos_common::ArgosError::from(error)).into_response();
     }
 
     Json(single_index_success()).into_response()

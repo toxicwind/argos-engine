@@ -91,7 +91,7 @@ pub const GITIGNORE: &str = ".gitignore";
 /// ARGOS's own ignore file. Same syntax as `.gitignore`, higher precedence, so
 /// a user can exclude something git tracks (or re-include something git
 /// ignores) without editing `.gitignore`.
-pub const XERJIGNORE: &str = ".argosignore";
+pub const ARGOSIGNORE: &str = ".argosignore";
 
 /// Build output that is junk in practice but is *not* reliably gitignored —
 /// `vendor/` is committed by Go projects, `third_party/` and `bower_components/`
@@ -575,7 +575,7 @@ impl IgnoreStack {
         // too (plus a hard level cap).
         let mut dir = parent.to_path_buf();
         for _ in 0..MAX_ANCESTOR_LEVELS {
-            for file in [XERJIGNORE, GITIGNORE] {
+            for file in [ARGOSIGNORE, GITIGNORE] {
                 let path = dir.join(file);
                 if !path.is_file() {
                     continue;
@@ -625,7 +625,7 @@ impl IgnoreStack {
         self.layers.truncate(depth);
         let layer = if self.opts.enabled {
             Layer {
-                argos: self.load(dir, dir.join(XERJIGNORE)),
+                argos: self.load(dir, dir.join(ARGOSIGNORE)),
                 git: self.load(dir, dir.join(GITIGNORE)),
                 // Per-repository excludes, which is where people put "junk
                 // only I have". Loaded per directory so a nested checkout gets
@@ -1306,7 +1306,7 @@ mod tests {
     }
 
     #[test]
-    fn xerjignore_outranks_gitignore_at_any_depth() {
+    fn argosignore_outranks_gitignore_at_any_depth() {
         let dir = tempfile::TempDir::new().unwrap();
         let root = dir.path();
         // First line: git tracks it, the user does not want it in the index.

@@ -115,8 +115,8 @@ impl IntoResponse for ConsoleApiError {
 
 // Common conversions so handlers can use `?` on engine and serde failures.
 
-impl From<argos_common::XerjError> for ConsoleApiError {
-    fn from(e: argos_common::XerjError) -> Self {
+impl From<argos_common::ArgosError> for ConsoleApiError {
+    fn from(e: argos_common::ArgosError) -> Self {
         // Map the few error categories the Argos Console surface is likely to surface.
         let msg = e.to_string();
         let lower = msg.to_lowercase();

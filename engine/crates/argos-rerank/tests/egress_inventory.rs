@@ -466,7 +466,7 @@ fn the_status_statement_names_every_node_path_and_the_docs_quote_it() {
     let doc = read(&repo_root().join("docs/RERANK.md"));
     assert!(
         doc.contains(s),
-        "docs/RERANK.md's GET /_xerj/rerank example must quote DATA_EGRESS verbatim"
+        "docs/RERANK.md's GET /_argos/rerank example must quote DATA_EGRESS verbatim"
     );
 }
 

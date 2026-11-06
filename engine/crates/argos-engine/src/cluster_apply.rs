@@ -45,19 +45,19 @@ impl MetadataApplier for EngineMetadataApplier {
 }
 
 pub(crate) fn propose_error(err: ProposeError) -> EngineError {
-    EngineError::Common(argos_common::XerjError::cluster_unavailable(err.to_string()))
+    EngineError::Common(argos_common::ArgosError::cluster_unavailable(err.to_string()))
 }
 
 pub(crate) fn effect_result(index: &str, effect: ApplyEffect) -> Result<()> {
     match effect {
         ApplyEffect::Applied => Ok(()),
         ApplyEffect::AlreadyExists => Err(EngineError::Common(
-            argos_common::XerjError::index_already_exists(index),
+            argos_common::ArgosError::index_already_exists(index),
         )),
         ApplyEffect::NotFound => Err(EngineError::Common(
-            argos_common::XerjError::index_not_found(index),
+            argos_common::ArgosError::index_not_found(index),
         )),
-        ApplyEffect::Failed(reason) => Err(EngineError::Common(argos_common::XerjError::internal(
+        ApplyEffect::Failed(reason) => Err(EngineError::Common(argos_common::ArgosError::internal(
             reason,
         ))),
     }
@@ -66,14 +66,14 @@ pub(crate) fn effect_result(index: &str, effect: ApplyEffect) -> Result<()> {
 fn is_already_exists(err: &EngineError) -> bool {
     matches!(
         err,
-        EngineError::Common(argos_common::XerjError::IndexAlreadyExists { .. })
+        EngineError::Common(argos_common::ArgosError::IndexAlreadyExists { .. })
     )
 }
 
 fn is_not_found(err: &EngineError) -> bool {
     matches!(
         err,
-        EngineError::Common(argos_common::XerjError::IndexNotFound { .. })
+        EngineError::Common(argos_common::ArgosError::IndexNotFound { .. })
     )
 }
 
@@ -87,11 +87,11 @@ impl Engine {
         self.ensure_cluster_state_writable()?;
         if !crate::index_guard::visible(&spec.name) {
             return Err(EngineError::Common(
-                argos_common::XerjError::index_not_found(&spec.name),
+                argos_common::ArgosError::index_not_found(&spec.name),
             ));
         }
         let Some(handle) = self.cluster_handle() else {
-            return Err(EngineError::Common(argos_common::XerjError::internal(
+            return Err(EngineError::Common(argos_common::ArgosError::internal(
                 "replicate_index_create called with no cluster handle",
             )));
         };
@@ -224,12 +224,12 @@ impl Engine {
         op: argos_cluster::ShardOp,
     ) -> Result<argos_cluster::ShardResult> {
         let Some(handle) = self.cluster_handle() else {
-            return Err(EngineError::Common(argos_common::XerjError::internal(
+            return Err(EngineError::Common(argos_common::ArgosError::internal(
                 "forward_shard called with no cluster handle",
             )));
         };
         handle.shard_call(owner, op).await.map_err(|err| {
-            EngineError::Common(argos_common::XerjError::cluster_unavailable(err.to_string()))
+            EngineError::Common(argos_common::ArgosError::cluster_unavailable(err.to_string()))
         })
     }
 
@@ -243,11 +243,11 @@ impl Engine {
         self.ensure_cluster_state_writable()?;
         if !crate::index_guard::visible(index) {
             return Err(EngineError::Common(
-                argos_common::XerjError::index_not_found(index),
+                argos_common::ArgosError::index_not_found(index),
             ));
         }
         let Some(handle) = self.cluster_handle() else {
-            return Err(EngineError::Common(argos_common::XerjError::internal(
+            return Err(EngineError::Common(argos_common::ArgosError::internal(
                 "replicate_mapping called with no cluster handle",
             )));
         };
@@ -273,11 +273,11 @@ impl Engine {
         self.ensure_cluster_state_writable()?;
         if !crate::index_guard::visible(index) {
             return Err(EngineError::Common(
-                argos_common::XerjError::index_not_found(index),
+                argos_common::ArgosError::index_not_found(index),
             ));
         }
         let Some(handle) = self.cluster_handle() else {
-            return Err(EngineError::Common(argos_common::XerjError::internal(
+            return Err(EngineError::Common(argos_common::ArgosError::internal(
                 "replicate_index_settings called with no cluster handle",
             )));
         };
@@ -299,7 +299,7 @@ impl Engine {
     pub(crate) async fn apply_user_index_settings(&self, name: &str, body: &Value) -> Result<()> {
         if self.get_index(name).is_err() {
             return Err(EngineError::Common(
-                argos_common::XerjError::index_not_found(name),
+                argos_common::ArgosError::index_not_found(name),
             ));
         }
         let inner = body.get("index").cloned().unwrap_or_else(|| body.clone());

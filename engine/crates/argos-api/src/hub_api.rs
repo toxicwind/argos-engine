@@ -1492,7 +1492,7 @@ async fn def_route(
 }
 
 /// `def` for one corpus: the body of `GET /_hub/v1/def/{slug}/{symbol}` after
-/// its query string was read, shared with the gRPC `XerjHub.Def` RPC
+/// its query string was read, shared with the gRPC `ArgosHub.Def` RPC
 /// ([`def_answer`]) so both surfaces return the same [`Answer`] and refuse the
 /// same requests. `auth` is the caller's `Authorization` value, forwarded to
 /// the in-process node.
@@ -1615,7 +1615,7 @@ struct CodeOpts {
 }
 
 /// `code` for one corpus: the body of `GET /_hub/v1/code/{slug}` after its
-/// query string was read, shared with the gRPC `XerjHub.Ask` RPC (through
+/// query string was read, shared with the gRPC `ArgosHub.Ask` RPC (through
 /// [`ask_answer`]) so both surfaces refuse the same requests.
 async fn code_core(
     shared: &Arc<HubShared>,
@@ -1795,7 +1795,7 @@ async fn search_route(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// The same answers for a surface that is not HTTP (gRPC `XerjHub`, plan §7)
+// The same answers for a surface that is not HTTP (gRPC `ArgosHub`, plan §7)
 // ─────────────────────────────────────────────────────────────────────────────
 //
 // The gRPC service is a thin adapter: it converts its request into the
@@ -1855,7 +1855,7 @@ async fn refusal(resp: Response) -> HubRefusal {
 
 impl HubShared {
     /// Count one request from a transport that is not an axum request (the
-    /// gRPC `XerjHub` service) against the same per-client budget the HTTP
+    /// gRPC `ArgosHub` service) against the same per-client budget the HTTP
     /// routes' layer draws on. The client is read exactly as there
     /// ([`crate::share::client_source`]): the TCP `peer`, or the
     /// `x-forwarded-for` values only when `peer` is a declared

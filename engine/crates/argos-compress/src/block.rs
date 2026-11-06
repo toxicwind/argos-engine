@@ -6,12 +6,12 @@
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::io::{Cursor, Read, Write};
-use argos_common::XerjError;
+use argos_common::ArgosError;
 
 use crate::codec::{get_codec, Codec, CompressionLevel};
 
 /// Result alias for block operations.
-pub type Result<T> = std::result::Result<T, XerjError>;
+pub type Result<T> = std::result::Result<T, ArgosError>;
 
 /// Number of documents per compressed block.
 pub const BLOCK_SIZE: usize = 128;
@@ -125,7 +125,7 @@ impl BlockWriter {
         let len = doc.len() as u32;
         self.pending
             .write_u32::<LittleEndian>(len)
-            .map_err(|e| XerjError::internal(e.to_string()))?;
+            .map_err(|e| ArgosError::internal(e.to_string()))?;
         self.pending.extend_from_slice(doc);
         self.pending_count += 1;
 
@@ -160,7 +160,7 @@ impl BlockWriter {
         };
         header
             .write_to(&mut self.completed)
-            .map_err(|e| XerjError::internal(e.to_string()))?;
+            .map_err(|e| ArgosError::internal(e.to_string()))?;
         self.completed.extend_from_slice(&compressed);
         Ok(())
     }
@@ -193,33 +193,33 @@ impl<'a> BlockReader<'a> {
         }
 
         let header = BlockHeader::read_from(&mut self.cursor)
-            .map_err(|e| XerjError::internal(format!("block header read: {e}")))?;
+            .map_err(|e| ArgosError::internal(format!("block header read: {e}")))?;
 
         let mut compressed = vec![0u8; header.compressed_len as usize];
         self.cursor
             .read_exact(&mut compressed)
-            .map_err(|e| XerjError::internal(format!("block data read: {e}")))?;
+            .map_err(|e| ArgosError::internal(format!("block data read: {e}")))?;
 
         // Select decompressor by codec_id
         let decompressed = match header.codec_id {
             0 => {
                 // None
                 if compressed.len() != header.uncompressed_len as usize {
-                    return Err(XerjError::internal("None codec length mismatch"));
+                    return Err(ArgosError::internal("None codec length mismatch"));
                 }
                 compressed
             }
             1 => {
                 // LZ4
                 lz4_flex::decompress_size_prepended(&compressed)
-                    .map_err(|e| XerjError::internal(format!("LZ4 decompress: {e}")))?
+                    .map_err(|e| ArgosError::internal(format!("LZ4 decompress: {e}")))?
             }
             2 => {
                 // Zstd
                 zstd::bulk::decompress(&compressed, header.uncompressed_len as usize)
-                    .map_err(|e| XerjError::internal(format!("Zstd decompress: {e}")))?
+                    .map_err(|e| ArgosError::internal(format!("Zstd decompress: {e}")))?
             }
-            id => return Err(XerjError::internal(format!("unknown codec_id: {id}"))),
+            id => return Err(ArgosError::internal(format!("unknown codec_id: {id}"))),
         };
 
         // Split individual documents by length prefix
@@ -228,11 +228,11 @@ impl<'a> BlockReader<'a> {
         for _ in 0..header.doc_count {
             let len = rdr
                 .read_u32::<LittleEndian>()
-                .map_err(|e| XerjError::internal(format!("doc len read: {e}")))?
+                .map_err(|e| ArgosError::internal(format!("doc len read: {e}")))?
                 as usize;
             let mut doc = vec![0u8; len];
             rdr.read_exact(&mut doc)
-                .map_err(|e| XerjError::internal(format!("doc data read: {e}")))?;
+                .map_err(|e| ArgosError::internal(format!("doc data read: {e}")))?;
             docs.push(doc);
         }
 

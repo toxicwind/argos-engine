@@ -944,7 +944,7 @@ mod child_process {
     /// line to stderr, exits with `code`. Run as `sh <script> hub pull …` so no
     /// freshly written executable is ever exec'd (no ETXTBSY race under the
     /// parallel test runner).
-    fn fake_xerj(dir: &Path, code: i32, stderr: &str) -> (PathBuf, PathBuf) {
+    fn fake_argos(dir: &Path, code: i32, stderr: &str) -> (PathBuf, PathBuf) {
         let args = dir.join("args.txt");
         let script = dir.join("fake-argos.sh");
         fs::write(
@@ -970,7 +970,7 @@ mod child_process {
     #[test]
     fn pull_runs_the_existing_pull_subcommand_quietly() {
         let tmp = tempdir().unwrap();
-        let (script, args) = fake_xerj(tmp.path(), 0, "");
+        let (script, args) = fake_argos(tmp.path(), 0, "");
 
         let out = ops(&script, Some("http://127.0.0.1:1"), tmp.path()).pull("quinn");
 
@@ -995,7 +995,7 @@ mod child_process {
     #[test]
     fn pull_omits_url_when_none_was_given() {
         let tmp = tempdir().unwrap();
-        let (script, args) = fake_xerj(tmp.path(), 0, "");
+        let (script, args) = fake_argos(tmp.path(), 0, "");
 
         ops(&script, None, tmp.path()).pull("quinn");
 
@@ -1011,7 +1011,7 @@ mod child_process {
     #[test]
     fn a_nonzero_exit_carries_its_code_and_stderr() {
         let tmp = tempdir().unwrap();
-        let (script, _) = fake_xerj(
+        let (script, _) = fake_argos(
             tmp.path(),
             3,
             "argos hub pull: pack verification failed: pack signature",
@@ -1052,7 +1052,7 @@ mod child_process {
         let tmp = tempdir().unwrap();
         let state = tmp.path().join("state");
         fs::create_dir_all(&state).unwrap();
-        let (script, _) = fake_xerj(tmp.path(), 0, "");
+        let (script, _) = fake_argos(tmp.path(), 0, "");
         let ops = ops(&script, None, tmp.path());
 
         assert_eq!(ops.ledger("quinn"), Ledger::Missing);

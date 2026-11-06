@@ -1,7 +1,7 @@
 use sha2::{Digest, Sha256};
 use argos_common::config::{Config, WalSync};
 use argos_common::types::Schema;
-use argos_common::XerjError;
+use argos_common::ArgosError;
 use argos_engine::{ClusterStateBlockKind, ClusterStateBootStatus, Engine};
 
 /// Byte-level storage snapshot. Directory and symlink topology is included,
@@ -286,8 +286,8 @@ async fn cluster_state_format1_incompatible_fixtures_latch_and_preserve_bytes() 
             let err = engine
                 .put_component_template("must-not-land".to_owned(), serde_json::json!({}))
                 .expect_err("blocked state must refuse mutation");
-            let common: XerjError = err.into();
-            assert!(matches!(&common, XerjError::ClusterStateUnavailable));
+            let common: ArgosError = err.into();
+            assert!(matches!(&common, ArgosError::ClusterStateUnavailable));
             drop(engine);
 
             let after = std::fs::read(dir.path().join("cluster_state.json")).unwrap();
@@ -387,16 +387,16 @@ async fn cluster_state_format1_future_state_cannot_reconcile_and_downgrade_on_bo
         );
         assert!(engine.data_streams.is_empty());
         assert!(engine.index_name_list().is_empty(), "boot {boot}");
-        let get_err: XerjError = match engine.get_index("user-events") {
+        let get_err: ArgosError = match engine.get_index("user-events") {
             Ok(_) => panic!("blocked boot must not open a user index"),
             Err(err) => err.into(),
         };
-        assert!(matches!(get_err, XerjError::ClusterStateUnavailable));
-        let create_err: XerjError = engine
+        assert!(matches!(get_err, ArgosError::ClusterStateUnavailable));
+        let create_err: ArgosError = engine
             .create_index("must-not-exist", Schema::empty())
             .expect_err("blocked boot must not activate a new WAL")
             .into();
-        assert!(matches!(create_err, XerjError::ClusterStateUnavailable));
+        assert!(matches!(create_err, ArgosError::ClusterStateUnavailable));
         engine.audit.append(
             "blocked-diagnostic",
             "test",
@@ -427,9 +427,9 @@ async fn cluster_state_format1_direct_durable_mutators_fail_before_any_side_effe
             Ok(_) => panic!("{operation}"),
             Err(error) => error,
         };
-        let common: XerjError = error.into();
+        let common: ArgosError = error.into();
         assert!(
-            matches!(common, XerjError::ClusterStateUnavailable),
+            matches!(common, ArgosError::ClusterStateUnavailable),
             "{operation}: {common}"
         );
     }

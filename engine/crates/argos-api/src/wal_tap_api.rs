@@ -1,29 +1,29 @@
 //! REST surface for the single-node WAL tap (issue #320).
 //!
 //! ```text
-//! GET    /_xerj/wal_tap          current configuration (never the credential)
-//! PUT    /_xerj/wal_tap          merge-patch it, durably, no restart
-//! DELETE /_xerj/wal_tap          drop the runtime overlay, revert to the file
-//! GET    /_xerj/wal_tap/_stats   per-index cursors, lag, counters, last error
+//! GET    /_argos/wal_tap          current configuration (never the credential)
+//! PUT    /_argos/wal_tap          merge-patch it, durably, no restart
+//! DELETE /_argos/wal_tap          drop the runtime overlay, revert to the file
+//! GET    /_argos/wal_tap/_stats   per-index cursors, lag, counters, last error
 //! ```
 //!
-//! This is a native (`_xerj`-namespaced) surface, not an Elasticsearch one:
+//! This is a native (`_argos`-namespaced) surface, not an Elasticsearch one:
 //! there is no ES endpoint that means "push my WAL somewhere", and pretending
 //! `_ccr/*` did would be exactly the silent-stub behaviour those handlers were
 //! made to `501` to avoid.
 //!
 //! ## Why every route here is superuser-only
 //!
-//! `PUT /_xerj/wal_tap` is a whole-node export primitive: `target_url` plus
+//! `PUT /_argos/wal_tap` is a whole-node export primitive: `target_url` plus
 //! `indices: ["*"]` streams every index on this node to a host of the
 //! caller's choosing, with an operator-supplied `Authorization` header
 //! attached — exfiltration and authenticated SSRF in one request. Nothing
 //! here is index-scoped, so there is no per-index decision to make, and that
 //! is the same reasoning `authz.rs` already applies to snapshot and restore.
-//! The reads are covered for the same reason: `GET /_xerj/wal_tap` echoes
+//! The reads are covered for the same reason: `GET /_argos/wal_tap` echoes
 //! `target_url` and `_stats` enumerates the node's whole index inventory.
-//! Enforced in [`crate::authz`] on the `_xerj` first segment, not here, so a
-//! second `_xerj` route cannot be added without inheriting it.
+//! Enforced in [`crate::authz`] on the `_argos` first segment, not here, so a
+//! second `_argos` route cannot be added without inheriting it.
 
 use axum::{
     extract::State,
@@ -68,7 +68,7 @@ fn config_body(config: &WalTapConfig) -> Value {
     })
 }
 
-/// `GET /_xerj/wal_tap`
+/// `GET /_argos/wal_tap`
 pub async fn get_wal_tap(State(state): State<AppState>) -> Response {
     let mut body = config_body(&state.engine.wal_tap.config());
     if let Some(obj) = body.as_object_mut() {
@@ -116,7 +116,7 @@ fn bad_request(reason: &str) -> Response {
         .into_response()
 }
 
-/// `PUT /_xerj/wal_tap`
+/// `PUT /_argos/wal_tap`
 ///
 /// Takes effect on the next poll. Cursors are keyed by index name and are
 /// untouched here, so adding an index to the allowlist starts it "from now"
@@ -217,7 +217,7 @@ pub async fn put_wal_tap(
     Json(resp).into_response()
 }
 
-/// `DELETE /_xerj/wal_tap`
+/// `DELETE /_argos/wal_tap`
 ///
 /// Drop the persisted runtime configuration and revert to the config file.
 ///
@@ -245,7 +245,7 @@ pub async fn delete_wal_tap(State(state): State<AppState>) -> Response {
     .into_response()
 }
 
-/// `GET /_xerj/wal_tap/_stats`
+/// `GET /_argos/wal_tap/_stats`
 ///
 /// The honesty surface. `gaps > 0` means entries were pruned out of the WAL
 /// before the tap could ship them and are gone; `lag_seq` is how far behind

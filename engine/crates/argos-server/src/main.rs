@@ -6,7 +6,7 @@
 //!
 //! - Native REST  — default :8080
 //! - ES-compat    — default :9200
-//! - gRPC         — default :8081 (XerjSearch service, plaintext h2c)
+//! - gRPC         — default :8081 (ArgosSearch service, plaintext h2c)
 //!
 //! Shuts down gracefully on SIGTERM or SIGINT.
 //!
@@ -328,25 +328,25 @@ fn help_text(feedback: bool) -> String {
          \x20\x20\x20\x20A flag may precede the subcommand: argos --url URL corpus index <name>\n\
          \x20\x20\x20\x20is read as argos corpus index <name> --url URL.\n\
          \n\
-         \x20\x20\x20\x20xerj [OPTIONS]                      start the server (options below)\n\
-         \x20\x20\x20\x20xerj autoindex <folder> [OPTIONS]   zero-config discovery + indexing — the\n\
+         \x20\x20\x20\x20argos [OPTIONS]                      start the server (options below)\n\
+         \x20\x20\x20\x20argos autoindex <folder> [OPTIONS]   zero-config discovery + indexing — the\n\
          \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20flagship path for most agents (see argos\n\
          \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20autoindex --help)\n\
-         \x20\x20\x20\x20xerj autoindex map [folder]        data map of indexed data, or preview a folder\n\
-         \x20\x20\x20\x20xerj autoindex remove --prefix <P>  drop one autoindexed folder, after a plan\n\
-         \x20\x20\x20\x20xerj code <corpus> \"<query>\"        reference-coding retrieval over a corpus\n\
+         \x20\x20\x20\x20argos autoindex map [folder]        data map of indexed data, or preview a folder\n\
+         \x20\x20\x20\x20argos autoindex remove --prefix <P>  drop one autoindexed folder, after a plan\n\
+         \x20\x20\x20\x20argos code <corpus> \"<query>\"        reference-coding retrieval over a corpus\n\
          \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20of peer projects (see argos code --help)\n\
-         \x20\x20\x20\x20xerj corpus add|index|list          the corpus lifecycle behind `argos code`\n\
+         \x20\x20\x20\x20argos corpus add|index|list          the corpus lifecycle behind `argos code`\n\
          \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20(see argos corpus --help)\n\
          {ask_lines}\
-         \x20\x20\x20\x20xerj index [OPTIONS]                direct NDJSON → engine ingest (see argos\n\
+         \x20\x20\x20\x20argos index [OPTIONS]                direct NDJSON → engine ingest (see argos\n\
          \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20index --help)\n\
-         \x20\x20\x20\x20xerj brain <folder>                 index + browse in one command (see argos\n\
+         \x20\x20\x20\x20argos brain <folder>                 index + browse in one command (see argos\n\
          \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20brain --help)\n\
-         \x20\x20\x20\x20xerj share <index|folder>           give someone read-only search over one\n\
+         \x20\x20\x20\x20argos share <index|folder>           give someone read-only search over one\n\
          \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20index: link + passcode + expiry (see argos\n\
          \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20share --help)\n\
-         \x20\x20\x20\x20xerj feedback [OPTIONS]             draft or --submit the agent field report —\n\
+         \x20\x20\x20\x20argos feedback [OPTIONS]             draft or --submit the agent field report —\n\
          \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20see argos feedback --help\n\
          \n\
          OPTIONS (for `argos [OPTIONS]`, the bare server start):\n\
@@ -452,34 +452,34 @@ fn help_text(feedback: bool) -> String {
          \x20\x20\x20\x20--version,  -V         Print version and exit\n\
          \n\
          SUBCOMMANDS:\n\
-         \x20\x20\x20\x20xerj batch-search --input FILE  ordered batch retrieval, JSON in/out (see argos batch-search --help)\n\
-         \x20\x20\x20\x20xerj sessions import     export selected session turns with PII redaction (see argos sessions --help)\n\
-         \x20\x20\x20\x20xerj index      <opts>          direct NDJSON → engine ingest (see argos index --help)\n\
-         \x20\x20\x20\x20xerj autoindex  <folder> [opts] zero-config folder discovery + indexing (see argos autoindex --help)\n\
-         \x20\x20\x20\x20xerj autoindex  map [folder]    data map of indexed data, or a read-only folder preview\n\
-         \x20\x20\x20\x20xerj search     \"<text>\"         retrieve code/passages from a running node — the\n\
+         \x20\x20\x20\x20argos batch-search --input FILE  ordered batch retrieval, JSON in/out (see argos batch-search --help)\n\
+         \x20\x20\x20\x20argos sessions import     export selected session turns with PII redaction (see argos sessions --help)\n\
+         \x20\x20\x20\x20argos index      <opts>          direct NDJSON → engine ingest (see argos index --help)\n\
+         \x20\x20\x20\x20argos autoindex  <folder> [opts] zero-config folder discovery + indexing (see argos autoindex --help)\n\
+         \x20\x20\x20\x20argos autoindex  map [folder]    data map of indexed data, or a read-only folder preview\n\
+         \x20\x20\x20\x20argos search     \"<text>\"         retrieve code/passages from a running node — the\n\
          \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20query client, no wrapper scripts (see argos search --help)\n\
-         \x20\x20\x20\x20xerj def        \"<symbol>\"       go-to-definition: where is this symbol defined, and\n\
+         \x20\x20\x20\x20argos def        \"<symbol>\"       go-to-definition: where is this symbol defined, and\n\
          \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20what is its signature (see argos def --help)\n\
-         \x20\x20\x20\x20xerj code       <corpus> \"<q>\"  reference-coding retrieval: how did peer projects\n\
+         \x20\x20\x20\x20argos code       <corpus> \"<q>\"  reference-coding retrieval: how did peer projects\n\
          \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20solve this (see argos code --help)\n\
-         \x20\x20\x20\x20xerj corpus     add|index|list   clone + index + list the reference corpora that\n\
+         \x20\x20\x20\x20argos corpus     add|index|list   clone + index + list the reference corpora that\n\
          \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20`argos code` searches (see argos corpus --help)\n\
-         \x20\x20\x20\x20xerj init                       wire ARGOS into the coding agents in this project:\n\
+         \x20\x20\x20\x20argos init                       wire ARGOS into the coding agents in this project:\n\
          \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20MCP + skill files, one command (see argos init --help)\n\
-         \x20\x20\x20\x20xerj gain                       what this node did for you, counted from the audit\n\
+         \x20\x20\x20\x20argos gain                       what this node did for you, counted from the audit\n\
          \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20log — searches, hit rate, latency (argos gain --help)\n\
-         \x20\x20\x20\x20xerj brain      <folder>        one command: index a folder into a running, browsable\n\
+         \x20\x20\x20\x20argos brain      <folder>        one command: index a folder into a running, browsable\n\
          \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20second brain in your browser (see argos brain --help)\n\
-         \x20\x20\x20\x20xerj memory     store <ns> --text <t>\n\
+         \x20\x20\x20\x20argos memory     store <ns> --text <t>\n\
          \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20store one agent memory on a running node\n\
          \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20(see argos memory --help)\n\
-         \x20\x20\x20\x20xerj mcp        [opts]          Model Context Protocol stdio server: exposes {mcp_tools} tools\n\
+         \x20\x20\x20\x20argos mcp        [opts]          Model Context Protocol stdio server: exposes {mcp_tools} tools\n\
          \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20(search, semantic, vector, hybrid, memory, second-brain,\n\
          \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20map, plan, code-search, Corpus Hub) to any MCP client.\n\
          \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20Proxies to a node you already started — set ARGOS_URL or\n\
          \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20--url (see argos mcp --help)\n\
-         \x20\x20\x20\x20xerj feedback   [opts]          draft the agent field report ARGOS asks every agent to\n\
+         \x20\x20\x20\x20argos feedback   [opts]          draft the agent field report ARGOS asks every agent to\n\
          \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20file; --submit sends it (GitHub PR first, API fallback),\n\
          \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20--dry-run just prints (see argos feedback --help)\n\
          \n\
@@ -518,20 +518,20 @@ fn help_text(feedback: bool) -> String {
          WIRE-COMPAT IDENTITY — three ways to run this, pick what fits:\n\
          \n\
          \x20\x20\x20\x201. Fully automatic (default, no flags):\n\
-         \x20\x20\x20\x20\x20\x20\x20\x20\x20xerj -d ./data\n\
+         \x20\x20\x20\x20\x20\x20\x20\x20\x20argos -d ./data\n\
          \x20\x20\x20\x20\x20\x20\x20Every client gets a response shaped for its own ecosystem, detected from its\n\
          \x20\x20\x20\x20\x20\x20\x20User-Agent on every request. One instance serves ES and OpenSearch clients at\n\
          \x20\x20\x20\x20\x20\x20\x20once.\n\
          \n\
          \x20\x20\x20\x202. Force one identity for every client, every request:\n\
-         \x20\x20\x20\x20\x20\x20\x20\x20\x20xerj -d ./data --compat-distribution opensearch --compat-version 2.11.0\n\
+         \x20\x20\x20\x20\x20\x20\x20\x20\x20argos -d ./data --compat-distribution opensearch --compat-version 2.11.0\n\
          \x20\x20\x20\x20\x20\x20\x20Or via env (handy in docker-compose):\n\
          \x20\x20\x20\x20\x20\x20\x20\x20\x20ARGOS_COMPAT_DISTRIBUTION=opensearch ARGOS_COMPAT_VERSION=2.11.0 argos -d ./data\n\
          \x20\x20\x20\x20\x20\x20\x20Ignores User-Agent entirely — useful for a client that doesn't send one, or when\n\
          \x20\x20\x20\x20\x20\x20\x20you want fully deterministic behavior.\n\
          \n\
          \x20\x20\x20\x203. Pin only the distribution, let the version auto-detect per client:\n\
-         \x20\x20\x20\x20\x20\x20\x20\x20\x20xerj -d ./data --compat-distribution opensearch\n\
+         \x20\x20\x20\x20\x20\x20\x20\x20\x20argos -d ./data --compat-distribution opensearch\n\
          \x20\x20\x20\x20\x20\x20\x20(or set only ARGOS_COMPAT_VERSION and leave distribution to auto-detect — the two\n\
          \x20\x20\x20\x20\x20\x20\x20settings are resolved independently, mix and match as needed.)\n",
         env!("CARGO_PKG_VERSION"),
@@ -554,14 +554,14 @@ fn ask_help_lines(hub: bool) -> &'static str {
     // survive. Descriptions in this block start at column 40, same as the
     // other USAGE lines.
     if hub {
-        "\x20\x20\x20\x20xerj ask \"<question>\"               answer a question from a hub corpus: the\n\
+        "\x20\x20\x20\x20argos ask \"<question>\"               answer a question from a hub corpus: the\n\
          \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20pre-indexed pack is pulled the first time\n\
          \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20(see argos ask --help); `argos \"<question>\"`\n\
          \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20is the same. `argos hub stop` stops the\n\
          \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20node argos ask started\n\
-         \x20\x20\x20\x20xerj hub <command>                  pull, find, stop, ... see argos hub --help\n"
+         \x20\x20\x20\x20argos hub <command>                  pull, find, stop, ... see argos hub --help\n"
     } else {
-        "\x20\x20\x20\x20xerj ask \"<question>\"              Corpus Hub answers: not available in this\n\
+        "\x20\x20\x20\x20argos ask \"<question>\"              Corpus Hub answers: not available in this\n\
          \x20\x20\x20\x20build (no hub signing key; exits 5).\n\
          \x20\x20\x20\x20A folder you autoindexed: argos search / argos def.\n\
          \x20\x20\x20\x20Public libraries: argos corpus + argos code\n"
@@ -2101,7 +2101,7 @@ fn index_help_text(feedback: bool) -> String {
          \n\
          {}\
          USAGE:\n\
-         \x20\x20\x20\x20xerj index --index <name> --file <ndjson> [OPTIONS]\n\
+         \x20\x20\x20\x20argos index --index <name> --file <ndjson> [OPTIONS]\n\
          \n\
          OPTIONS:\n\
          \x20\x20\x20\x20--index,    -i <NAME>  Target index name (required)\n\
@@ -2386,7 +2386,7 @@ async fn run_cli_index(cmd: IndexCmdArgs) -> Result<()> {
                                 return;
                             }
                             Err(argos_engine::EngineError::Common(
-                                argos_common::XerjError::ResourceExhausted { .. },
+                                argos_common::ArgosError::ResourceExhausted { .. },
                             )) if attempts < 240 => {
                                 attempts += 1;
                                 // The engine's Condvar already waited up to
@@ -4856,7 +4856,7 @@ async fn async_main() -> Result<()> {
     //       index subset to an external ES-compatible target. The loop always
     //       runs; it is inert (one sleep per poll interval, no I/O) until
     //       `wal_tap.enabled` and a `target_url` are set, either in the config
-    //       file or at runtime via `PUT /_xerj/wal_tap`.
+    //       file or at runtime via `PUT /_argos/wal_tap`.
     {
         let tap = state.engine.wal_tap.clone();
         let engine = state.engine.clone();
@@ -4870,7 +4870,7 @@ async fn async_main() -> Result<()> {
                 indices = ?cfg.indices,
                 poll_interval_ms = cfg.poll_interval_ms,
                 "WAL tap enabled — pushing to an external ES-compatible target \
-                 (one-directional, no backfill; see GET /_xerj/wal_tap/_stats)"
+                 (one-directional, no backfill; see GET /_argos/wal_tap/_stats)"
             );
         }
         tokio::spawn(argos_engine::wal_tap::run(tap, engine));
@@ -4886,7 +4886,7 @@ async fn async_main() -> Result<()> {
     //     — a property worth preserving.
     let mut native_router = build_native_router(state.clone());
     // One hub state for the ES-compat `/_hub/v1/*` routes AND the gRPC
-    // `XerjHub` service: one rate-limit budget per client across both.
+    // `ArgosHub` service: one rate-limit budget per client across both.
     let hub_shared = argos_api::hub_api::HubShared::new(state.clone());
     let mut es_router = build_es_compat_router_with_hub(state.clone(), hub_shared.clone());
     if let Some(console_state) = argos_console_state {

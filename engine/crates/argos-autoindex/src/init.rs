@@ -475,7 +475,7 @@ fn toml_basic_string(s: &str) -> String {
 /// True when the file already has a argos server table. A comment that merely
 /// mentions the header does not count. No TOML parser: argos-autoindex does
 /// not depend on one, and a present header is enough to leave the file alone.
-fn codex_has_xerj(text: &str) -> bool {
+fn codex_has_argos(text: &str) -> bool {
     text.lines().any(|line| {
         let t = line.trim();
         !t.starts_with('#') && (t == "[mcp_servers.argos]" || t.starts_with("[mcp_servers.argos."))
@@ -503,7 +503,7 @@ fn write_codex_config(path: &Path, url: &str, dry: bool) -> Result<String, Strin
             ))
         }
     };
-    if existing.as_deref().is_some_and(codex_has_xerj) {
+    if existing.as_deref().is_some_and(codex_has_argos) {
         return Ok(report("kept", path, dry));
     }
     let block = codex_mcp_block(url);

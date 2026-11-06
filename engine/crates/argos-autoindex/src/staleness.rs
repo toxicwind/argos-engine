@@ -57,7 +57,7 @@ const FILE_PAGE: usize = 4096;
 const MAX_DEPTH: usize = 64;
 const HINT_CODE: &str = "index_stale";
 
-/// What `argos search` prints, and what MCP appends under `_xerj.hints`.
+/// What `argos search` prints, and what MCP appends under `_argos.hints`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StalenessHint {
     pub code: &'static str,
@@ -163,13 +163,13 @@ pub fn hint_for_stamp(
     Some(compose(stamp, &root, &rel, change))
 }
 
-/// Append `hint` to `_xerj.hints`, leaving an existing hint list in place.
+/// Append `hint` to `_argos.hints`, leaving an existing hint list in place.
 /// A response that is not a JSON object is left alone.
 pub fn attach(resp: &mut Value, hint: &StalenessHint) {
     let Some(obj) = resp.as_object_mut() else {
         return;
     };
-    let argos = obj.entry("_xerj").or_insert_with(|| json!({}));
+    let argos = obj.entry("_argos").or_insert_with(|| json!({}));
     let Some(argos) = argos.as_object_mut() else {
         return;
     };
@@ -967,13 +967,13 @@ mod tests {
             change: "newer",
         };
         let mut resp = json!({
-            "_xerj": {"hints": [{"code": "lexical_on_semantic_text", "reason": "lexical"}]},
+            "_argos": {"hints": [{"code": "lexical_on_semantic_text", "reason": "lexical"}]},
             "hits": {"hits": [{"_id": "1"}]}
         });
         attach(&mut resp, &hint);
         attach(&mut resp, &hint);
         let hints = resp
-            .pointer("/_xerj/hints")
+            .pointer("/_argos/hints")
             .and_then(Value::as_array)
             .unwrap();
         assert_eq!(hints.len(), 2);
@@ -988,7 +988,7 @@ mod tests {
         let parsed: Value = serde_json::from_str(&merged).unwrap();
         assert_eq!(
             parsed
-                .pointer("/_xerj/hints/0/change")
+                .pointer("/_argos/hints/0/change")
                 .and_then(Value::as_str),
             Some("newer")
         );

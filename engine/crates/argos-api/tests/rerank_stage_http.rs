@@ -1937,7 +1937,7 @@ async fn the_status_endpoint_says_whether_it_is_configured_and_never_the_key() {
         &stub.endpoint,
     ))
     .await;
-    let (st, text) = node.raw("GET", "/_xerj/rerank", String::new()).await;
+    let (st, text) = node.raw("GET", "/_argos/rerank", String::new()).await;
     assert_eq!(st, StatusCode::OK, "{text}");
     assert!(!text.contains("sk-this-must-never-be-printed"), "{text}");
     let r: Value = serde_json::from_str(&text).unwrap();
@@ -1962,7 +1962,7 @@ async fn the_status_endpoint_says_whether_it_is_configured_and_never_the_key() {
         .contains("sends the text"));
 
     let bare = node_with(ProviderSettings::resolve(true, "", "", None, None)).await;
-    let (_, r) = bare.call("GET", "/_xerj/rerank", Value::Null).await;
+    let (_, r) = bare.call("GET", "/_argos/rerank", Value::Null).await;
     assert_eq!(r["configured"], false, "{r}");
     assert_eq!(r["api_key"]["set"], false);
     assert_eq!(r["endpoint"]["source"], "default");
@@ -2266,7 +2266,7 @@ async fn the_response_hint_keeps_the_rerank_block() {
     assert_eq!(st, StatusCode::OK, "{r}");
     // Several diagnostics can share the `hints` array; find the payload one.
     let payload_hint = |resp: &Value| -> Option<Value> {
-        resp["_xerj"]["hints"]
+        resp["_argos"]["hints"]
             .as_array()?
             .iter()
             .find(|h| h["try"]["body"]["fields"] == json!(["_passage"]))

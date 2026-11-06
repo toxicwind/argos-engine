@@ -12,7 +12,7 @@ impl Drop for Node {
 }
 
 fn startup(work: &std::path::Path, extra: &[&str], env_config: Option<&str>) -> String {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_xerj"));
+    let mut child = Command::new(env!("CARGO_BIN_EXE_argos"));
     child
         .current_dir(work)
         .env_clear()

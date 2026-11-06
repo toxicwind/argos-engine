@@ -10728,7 +10728,7 @@ impl Index {
     ///
     /// #320. Called by [`Engine`](crate::engine::Engine) immediately after
     /// every open/create, and again on every index when an operator changes
-    /// `wal_tap.min_retained_generations` through `PUT /_xerj/wal_tap`. See
+    /// `wal_tap.min_retained_generations` through `PUT /_argos/wal_tap`. See
     /// [`argos_storage::index_store::IndexStore::set_wal_min_retained_generations`]
     /// for why the open-time config value alone was not enough.
     pub fn set_wal_min_retained_generations(&self, n: u64) {
@@ -10790,7 +10790,7 @@ impl Index {
         self.publication_test_point(id, PublicationTestPoint::SyncBeforeCollectionBegin);
         if id == "__fail_sync_before_publication" {
             return Err(EngineError::Common(
-                argos_common::XerjError::invalid_document_json(
+                argos_common::ArgosError::invalid_document_json(
                     "injected synchronous preparation failure",
                 ),
             ));
@@ -10866,7 +10866,7 @@ impl Index {
         // so a rejected create leaves nothing behind.
         let analysis_problems = AnalyzerRegistry::unsupported_analysis(&settings);
         if !analysis_problems.is_empty() {
-            return Err(EngineError::Common(argos_common::XerjError::config(
+            return Err(EngineError::Common(argos_common::ArgosError::config(
                 format!(
                     "index [{}] cannot be created: argos cannot honour this analysis \
                  configuration — {}",
@@ -11178,7 +11178,7 @@ impl Index {
 
         if !index_dir.exists() {
             return Err(EngineError::Common(
-                argos_common::XerjError::index_not_found(name.as_str()),
+                argos_common::ArgosError::index_not_found(name.as_str()),
             ));
         }
 
@@ -11705,7 +11705,7 @@ impl Index {
         ) == crate::bulk::SemanticLifecycleFault::Publication
         {
             return Err(crate::EngineError::Common(
-                argos_common::XerjError::invalid_query(
+                argos_common::ArgosError::invalid_query(
                     "injected semantic publication failure inside index_document_prepared",
                 ),
             ));
@@ -11782,7 +11782,7 @@ impl Index {
     ) -> Result<IndexResponse> {
         // Check write block.
         if let Some(block) = self.write_block_reason().await {
-            return Err(EngineError::Common(argos_common::XerjError::index_blocked(
+            return Err(EngineError::Common(argos_common::ArgosError::index_blocked(
                 self.name.as_str(),
                 block,
             )));
@@ -11801,7 +11801,7 @@ impl Index {
             argos_common::document_limit::json_value_exceeds_indexed_document_limit(&source)
         {
             return Err(EngineError::Common(
-                argos_common::XerjError::invalid_document_json(
+                argos_common::ArgosError::invalid_document_json(
                     argos_common::document_limit::indexed_document_refusal_at_least(seen),
                 ),
             ));
@@ -11851,7 +11851,7 @@ impl Index {
             if let Some(entry) = self.store.version_map.get(&doc_id) {
                 if entry.seq_no != expected_seq {
                     return Err(EngineError::Common(
-                        argos_common::XerjError::version_conflict(
+                        argos_common::ArgosError::version_conflict(
                             &doc_id,
                             expected_seq,
                             entry.seq_no,
@@ -11861,7 +11861,7 @@ impl Index {
             } else {
                 // Document doesn't exist but caller expects a specific seq_no.
                 return Err(EngineError::Common(
-                    argos_common::XerjError::version_conflict(&doc_id, expected_seq, 0),
+                    argos_common::ArgosError::version_conflict(&doc_id, expected_seq, 0),
                 ));
             }
         }
@@ -11876,7 +11876,7 @@ impl Index {
                 || self.memtable.contains(&doc_id);
             if exists {
                 return Err(EngineError::Common(
-                    argos_common::XerjError::version_conflict(&doc_id, 0, 1),
+                    argos_common::ArgosError::version_conflict(&doc_id, 0, 1),
                 ));
             }
         }
@@ -11891,7 +11891,7 @@ impl Index {
                 };
                 if !valid {
                     return Err(EngineError::Common(
-                        argos_common::XerjError::version_conflict(&doc_id, version, current),
+                        argos_common::ArgosError::version_conflict(&doc_id, version, current),
                     ));
                 }
             }
@@ -12127,7 +12127,7 @@ impl Index {
         }
 
         if let Some(block) = self.write_block_reason().await {
-            return Err(EngineError::Common(argos_common::XerjError::index_blocked(
+            return Err(EngineError::Common(argos_common::ArgosError::index_blocked(
                 self.name.as_str(),
                 block,
             )));
@@ -12177,7 +12177,7 @@ impl Index {
                     if bp_start.elapsed() >= bp_deadline {
                         self.maybe_spawn_flush().await;
                         return Err(EngineError::Common(
-                            argos_common::XerjError::resource_exhausted(format!(
+                            argos_common::ArgosError::resource_exhausted(format!(
                                 "indexing back-pressure: memtable={}MB exceeds 3×flush_threshold={}MB on index [{}] after {}s wait — flusher may be stuck",
                                 self.memtable.size_bytes() / (1024 * 1024),
                                 self.flush_byte_threshold / (1024 * 1024),
@@ -12494,7 +12494,7 @@ impl Index {
         }
         let batch_len = docs.len();
         if let Some(block) = self.write_block_reason().await {
-            return Err(EngineError::Common(argos_common::XerjError::index_blocked(
+            return Err(EngineError::Common(argos_common::ArgosError::index_blocked(
                 self.name.as_str(),
                 block,
             )));
@@ -12507,7 +12507,7 @@ impl Index {
             .install(|| argos_storage::IndexStore::validate_raw_batch(docs))
             .map_err(|error| match error {
                 argos_storage::StorageError::RawBatchValidation { .. } => EngineError::Common(
-                    argos_common::XerjError::invalid_document_json(error.to_string()),
+                    argos_common::ArgosError::invalid_document_json(error.to_string()),
                 ),
                 error => EngineError::Storage(error),
             })?;
@@ -12529,7 +12529,7 @@ impl Index {
                     if bp_start.elapsed() >= bp_deadline {
                         self.maybe_spawn_flush().await;
                         return Err(EngineError::Common(
-                            argos_common::XerjError::resource_exhausted(format!(
+                            argos_common::ArgosError::resource_exhausted(format!(
                                 "indexing back-pressure: memtable={}MB exceeds 3×flush_threshold={}MB on index [{}] after {}s wait — flusher may be stuck",
                                 self.memtable.size_bytes() / (1024 * 1024),
                                 self.flush_byte_threshold / (1024 * 1024),
@@ -12555,7 +12555,7 @@ impl Index {
             .install(|| argos_storage::IndexStore::parse_validated_raw_batch(validated))
             .map_err(|error| match error {
                 argos_storage::StorageError::RawBatchValidation { .. } => EngineError::Common(
-                    argos_common::XerjError::invalid_document_json(error.to_string()),
+                    argos_common::ArgosError::invalid_document_json(error.to_string()),
                 ),
                 error => EngineError::Storage(error),
             })?;
@@ -12865,7 +12865,7 @@ impl Index {
         self.governor_write_gate()?;
         let has_vector_mapping = {
             let schema = self.schema.try_read().map_err(|_| {
-                EngineError::Common(argos_common::XerjError::resource_exhausted(
+                EngineError::Common(argos_common::ArgosError::resource_exhausted(
                     "schema is being updated during synchronous ingest; retry the batch",
                 ))
             })?;
@@ -12874,14 +12874,14 @@ impl Index {
         if has_vector_mapping {
             if tokio::runtime::Handle::try_current().is_ok() {
                 return Err(EngineError::Common(
-                    argos_common::XerjError::resource_exhausted(
+                    argos_common::ArgosError::resource_exhausted(
                         "synchronous vector ingest cannot run on a Tokio runtime thread; call it from a dedicated/Rayon worker or use async turbo ingest",
                     ),
                 ));
             }
             if self.flush_signal.runtime().is_none() {
                 return Err(EngineError::Common(
-                    argos_common::XerjError::resource_exhausted(
+                    argos_common::ArgosError::resource_exhausted(
                         "synchronous vector ingest requires the engine runtime; retry through async turbo ingest",
                     ),
                 ));
@@ -12891,7 +12891,7 @@ impl Index {
             .install(|| argos_storage::IndexStore::validate_raw_batch(docs))
             .map_err(|error| match error {
                 argos_storage::StorageError::RawBatchValidation { .. } => EngineError::Common(
-                    argos_common::XerjError::invalid_document_json(error.to_string()),
+                    argos_common::ArgosError::invalid_document_json(error.to_string()),
                 ),
                 error => EngineError::Storage(error),
             })?;
@@ -12924,7 +12924,7 @@ impl Index {
                     if bp_start.elapsed() >= bp_deadline {
                         self.try_spawn_sync_flush_all();
                         return Err(EngineError::Common(
-                            argos_common::XerjError::resource_exhausted(format!(
+                            argos_common::ArgosError::resource_exhausted(format!(
                                 "indexing back-pressure: memtable={}MB exceeds 3×flush_threshold={}MB on index [{}] after {}s wait — flusher may be stuck",
                                 self.memtable.size_bytes() / (1024 * 1024),
                                 self.flush_byte_threshold / (1024 * 1024),
@@ -12955,7 +12955,7 @@ impl Index {
         // memtable so live GET, flush, and replay all observe the same value.
         let (has_copy_to, passage_scored_fields) = {
             let schema = self.schema.try_read().map_err(|_| {
-                EngineError::Common(argos_common::XerjError::resource_exhausted(
+                EngineError::Common(argos_common::ArgosError::resource_exhausted(
                     "schema is being updated during synchronous ingest; retry the batch",
                 ))
             })?;
@@ -12982,7 +12982,7 @@ impl Index {
             let (raw_docs, parsed) = validated.into_parts();
             let parsed = parsed.expect("parse_validated_raw_batch retains parsed values");
             let schema = self.schema.try_read().map_err(|_| {
-                EngineError::Common(argos_common::XerjError::resource_exhausted(
+                EngineError::Common(argos_common::ArgosError::resource_exhausted(
                     "schema is being updated during synchronous ingest; retry the batch",
                 ))
             })?;
@@ -13313,7 +13313,7 @@ impl Index {
         }
 
         if let Some(block) = self.write_block_reason().await {
-            return Err(EngineError::Common(argos_common::XerjError::index_blocked(
+            return Err(EngineError::Common(argos_common::ArgosError::index_blocked(
                 self.name.as_str(),
                 block,
             )));
@@ -15875,7 +15875,7 @@ impl Index {
         // logs an error every pass until the offending segment is repaired.
         let failed = failed_batches.load(std::sync::atomic::Ordering::Relaxed);
         if failed > 0 {
-            return Err(EngineError::Common(argos_common::XerjError::internal(
+            return Err(EngineError::Common(argos_common::ArgosError::internal(
                 format!(
                     "merge pass aborted {failed} batch(es): an input segment could not \
                      be fully read, the output could not be written, or there was not \
@@ -19140,7 +19140,7 @@ impl Index {
         if self.index_has_any_vector_at(field).await {
             return Ok(());
         }
-        Err(EngineError::Common(argos_common::XerjError::invalid_query(
+        Err(EngineError::Common(argos_common::ArgosError::invalid_query(
             format!(
                 "[knn] query field [{field}] is not a vector field: it is absent from the \
                  mapping and carries no indexed vector data. Map it as [dense_vector] (or \
@@ -19219,7 +19219,7 @@ impl Index {
         {
             return Ok(());
         }
-        Err(EngineError::Common(argos_common::XerjError::invalid_query(
+        Err(EngineError::Common(argos_common::ArgosError::invalid_query(
             format!(
                 "[knn] nested query field [{field}] is not a vector field: it is absent from \
                  the nested mapping and carries no indexed vector data. Map it as \
@@ -19346,7 +19346,7 @@ impl Index {
             match vectors.pop() {
                 Some(v) if !v.is_empty() => v,
                 _ => {
-                    return Err(EngineError::Common(argos_common::XerjError::invalid_query(
+                    return Err(EngineError::Common(argos_common::ArgosError::invalid_query(
                         "embedder returned no vector for semantic query",
                     )));
                 }
@@ -19360,7 +19360,7 @@ impl Index {
             // indices contribute no hits instead of failing the request.
             // Do not soften this error here — the explicit-index contract is
             // the 400, and the coordinator matches this reason text.
-            return Err(EngineError::Common(argos_common::XerjError::invalid_query(
+            return Err(EngineError::Common(argos_common::ArgosError::invalid_query(
                 format!(
                     "semantic query on field [{field}]: it is not a `semantic_text` field, so \
                      there is no comparable stored vector to match. A `semantic` query requires \
@@ -19517,7 +19517,7 @@ impl Index {
                 .into_iter()
                 .map(|_| {
                     Err(crate::EngineError::Common(
-                        argos_common::XerjError::invalid_query(
+                        argos_common::ArgosError::invalid_query(
                             "injected semantic embedding failure inside \
                              apply_semantic_embeddings_batch",
                         ),
@@ -19907,7 +19907,7 @@ impl Index {
             .enumerate()
             .map(|(idx, source)| match failures[idx].take() {
                 Some(error) if admission_rejections[idx] => Err(EngineError::Common(
-                    argos_common::XerjError::resource_exhausted(format!(
+                    argos_common::ArgosError::resource_exhausted(format!(
                         "semantic_text batch embed rejected before tokenization: {error}"
                     )),
                 )),
@@ -19969,7 +19969,7 @@ impl Index {
         // top-N would silently under-count. Fail loud (400) instead of
         // returning `aggs: null`, mirroring `result_window_too_large`.
         if request.aggs.is_some() {
-            return Err(EngineError::Common(argos_common::XerjError::invalid_query(
+            return Err(EngineError::Common(argos_common::ArgosError::invalid_query(
                 "aggregations are not supported with hybrid/fusion queries; \
                  run the aggregation as a separate non-hybrid search",
             )));
@@ -20107,7 +20107,7 @@ impl Index {
             // silently substituting RRF, in case a future non-parser caller
             // constructs the AST directly.
             argos_query::ast::FusionStrategy::Learned => {
-                return Err(EngineError::Common(argos_common::XerjError::invalid_query(
+                return Err(EngineError::Common(argos_common::ArgosError::invalid_query(
                     "hybrid fusion learned is not yet supported; use rrf or linear",
                 )));
             }
@@ -21321,7 +21321,7 @@ impl Index {
     ) -> Result<DeleteDocOutcome> {
         // Check write block.
         if let Some(block) = self.write_block_reason().await {
-            return Err(EngineError::Common(argos_common::XerjError::index_blocked(
+            return Err(EngineError::Common(argos_common::ArgosError::index_blocked(
                 self.name.as_str(),
                 block,
             )));
@@ -21340,7 +21340,7 @@ impl Index {
                 Some(entry) if !entry.deleted => {
                     if entry.seq_no != expected_seq {
                         return Err(EngineError::Common(
-                            argos_common::XerjError::version_conflict(
+                            argos_common::ArgosError::version_conflict(
                                 id,
                                 expected_seq,
                                 entry.seq_no,
@@ -21352,7 +21352,7 @@ impl Index {
                 // (ES: "required seqNo [N] ... but no document was found").
                 _ => {
                     return Err(EngineError::Common(
-                        argos_common::XerjError::version_conflict(id, expected_seq, 0),
+                        argos_common::ArgosError::version_conflict(id, expected_seq, 0),
                     ));
                 }
             }
@@ -22205,7 +22205,7 @@ impl Index {
         };
         if from.saturating_add(size) > max_result_window {
             return Err(EngineError::Common(
-                argos_common::XerjError::result_window_too_large(from, size, max_result_window),
+                argos_common::ArgosError::result_window_too_large(from, size, max_result_window),
             ));
         }
         Ok(())
@@ -22604,7 +22604,7 @@ impl Index {
         .await
         {
             Ok(result) => result.map_err(|_| {
-                EngineError::Common(argos_common::XerjError::internal(
+                EngineError::Common(argos_common::ArgosError::internal(
                     "query semaphore closed — index is shutting down",
                 ))
             })?,
@@ -22821,7 +22821,7 @@ impl Index {
     pub async fn validate_query(
         &self,
         query: &QueryNode,
-    ) -> std::result::Result<(), argos_common::XerjError> {
+    ) -> std::result::Result<(), argos_common::ArgosError> {
         let schema = self.schema.read().await;
         check_buildable_query(query, &schema.schema).map(|_| ())
     }
@@ -22846,7 +22846,7 @@ impl Index {
         }
         // Check read block.
         if self.is_read_blocked().await {
-            return Err(EngineError::Common(argos_common::XerjError::index_blocked(
+            return Err(EngineError::Common(argos_common::ArgosError::index_blocked(
                 self.name.as_str(),
                 "read",
             )));
@@ -22989,7 +22989,7 @@ impl Index {
                 // this against a legacy namespace). #437 / #504 review.
                 if sf.unmapped_type.is_none() && declared_field(&schema.schema, &sf.field).is_none()
                 {
-                    return Err(EngineError::Common(argos_common::XerjError::invalid_query(
+                    return Err(EngineError::Common(argos_common::ArgosError::invalid_query(
                         format!("No mapping found for [{}] in order to sort on", sf.field),
                     )));
                 }
@@ -23063,7 +23063,7 @@ impl Index {
         if passage_requested(request)
             && (peel_multi_knn_query(query).is_some() || peel_hybrid_query(query).is_some())
         {
-            return Err(EngineError::Common(argos_common::XerjError::invalid_query(
+            return Err(EngineError::Common(argos_common::ArgosError::invalid_query(
                 "`fields: [\"_passage\"]` requires one semantic or kNN clause; \
                      multi-kNN and hybrid queries combine independent score contributions, \
                      so they do not have one unambiguous winning passage; request `_passage` \
@@ -23266,7 +23266,7 @@ impl Index {
         // erased the harmless one-clause wrappers, so this only fires on
         // shapes that genuinely cannot execute.
         if query.contains_hybrid() {
-            return Err(EngineError::Common(argos_common::XerjError::invalid_query(
+            return Err(EngineError::Common(argos_common::ArgosError::invalid_query(
                 "hybrid queries are supported at the top level or as \
                  bool{must: [hybrid], filter: […]} (the filter clauses are pushed \
                  into every leg); this query nests a hybrid where it cannot be \
@@ -27204,7 +27204,7 @@ impl Index {
                         format!("{combined}")
                     };
                     return Err(EngineError::Common(
-                            argos_common::XerjError::invalid_query(format!(
+                            argos_common::ArgosError::invalid_query(format!(
                                 "function score query returned an invalid score: {label} for doc: {doc_idx}; score must be a non-negative real number"
                             )),
                         ));
@@ -27760,7 +27760,7 @@ impl Index {
                     // silently drops its docs from every aggregation
                     // bucket, so surface it rather than continuing.
                     None => {
-                        return Err(EngineError::Common(argos_common::XerjError::internal(
+                        return Err(EngineError::Common(argos_common::ArgosError::internal(
                             format!("segment {} unreadable during corpus assembly", seg.id),
                         )));
                     }
@@ -28326,7 +28326,7 @@ impl Index {
                     Ok(Ok(())) => {}
                     Ok(Err(e)) => result = Err(e),
                     Err(error) => {
-                        result = Err(EngineError::Common(argos_common::XerjError::internal(
+                        result = Err(EngineError::Common(argos_common::ArgosError::internal(
                             format!("flush shard task failed: {error}"),
                         )));
                     }
@@ -28874,7 +28874,7 @@ impl Index {
     /// Names the block that is currently denying **writes** on this index, or
     /// `None` when writes are admitted.
     ///
-    /// The returned name is threaded into `XerjError::IndexBlocked` so the HTTP
+    /// The returned name is threaded into `ArgosError::IndexBlocked` so the HTTP
     /// layer can pick the status ES picks. Three settings deny writes, and they
     /// do *not* all answer the same status:
     ///
@@ -29210,7 +29210,7 @@ impl Index {
         let projected = candidate.schema.field_count() as u32;
         if projected > self.max_fields_per_index {
             return Err(EngineError::Common(
-                argos_common::XerjError::invalid_mapping(format!(
+                argos_common::ArgosError::invalid_mapping(format!(
                     "Limit of total fields [{}] has been exceeded: this mapping update would \
                      bring the index to {projected} fields",
                     self.max_fields_per_index
@@ -29376,7 +29376,7 @@ impl Index {
                     other => other.to_string().chars().take(64).collect(),
                 };
                 return Err(EngineError::Common(
-                    argos_common::XerjError::InvalidMapping {
+                    argos_common::ArgosError::InvalidMapping {
                         reason: format!(
                             "failed to parse field [{key}] of type [date] with value [{preview}]"
                         ),
@@ -36377,7 +36377,7 @@ fn flush_admit_timeout_error(index: &str, what: &str, budget: std::time::Duratio
         budget_ms = budget.as_millis() as u64,
         "flush timed out waiting for admission; the memtable was not frozen"
     );
-    EngineError::Common(argos_common::XerjError::internal(format!(
+    EngineError::Common(argos_common::ArgosError::internal(format!(
         "index [{index}] flush timed out after {budget:?} waiting for {what}; \
          the memtable was not frozen, so this flush can be retried"
     )))
@@ -36389,7 +36389,7 @@ fn flush_budget_timeout_error(index: &str, budget: std::time::Duration) -> Engin
         budget_ms = budget.as_millis() as u64,
         "flush timed out; the publish coordinator was left running"
     );
-    EngineError::Common(argos_common::XerjError::internal(format!(
+    EngineError::Common(argos_common::ArgosError::internal(format!(
         "index [{index}] flush timed out after {budget:?}; the publish coordinator was left \
          running so a publication already past the freeze can finish, and this refresh can be \
          retried"
@@ -36466,7 +36466,7 @@ async fn await_flush_task(
 ) -> Result<()> {
     match within_wall_clock(budget, task).await {
         Some(Ok(result)) => result,
-        Some(Err(error)) => Err(EngineError::Common(argos_common::XerjError::internal(
+        Some(Err(error)) => Err(EngineError::Common(argos_common::ArgosError::internal(
             format!("index [{index}] flush task failed: {error}"),
         ))),
         None => Err(flush_budget_timeout_error(index, budget)),
@@ -37069,7 +37069,7 @@ async fn do_flush_shard(
         .await;
         match joined {
             Ok(result) => result,
-            Err(join_e) => Err(EngineError::Common(argos_common::XerjError::internal(
+            Err(join_e) => Err(EngineError::Common(argos_common::ArgosError::internal(
                 format!("flush finalizer task failed before publication: {join_e}"),
             ))),
         }
@@ -37077,7 +37077,7 @@ async fn do_flush_shard(
     let finalize_outcome = match finalize_coordinator.await {
         Ok(inner) => inner,
         Err(join_e) => {
-            return Err(EngineError::Common(argos_common::XerjError::internal(
+            return Err(EngineError::Common(argos_common::ArgosError::internal(
                 format!("flush coordinator task failed: {join_e}"),
             )));
         }
@@ -40729,8 +40729,8 @@ fn build_highlight_fragments(
 /// the `semantic_text` field's mapped `dimensions`. The backend's width is
 /// fixed, so a retry cannot succeed: report it as a mapping error (HTTP 400,
 /// `mapper_parsing_exception` on `_bulk`) rather than a retryable backend 500.
-fn semantic_width_mismatch_error(detail: &str) -> argos_common::XerjError {
-    argos_common::XerjError::invalid_mapping(format!(
+fn semantic_width_mismatch_error(detail: &str) -> argos_common::ArgosError {
+    argos_common::ArgosError::invalid_mapping(format!(
         "{detail}; the embedding backend's vector width is fixed, so retrying cannot \
          succeed: set the semantic_text field's `dimensions` to the backend's width, \
          or point the field at a backend that returns the mapped width"
@@ -40774,11 +40774,11 @@ fn is_embedding_admission_rejection(_e: &anyhow::Error) -> bool {
     false
 }
 
-fn embed_backend_error(e: anyhow::Error, ctx: &str) -> argos_common::XerjError {
+fn embed_backend_error(e: anyhow::Error, ctx: &str) -> argos_common::ArgosError {
     if is_embedding_admission_rejection(&e) {
-        return argos_common::XerjError::resource_exhausted(format!("{ctx}: {e}"));
+        return argos_common::ArgosError::resource_exhausted(format!("{ctx}: {e}"));
     }
-    argos_common::XerjError::embedding(format!("{ctx}: {e}"))
+    argos_common::ArgosError::embedding(format!("{ctx}: {e}"))
 }
 
 const EMBEDDING_IDENTITY_FILE: &str = "embedding_identity.json";
@@ -40860,7 +40860,7 @@ fn validate_onnx_dimensions(fields: &[FieldConfig]) -> Result<()> {
                 .dimensions
                 .unwrap_or(argos_ai::local::DEFAULT_DIMS);
             if dims != 384 {
-                return Err(EngineError::Common(argos_common::XerjError::embedding(
+                return Err(EngineError::Common(argos_common::ArgosError::embedding(
                     format!(
                         "semantic field [{}] declares {dims} dimensions, but the experimental \
                          MiniLM ONNX backend returns exactly 384. Change the mapping to 384 or \
@@ -40903,7 +40903,7 @@ fn configured_onnx_assets(
             })
         })
         .clone()
-        .map_err(|reason| EngineError::Common(argos_common::XerjError::embedding(reason)))
+        .map_err(|reason| EngineError::Common(argos_common::ArgosError::embedding(reason)))
 }
 
 fn configured_onnx_identity(
@@ -40913,7 +40913,7 @@ fn configured_onnx_identity(
         return Ok(None);
     }
     #[cfg(not(feature = "onnx-experimental"))]
-    return Err(EngineError::Common(argos_common::XerjError::embedding(
+    return Err(EngineError::Common(argos_common::ArgosError::embedding(
         "onnx-experimental was requested but this engine build does not include the \
          onnx-experimental feature; no embedding identity marker was written",
     )));
@@ -41240,7 +41240,7 @@ pub(crate) fn embedding_execution_identity(
         "onnx-experimental" => "onnx-experimental",
         "lexical" => "lexical",
         "proxy" if cfg.default_endpoint.is_empty() => {
-            return Err(EngineError::Common(argos_common::XerjError::embedding(
+            return Err(EngineError::Common(argos_common::ArgosError::embedding(
                 "embedding.mode=proxy requires embedding.default_endpoint to be set; \
                  remove mode=proxy (use auto) if a lexical fallback is wanted",
             )));
@@ -41252,7 +41252,7 @@ pub(crate) fn embedding_execution_identity(
     if backend == "proxy" {
         if let Err(e) = argos_ai::embed::EmbeddingProxy::new(proxy_config(cfg)) {
             if requested == "proxy" {
-                return Err(EngineError::Common(argos_common::XerjError::embedding(
+                return Err(EngineError::Common(argos_common::ArgosError::embedding(
                     format!("embedding.mode=proxy failed to initialize: {e}"),
                 )));
             }
@@ -41278,7 +41278,7 @@ pub(crate) fn embedding_execution_identity(
         ),
         "onnx-experimental" => {
             let identity = configured_onnx_identity(cfg)?.ok_or_else(|| {
-                EngineError::Common(argos_common::XerjError::embedding(
+                EngineError::Common(argos_common::ArgosError::embedding(
                     "ONNX embedding identity is unavailable",
                 ))
             })?;
@@ -41443,14 +41443,14 @@ fn validate_embedding_identity(
     if marker_path.exists() {
         let persisted: PersistedEmbeddingIdentity =
             serde_json::from_slice(&std::fs::read(&marker_path)?).map_err(|e| {
-                EngineError::Common(argos_common::XerjError::embedding(format!(
+                EngineError::Common(argos_common::ArgosError::embedding(format!(
                     "cannot read {}: {e}; restore the marker or reindex this index",
                     marker_path.display()
                 )))
             })?;
         return match configured {
             Some(current) if current == persisted => Ok(()),
-            Some(current) => Err(EngineError::Common(argos_common::XerjError::embedding(
+            Some(current) => Err(EngineError::Common(argos_common::ArgosError::embedding(
                 format!(
                     "embedding identity mismatch for index {}: persisted backend={} \
                      model={} tokenizer={}, configured backend={} model={} tokenizer={}. \
@@ -41467,7 +41467,7 @@ fn validate_embedding_identity(
                     current.tokenizer_sha256,
                 ),
             ))),
-            None => Err(EngineError::Common(argos_common::XerjError::embedding(
+            None => Err(EngineError::Common(argos_common::ArgosError::embedding(
                 format!(
                     "index {} contains ONNX vectors but the server is configured for \
                      embedding.mode={:?}. Restart with onnx-experimental and the original \
@@ -41491,7 +41491,7 @@ fn validate_embedding_identity(
         return Ok(());
     };
     if !new_index && has_documents {
-        return Err(EngineError::Common(argos_common::XerjError::embedding(
+        return Err(EngineError::Common(argos_common::ArgosError::embedding(
             format!(
                 "existing semantic index {} has no embedding identity marker. It may contain \
                  vectors from another backend, so ONNX cannot be enabled safely in place. \
@@ -41551,7 +41551,7 @@ fn validate_embedding_execution(
     if path.exists() {
         let persisted: PersistedEmbeddingExecution = serde_json::from_slice(&std::fs::read(&path)?)
             .map_err(|e| {
-                EngineError::Common(argos_common::XerjError::embedding(format!(
+                EngineError::Common(argos_common::ArgosError::embedding(format!(
                     "cannot read {}: {e}; remove it to re-record, or reindex",
                     path.display()
                 )))
@@ -41561,7 +41561,7 @@ fn validate_embedding_execution(
             && (persisted.backend != current.backend
                 || (!older_record && persisted.identity_sha256 != current.identity_sha256));
         if genuine_change {
-            return Err(EngineError::Common(argos_common::XerjError::embedding(
+            return Err(EngineError::Common(argos_common::ArgosError::embedding(
                 format!(
                     "index {} holds vectors produced by embedding backend {:?} but this server resolves embedding.mode={:?} to backend {:?}. Query vectors from one embedder scored against document vectors from another are silently wrong rather than visibly wrong: the widths can agree, so no dimension check fires, and the scores stay plausible while the ranking degrades toward noise. Restore the previous embedding configuration, or reindex into a new index under this one.",
                     index_dir.display(),
@@ -41606,13 +41606,13 @@ fn ensure_embedding_identity_for_new_field(
     if marker_path.exists() {
         let persisted: PersistedEmbeddingIdentity =
             serde_json::from_slice(&std::fs::read(&marker_path)?).map_err(|e| {
-                EngineError::Common(argos_common::XerjError::embedding(format!(
+                EngineError::Common(argos_common::ArgosError::embedding(format!(
                     "cannot read {}: {e}; restore the marker or reindex this index",
                     marker_path.display()
                 )))
             })?;
         if persisted != configured {
-            return Err(EngineError::Common(argos_common::XerjError::embedding(
+            return Err(EngineError::Common(argos_common::ArgosError::embedding(
                 format!(
                     "embedding identity mismatch for index {}; refusing to add a semantic \
                      field in a different vector space. Restore the original ONNX assets or \
@@ -42786,7 +42786,7 @@ fn make_embedder(cfg: &argos_common::config::EmbeddingConfig) -> Result<argos_ai
         // (endpoint set but mode not pinned) keeps the documented fallback.
         if cfg.default_endpoint.is_empty() {
             if explicit_proxy {
-                return Err(EngineError::Common(argos_common::XerjError::embedding(
+                return Err(EngineError::Common(argos_common::ArgosError::embedding(
                     "embedding.mode=proxy requires embedding.default_endpoint to be set; \
                      remove mode=proxy (use auto) if a lexical fallback is wanted",
                 )));
@@ -42805,7 +42805,7 @@ fn make_embedder(cfg: &argos_common::config::EmbeddingConfig) -> Result<argos_ai
             }
             Err(e) => {
                 if explicit_proxy {
-                    return Err(EngineError::Common(argos_common::XerjError::embedding(
+                    return Err(EngineError::Common(argos_common::ArgosError::embedding(
                         format!("embedding.mode=proxy failed to initialize: {e}"),
                     )));
                 }
@@ -42835,7 +42835,7 @@ fn make_onnx_embedder(cfg: &argos_common::config::EmbeddingConfig) -> Result<arg
     let model_path = PathBuf::from(cfg.onnx_model_path.trim());
     let tokenizer_path = PathBuf::from(cfg.onnx_tokenizer_path.trim());
     if cfg.onnx_model_path.trim().is_empty() || !model_path.is_file() {
-        return Err(EngineError::Common(argos_common::XerjError::embedding(
+        return Err(EngineError::Common(argos_common::ArgosError::embedding(
             format!(
                 "embedding.mode=onnx-experimental requires a readable FP32 model file; \
                  set --onnx-model <PATH> or embedding.onnx_model_path (got {:?})",
@@ -42844,7 +42844,7 @@ fn make_onnx_embedder(cfg: &argos_common::config::EmbeddingConfig) -> Result<arg
         )));
     }
     if cfg.onnx_tokenizer_path.trim().is_empty() || !tokenizer_path.is_file() {
-        return Err(EngineError::Common(argos_common::XerjError::embedding(
+        return Err(EngineError::Common(argos_common::ArgosError::embedding(
             format!(
                 "embedding.mode=onnx-experimental requires the matching tokenizer.json; \
                  set --onnx-tokenizer <PATH> or embedding.onnx_tokenizer_path (got {:?})",
@@ -42861,7 +42861,7 @@ fn make_onnx_embedder(cfg: &argos_common::config::EmbeddingConfig) -> Result<arg
         || cfg.onnx_max_input_bytes_per_call > cfg.onnx_max_inflight_input_bytes
         || cfg.onnx_max_inflight_input_bytes > u32::MAX as usize
     {
-        return Err(EngineError::Common(argos_common::XerjError::embedding(
+        return Err(EngineError::Common(argos_common::ArgosError::embedding(
             format!(
                 "invalid ONNX limits: pending={}, batch={}, padded_tokens={}, inflight_calls={}, \
                  bytes_per_call={}, inflight_bytes={}; all must be non-zero, bytes_per_call \
@@ -42905,7 +42905,7 @@ fn make_onnx_embedder(cfg: &argos_common::config::EmbeddingConfig) -> Result<arg
 
 #[cfg(not(feature = "onnx-experimental"))]
 fn make_onnx_embedder(_cfg: &argos_common::config::EmbeddingConfig) -> Result<argos_ai::Embedder> {
-    Err(EngineError::Common(argos_common::XerjError::embedding(
+    Err(EngineError::Common(argos_common::ArgosError::embedding(
         "embedding.mode=onnx-experimental requested, but this binary was built without it; \
          rebuild argos-server with --features onnx-experimental. ARGOS will not silently \
          substitute lexical vectors because that would mislabel search quality.",
@@ -42929,7 +42929,7 @@ pub fn ensure_neural_ready(cfg: &argos_common::config::EmbeddingConfig) -> Resul
     {
         let neural_cfg = configured_neural_config(cfg);
         if let Err(error) = argos_ai::Embedder::preload_neural(&neural_cfg) {
-            return Err(EngineError::Common(argos_common::XerjError::embedding(
+            return Err(EngineError::Common(argos_common::ArgosError::embedding(
                 argos_ai::neural::startup_failure_message(&neural_cfg.model_id, &error),
             )));
         }
@@ -43329,7 +43329,7 @@ fn store_config_from(
         // configuration before freezing the `Config` into its `Arc`, so this
         // is the persisted runtime value when one exists and the file's value
         // otherwise — i.e. correct from byte zero for every store opened at
-        // boot. A runtime `PUT /_xerj/wal_tap` cannot reach an `Arc<Config>`
+        // boot. A runtime `PUT /_argos/wal_tap` cannot reach an `Arc<Config>`
         // at all, so it is applied by
         // `Engine::apply_wal_retention_floor` straight onto the live
         // `WalWriter`s instead. Both halves are required: this one alone
@@ -43389,7 +43389,7 @@ pub fn storage_mode_from_config(
             // `s3_prefix` arrives as "argos/" or "argos" (or empty) — normalise
             // so the per-index namespace is always `<prefix>/indices/<name>/`.
             // The naive `{prefix}indices/` concatenation glued the default
-            // into `xerjindices/`, one key level that reads as a typo in
+            // into `argosindices/`, one key level that reads as a typo in
             // every bucket browser.
             let base = storage.s3_prefix.trim().trim_end_matches('/');
             let prefix = if base.is_empty() {
@@ -46191,16 +46191,16 @@ fn has_analyzed_text_term_leaf(q: &QueryNode, schema: &Schema) -> bool {
 fn check_buildable_query(
     query: &QueryNode,
     schema: &Schema,
-) -> std::result::Result<QueryNode, argos_common::XerjError> {
+) -> std::result::Result<QueryNode, argos_common::ArgosError> {
     let resolved = rewrite_keyword_full_text_to_term(&rewrite_query_aliases(query, schema), schema);
     if let Some(field) = unsearchable_query_field(&resolved, schema) {
-        return Err(argos_common::XerjError::invalid_query(format!(
+        return Err(argos_common::ArgosError::invalid_query(format!(
             "failed to create query: Cannot search on field [{field}] \
              since it is not indexed nor has doc values."
         )));
     }
     if let Some(value) = non_numeric_term_value(&resolved, schema) {
-        return Err(argos_common::XerjError::invalid_query(format!(
+        return Err(argos_common::ArgosError::invalid_query(format!(
             "failed to create query: For input string: \"{value}\""
         )));
     }
@@ -46214,7 +46214,7 @@ fn check_buildable_query(
 /// `IllegalArgumentException: Cannot search on field [f] since it is not
 /// indexed nor has doc values.`, which its shard query builder wraps as a
 /// `query_shard_exception` inside a 400 `search_phase_execution_exception`.
-/// ARGOS's `XerjError::InvalidQuery` + the `failed to create query:` prefix
+/// ARGOS's `ArgosError::InvalidQuery` + the `failed to create query:` prefix
 /// reproduce exactly that envelope (see `argos-api/src/error.rs`).
 ///
 /// `index: false` WITH doc values is *not* unsearchable: ES 8.1 added "doc

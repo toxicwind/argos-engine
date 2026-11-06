@@ -18,9 +18,9 @@
 //!
 //! ## Who may call it
 //!
-//! Every `/_xerj/*` route is **superuser-only**, enforced in
+//! Every `/_argos/*` route is **superuser-only**, enforced in
 //! [`crate::authz`](../../argos_api/authz/index.html) on the first path
-//! segment. `PUT /_xerj/wal_tap` names an arbitrary host in `target_url` and
+//! segment. `PUT /_argos/wal_tap` names an arbitrary host in `target_url` and
 //! an arbitrary index set in `indices`, and attaches an operator-supplied
 //! `Authorization` header to what it sends — a whole-node export channel and
 //! an authenticated SSRF in one request. Nothing here is index-scoped, so
@@ -98,7 +98,7 @@
 //! and always finds out. The
 //! cursor carries the generation it sits in, a pruned-out-from-under-us
 //! generation is detected exactly ([`WalShardTail::gap`]), and each occurrence
-//! logs at `warn` and increments `gaps` in `GET /_xerj/wal_tap/_stats`. The
+//! logs at `warn` and increments `gaps` in `GET /_argos/wal_tap/_stats`. The
 //! degradation is visible, not silent.
 //!
 //! "Visible" is not the same as "survivable", though, and at the default
@@ -116,7 +116,7 @@
 //! releases it, which is exactly how a dead follower wedges a leader's disk.
 //! A floor costs `n * wal_max_size_mb` per shard and not one byte more.
 //!
-//! The floor is **live**: `PUT /_xerj/wal_tap` pushes it straight onto the
+//! The floor is **live**: `PUT /_argos/wal_tap` pushes it straight onto the
 //! open `WalWriter`s (`Engine::apply_wal_retention_floor`), because the value
 //! that reaches a store at open time comes from `Engine.config`, an
 //! `Arc<Config>` written once at boot and never mutated. Setting it through
@@ -129,8 +129,8 @@
 //! construction is its `IndexFileDeleter.revisitPolicy` (`:516-543`).
 //!
 //! **4c. Where the configuration lives.** In the state file next to the
-//! cursors, not only in memory. `PUT /_xerj/wal_tap` is durable and is
-//! re-applied over the config file on the next boot; `DELETE /_xerj/wal_tap`
+//! cursors, not only in memory. `PUT /_argos/wal_tap` is durable and is
+//! re-applied over the config file on the next boot; `DELETE /_argos/wal_tap`
 //! drops it. The alternative — the shape this started as — advertised
 //! "runtime config, no restart" while a restart silently reverted the tap to
 //! `enabled = false`, froze its cursors, let WAL pruning carry on, and left
@@ -217,7 +217,7 @@ struct IndexCursors {
 struct PersistedState {
     version: u32,
     indices: BTreeMap<String, IndexCursors>,
-    /// The last configuration applied through `PUT /_xerj/wal_tap`.
+    /// The last configuration applied through `PUT /_argos/wal_tap`.
     ///
     /// Without this, "runtime config, no restart" was a half-truth that
     /// failed in the direction that loses data: the live config lived only in
@@ -228,7 +228,7 @@ struct PersistedState {
     ///
     /// Precedent for a persisted overlay winning over the file is
     /// Elasticsearch's `persistent` cluster settings.
-    /// `DELETE /_xerj/wal_tap` drops it and reverts to the file.
+    /// `DELETE /_argos/wal_tap` drops it and reverts to the file.
     #[serde(default)]
     runtime_config: Option<WalTapConfig>,
 }
@@ -361,7 +361,7 @@ impl IndexTapStats {
 pub struct WalTap {
     config: RwLock<WalTapConfig>,
     /// Exactly what `argos.toml` said, kept verbatim so `DELETE
-    /// /_xerj/wal_tap` has something true to revert to.
+    /// /_argos/wal_tap` has something true to revert to.
     ///
     /// It used to be read back off `Engine.config`, which was safe only while
     /// nothing else ever wrote to that field. `Engine::new` now folds the
@@ -443,8 +443,8 @@ impl WalTap {
                     target_url = %saved.redacted_target_url(),
                     enabled = saved.enabled,
                     indices = ?saved.indices,
-                    "WAL tap: applying the configuration last set via PUT /_xerj/wal_tap \
-                     (overrides the config file; DELETE /_xerj/wal_tap reverts)"
+                    "WAL tap: applying the configuration last set via PUT /_argos/wal_tap \
+                     (overrides the config file; DELETE /_argos/wal_tap reverts)"
                 );
                 saved
             }
@@ -476,7 +476,7 @@ impl WalTap {
         self.config.read().clone()
     }
 
-    /// What `argos.toml` said at boot — the value `DELETE /_xerj/wal_tap`
+    /// What `argos.toml` said at boot — the value `DELETE /_argos/wal_tap`
     /// reverts to.
     pub fn file_config(&self) -> WalTapConfig {
         self.file_config.clone()
@@ -663,7 +663,7 @@ impl WalTap {
     /// **Every multiply here saturates**, including the two that used to be
     /// plain `*`. `max_retry_backoff_secs` and `poll_interval_ms` reach this
     /// function from two places, and only one of them is range-checked:
-    /// `PUT /_xerj/wal_tap` bounds both, but `Config::validate` bounds
+    /// `PUT /_argos/wal_tap` bounds both, but `Config::validate` bounds
     /// neither, so `argos.toml` can put any `u64` in either field. At
     /// `max_retry_backoff_secs > u64::MAX / 1000` (~1.8e16) the old
     /// `secs.max(1) * 1000` overflowed — a panic under `cargo test`'s
@@ -1487,7 +1487,7 @@ mod tests {
     }
 
     /// `max_retry_backoff_secs` reaches [`WalTap::arm_backoff`] from the config
-    /// file as well as from `PUT /_xerj/wal_tap`, and `Config::validate` does
+    /// file as well as from `PUT /_argos/wal_tap`, and `Config::validate` does
     /// not range-check it — so any `u64` in `argos.toml` gets here.
     ///
     /// The value below is chosen so the OLD `secs.max(1) * 1000` fails in both

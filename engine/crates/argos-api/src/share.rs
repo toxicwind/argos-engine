@@ -773,7 +773,7 @@ impl FromRequestParts<AppState> for ClaimSource {
 }
 
 /// The reading behind [`ClaimSource`], for a transport that is not an axum
-/// request: the gRPC `XerjHub` service hands in its TCP peer and its
+/// request: the gRPC `ArgosHub` service hands in its TCP peer and its
 /// `x-forwarded-for` metadata values, so one client is one address on both
 /// listeners.
 ///
@@ -1179,7 +1179,7 @@ async fn revoke_share_inner(state: AppState, principal: Principal, id: String) -
     let invalidated = match state.engine.invalidate_api_keys(&key_ids, now) {
         Ok((fresh, _previously)) => fresh.len(),
         Err(e) => {
-            return crate::error::ApiError::new(argos_common::XerjError::from(e)).into_response();
+            return crate::error::ApiError::new(argos_common::ArgosError::from(e)).into_response();
         }
     };
     if let Err(e) = state.shares.persist() {
@@ -1385,7 +1385,7 @@ async fn claim_share_inner(state: AppState, source: String, body: Option<Json<Va
             rec.claims = rec.claims.saturating_sub(1);
             rec.key_ids.retain(|k| k != &key_id);
         }
-        return crate::error::ApiError::new(argos_common::XerjError::from(e)).into_response();
+        return crate::error::ApiError::new(argos_common::ArgosError::from(e)).into_response();
     }
     if let Err(e) = state.shares.persist() {
         tracing::error!(error = %e, "could not persist shares.json after claim");

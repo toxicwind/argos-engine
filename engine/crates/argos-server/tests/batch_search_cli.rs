@@ -34,7 +34,7 @@ async fn cli_stdin_file_and_mcp_agree_and_item_errors_have_exit_three() {
     let path = dir.path().join("queries.json");
     std::fs::write(&path, input.to_string()).unwrap();
     for file in ["-".to_string(), path.to_string_lossy().into_owned()] {
-        let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_xerj"))
+        let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_argos"))
             .args([
                 "--url",
                 &url,
@@ -72,7 +72,7 @@ async fn cli_stdin_file_and_mcp_agree_and_item_errors_have_exit_three() {
 
 #[test]
 fn cli_help_and_malformed_input_never_start_a_node() {
-    let help = std::process::Command::new(env!("CARGO_BIN_EXE_xerj"))
+    let help = std::process::Command::new(env!("CARGO_BIN_EXE_argos"))
         .args(["batch-search", "--help", "--disable-feedback"])
         .output()
         .unwrap();
@@ -81,7 +81,7 @@ fn cli_help_and_malformed_input_never_start_a_node() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("invalid.json");
     std::fs::write(&path, r#"{"queries":[]}"#).unwrap();
-    let out = std::process::Command::new(env!("CARGO_BIN_EXE_xerj"))
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_argos"))
         .args([
             "batch-search",
             "--input",

@@ -4,10 +4,10 @@
 //! Attempts to break at sentence boundaries to preserve semantic coherence.
 
 use serde::{Deserialize, Serialize};
-use argos_common::XerjError;
+use argos_common::ArgosError;
 
 /// Result alias.
-pub type Result<T> = std::result::Result<T, XerjError>;
+pub type Result<T> = std::result::Result<T, ArgosError>;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Chunk

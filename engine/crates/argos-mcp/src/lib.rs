@@ -933,7 +933,7 @@ pub fn tool_specs_with(include_hub: bool) -> Value {
                  see that argument for the tokenizer and the locator-only rule). \
                  If this prefix was autoindexed from a folder on this machine and a file \
                  there is newer than the last run, or an indexed file has been removed, \
-                 the response adds `_xerj.hints` code `index_stale` with the last index \
+                 the response adds `_argos.hints` code `index_stale` with the last index \
                  time and a reindex command. Hits are returned with that hint. The check \
                  stats at most 4096 entries, stops after 100ms, and skips hidden and \
                  ignored paths.",
@@ -6085,8 +6085,8 @@ mod tests {
         assert_eq!(merged["isError"], false);
         let text = merged["content"][0]["text"].as_str().unwrap();
         let parsed: Value = serde_json::from_str(text).unwrap();
-        assert_eq!(parsed["_xerj"]["hints"][0]["code"], "index_stale");
-        assert_eq!(parsed["_xerj"]["hints"][0]["path"], "docs/page.md");
+        assert_eq!(parsed["_argos"]["hints"][0]["code"], "index_stale");
+        assert_eq!(parsed["_argos"]["hints"][0]["path"], "docs/page.md");
         assert!(parsed["hits"]["hits"].as_array().unwrap().is_empty());
 
         let err = tool_text("ARGOS returned HTTP 400: no", true);

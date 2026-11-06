@@ -12,10 +12,10 @@ use std::time::Duration;
 use tokio::sync::Semaphore;
 use tokio::time::sleep;
 use tracing::{debug, warn};
-use argos_common::XerjError;
+use argos_common::ArgosError;
 
 /// Result alias.
-pub type Result<T> = std::result::Result<T, XerjError>;
+pub type Result<T> = std::result::Result<T, ArgosError>;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Config
@@ -123,18 +123,18 @@ struct EmbedDatum {
 /// [`EmbeddingProxy::send_with_retry`]; a permanent failure (4xx client error,
 /// contract violation) returns immediately instead of stalling ~2 min/doc.
 struct EmbedFailure {
-    err: XerjError,
+    err: ArgosError,
     retryable: bool,
 }
 
 impl EmbedFailure {
-    fn transient(err: XerjError) -> Self {
+    fn transient(err: ArgosError) -> Self {
         Self {
             err,
             retryable: true,
         }
     }
-    fn permanent(err: XerjError) -> Self {
+    fn permanent(err: ArgosError) -> Self {
         Self {
             err,
             retryable: false,
@@ -176,15 +176,15 @@ fn endpoint_origin(url: &reqwest::Url) -> String {
 fn resolve_embeddings_endpoint(raw: &str) -> Result<String> {
     let configured = raw.trim();
     let mut url = reqwest::Url::parse(configured)
-        .map_err(|e| XerjError::embedding(format!("invalid embedding endpoint: {e}")))?;
+        .map_err(|e| ArgosError::embedding(format!("invalid embedding endpoint: {e}")))?;
     if !matches!(url.scheme(), "http" | "https") {
-        return Err(XerjError::embedding(
+        return Err(ArgosError::embedding(
             "embedding endpoint must use http or https",
         ));
     }
     if url.host_str().is_none() {
         let suggestion = format!("{configured}/v1/embeddings");
-        return Err(XerjError::embedding(format!(
+        return Err(ArgosError::embedding(format!(
             "embedding endpoint `{configured}` has no host, so it was not called. \
              Set embedding.default_endpoint to `{suggestion}`."
         )));
@@ -201,7 +201,7 @@ fn resolve_embeddings_endpoint(raw: &str) -> Result<String> {
     } else {
         let origin = endpoint_origin(&url);
         let suggestion = format!("{origin}/v1/embeddings");
-        return Err(XerjError::embedding(format!(
+        return Err(ArgosError::embedding(format!(
             "embedding endpoint `{configured}` is not an embeddings URL, so it was not called. \
              A base URL ending in `/v1` or `/v1/` has `/embeddings` appended, and so does a bare \
              host (`{origin}` or `{origin}/`). Any other path must already end in `/embeddings`. \
@@ -239,7 +239,7 @@ impl EmbeddingProxy {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_millis(config.timeout_ms))
             .build()
-            .map_err(|e| XerjError::embedding(format!("HTTP client init: {e}")))?;
+            .map_err(|e| ArgosError::embedding(format!("HTTP client init: {e}")))?;
 
         let semaphore = Arc::new(Semaphore::new(config.max_concurrent));
 
@@ -290,7 +290,7 @@ impl EmbeddingProxy {
                     .semaphore
                     .acquire()
                     .await
-                    .map_err(|e| XerjError::embedding(format!("semaphore: {e}")))?;
+                    .map_err(|e| ArgosError::embedding(format!("semaphore: {e}")))?;
                 self.send_with_retry(chunk, model).await
             });
         }
@@ -299,7 +299,7 @@ impl EmbeddingProxy {
     }
 
     async fn send_with_retry(&self, texts: &[String], model: &str) -> Result<Vec<Vec<f32>>> {
-        let mut last_err = XerjError::embedding("no attempts made");
+        let mut last_err = ArgosError::embedding("no attempts made");
         let mut backoff = Duration::from_millis(200);
 
         for attempt in 0..=self.config.max_retries {
@@ -357,7 +357,7 @@ impl EmbeddingProxy {
         // Transport-level failures (connection refused, DNS, timeout) are
         // transient: the proxy may be restarting or briefly unreachable.
         let resp = req.json(&body).send().await.map_err(|e| {
-            EmbedFailure::transient(XerjError::embedding(format!("HTTP request: {e}")))
+            EmbedFailure::transient(ArgosError::embedding(format!("HTTP request: {e}")))
         })?;
 
         if !resp.status().is_success() {
@@ -368,7 +368,7 @@ impl EmbeddingProxy {
             // key, or a malformed request — that no amount of retrying fixes.
             let retryable = status_is_retryable(status.as_u16());
             let body = resp.text().await.unwrap_or_default();
-            let err = XerjError::embedding(format!("embedding API returned {status}: {body}"));
+            let err = ArgosError::embedding(format!("embedding API returned {status}: {body}"));
             return Err(if retryable {
                 EmbedFailure::transient(err)
             } else {
@@ -379,7 +379,7 @@ impl EmbeddingProxy {
         // A 200 with an unparseable / short body is a contract violation, not
         // a transient blip — don't spin on it.
         let response: EmbedResponse = resp.json().await.map_err(|e| {
-            EmbedFailure::permanent(XerjError::embedding(format!("response parse: {e}")))
+            EmbedFailure::permanent(ArgosError::embedding(format!("response parse: {e}")))
         })?;
 
         // Sort by index to restore original order
@@ -387,7 +387,7 @@ impl EmbeddingProxy {
         data.sort_by_key(|d| d.index);
 
         if data.len() != texts.len() {
-            return Err(EmbedFailure::permanent(XerjError::embedding(format!(
+            return Err(EmbedFailure::permanent(ArgosError::embedding(format!(
                 "expected {} embeddings, got {}",
                 texts.len(),
                 data.len()
@@ -402,7 +402,7 @@ impl EmbeddingProxy {
         let mut results = self.embed_batch(vec![text]).await?;
         results
             .pop()
-            .ok_or_else(|| XerjError::embedding("empty embedding response"))
+            .ok_or_else(|| ArgosError::embedding("empty embedding response"))
     }
 }
 

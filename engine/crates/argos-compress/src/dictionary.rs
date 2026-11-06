@@ -5,10 +5,10 @@
 //! bytes per value to 2 bytes after the dictionary is built.
 
 use std::collections::HashMap;
-use argos_common::XerjError;
+use argos_common::ArgosError;
 
 /// Result alias for dictionary operations.
-pub type Result<T> = std::result::Result<T, XerjError>;
+pub type Result<T> = std::result::Result<T, ArgosError>;
 
 /// Maximum number of distinct values in a single dictionary.
 ///
@@ -85,7 +85,7 @@ impl DictionaryEncoder {
             return Ok(id);
         }
         if self.vocab.len() >= MAX_DICT_ENTRIES {
-            return Err(XerjError::resource_exhausted(format!(
+            return Err(ArgosError::resource_exhausted(format!(
                 "dictionary full ({MAX_DICT_ENTRIES} entries)"
             )));
         }
@@ -164,7 +164,7 @@ impl DictionaryDecoder {
     /// Deserialize from bytes produced by [`DictionaryEncoder::serialize`].
     pub fn deserialize(data: &[u8]) -> Result<Self> {
         if data.len() < 4 {
-            return Err(XerjError::internal("dictionary data too short"));
+            return Err(ArgosError::internal("dictionary data too short"));
         }
         let count = u32::from_le_bytes(data[0..4].try_into().unwrap()) as usize;
         let mut pos = 4usize;
@@ -172,15 +172,15 @@ impl DictionaryDecoder {
 
         for _ in 0..count {
             if pos + 2 > data.len() {
-                return Err(XerjError::internal("dictionary truncated at string length"));
+                return Err(ArgosError::internal("dictionary truncated at string length"));
             }
             let slen = u16::from_le_bytes(data[pos..pos + 2].try_into().unwrap()) as usize;
             pos += 2;
             if pos + slen > data.len() {
-                return Err(XerjError::internal("dictionary truncated at string data"));
+                return Err(ArgosError::internal("dictionary truncated at string data"));
             }
             let s = std::str::from_utf8(&data[pos..pos + slen])
-                .map_err(|e| XerjError::internal(format!("dictionary utf8: {e}")))?
+                .map_err(|e| ArgosError::internal(format!("dictionary utf8: {e}")))?
                 .to_owned();
             vocab.push(s);
             pos += slen;

@@ -69,7 +69,7 @@ key_path = "{root}/missing.key"
     let config_path = dir.path().join("argos.toml");
     std::fs::write(&config_path, config).unwrap();
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_xerj"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_argos"))
         .arg("--config")
         .arg(&config_path)
         .stdout(Stdio::null())

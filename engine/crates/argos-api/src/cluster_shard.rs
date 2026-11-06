@@ -95,7 +95,7 @@ fn is_shard_not_ready(result: &ShardResult) -> bool {
 }
 
 fn engine_error_response(err: argos_engine::EngineError) -> Response {
-    ApiError::new(argos_common::XerjError::from(err)).into_response()
+    ApiError::new(argos_common::ArgosError::from(err)).into_response()
 }
 
 async fn forward_retrying(state: &AppState, owner: &str, op: ShardOp) -> Response {
@@ -1645,7 +1645,7 @@ fn ensure_fail_response(index: &str, err: EnsureFail) -> Response {
 fn ensure_fail_status(err: EnsureFail) -> (u16, String) {
     match err {
         EnsureFail::Engine(err) => {
-            let common = argos_common::XerjError::from(err);
+            let common = argos_common::ArgosError::from(err);
             let status = common.http_status();
             (status, common.to_string())
         }

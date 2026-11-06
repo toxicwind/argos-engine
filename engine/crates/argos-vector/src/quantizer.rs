@@ -6,10 +6,10 @@
 //! vectors for the final top-K.
 
 use serde::{Deserialize, Serialize};
-use argos_common::XerjError;
+use argos_common::ArgosError;
 
 /// Result alias.
-pub type Result<T> = std::result::Result<T, XerjError>;
+pub type Result<T> = std::result::Result<T, ArgosError>;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Quantized data containers
@@ -156,7 +156,7 @@ impl Quantizer for NoneQuantizer {
         let dim = query.len();
         let stored = quantized
             .get_f32(id, dim)
-            .ok_or_else(|| XerjError::internal(format!("NoneQuantizer: id {id} out of range")))?;
+            .ok_or_else(|| ArgosError::internal(format!("NoneQuantizer: id {id} out of range")))?;
 
         let dist: f32 = query
             .iter()
@@ -231,7 +231,7 @@ impl Quantizer for Scalar8Quantizer {
 
         for vec in vectors {
             if vec.len() != dim {
-                return Err(XerjError::invalid_mapping(
+                return Err(ArgosError::invalid_mapping(
                     "Scalar8Quantizer: inconsistent vector dimensions",
                 ));
             }
@@ -278,7 +278,7 @@ impl Quantizer for Scalar8Quantizer {
                 scales,
             } => (bytes, mins, scales),
             _ => {
-                return Err(XerjError::internal(
+                return Err(ArgosError::internal(
                     "Scalar8Quantizer: wrong QuantizedData variant",
                 ))
             }
@@ -289,7 +289,7 @@ impl Quantizer for Scalar8Quantizer {
         let end = start + dim;
 
         if end > bytes.len() {
-            return Err(XerjError::internal(format!(
+            return Err(ArgosError::internal(format!(
                 "Scalar8Quantizer: id {id} out of range"
             )));
         }
@@ -534,7 +534,7 @@ impl Quantizer for Scalar4Quantizer {
 
         for vec in vectors {
             if vec.len() != dim {
-                return Err(XerjError::invalid_mapping(
+                return Err(ArgosError::invalid_mapping(
                     "Scalar4Quantizer: inconsistent vector dimensions",
                 ));
             }
@@ -591,7 +591,7 @@ impl Quantizer for Scalar4Quantizer {
                 scales,
             } => (bytes, mins, scales),
             _ => {
-                return Err(XerjError::internal(
+                return Err(ArgosError::internal(
                     "Scalar4Quantizer: wrong QuantizedData variant",
                 ))
             }
@@ -603,7 +603,7 @@ impl Quantizer for Scalar4Quantizer {
         let byte_end = byte_start + bytes_per_vec;
 
         if byte_end > bytes.len() {
-            return Err(XerjError::internal(format!(
+            return Err(ArgosError::internal(format!(
                 "Scalar4Quantizer: id {id} out of range"
             )));
         }

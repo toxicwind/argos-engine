@@ -88,7 +88,7 @@
 //! ## Denial shape: "not found", not "forbidden"
 //!
 //! A denied name reports the ordinary
-//! [`argos_common::XerjError::index_not_found`], for two reasons:
+//! [`argos_common::ArgosError::index_not_found`], for two reasons:
 //!
 //! 1. **No enumeration.** A caller cannot tell a brain it may not read from a
 //!    brain that does not exist, so it cannot map the node by probing.

@@ -363,7 +363,7 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum EngineError {
     #[error(transparent)]
-    Common(#[from] argos_common::XerjError),
+    Common(#[from] argos_common::ArgosError),
 
     #[error("storage error: {0}")]
     Storage(#[from] argos_storage::StorageError),
@@ -398,20 +398,20 @@ pub enum EngineError {
 /// Engine-level result alias.
 pub type Result<T> = std::result::Result<T, EngineError>;
 
-impl From<EngineError> for argos_common::XerjError {
+impl From<EngineError> for argos_common::ArgosError {
     fn from(e: EngineError) -> Self {
         match e {
             EngineError::Common(z) => z,
-            EngineError::Storage(s) => argos_common::XerjError::storage(s.to_string()),
-            EngineError::Query(q) => argos_common::XerjError::invalid_query(q.to_string()),
-            EngineError::Fts(f) => argos_common::XerjError::internal(f.to_string()),
-            EngineError::Io(io) => argos_common::XerjError::storage_io("IO error", io),
-            EngineError::Serde(s) => argos_common::XerjError::serialization(s.to_string()),
+            EngineError::Storage(s) => argos_common::ArgosError::storage(s.to_string()),
+            EngineError::Query(q) => argos_common::ArgosError::invalid_query(q.to_string()),
+            EngineError::Fts(f) => argos_common::ArgosError::internal(f.to_string()),
+            EngineError::Io(io) => argos_common::ArgosError::storage_io("IO error", io),
+            EngineError::Serde(s) => argos_common::ArgosError::serialization(s.to_string()),
             // `store_exception` (500) is the ES type for "this shard's on-disk
             // state is unusable" — the closest honest mapping for a corrupt
             // sidecar, and it keeps the reason string intact for the client.
             corrupt @ EngineError::CorruptIndexMetadata { .. } => {
-                argos_common::XerjError::storage(corrupt.to_string())
+                argos_common::ArgosError::storage(corrupt.to_string())
             }
         }
     }

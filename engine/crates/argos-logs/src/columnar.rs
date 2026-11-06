@@ -8,14 +8,14 @@
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use serde::{Deserialize, Serialize};
 use std::io::{Cursor, Read};
-use argos_common::XerjError;
+use argos_common::ArgosError;
 use argos_compress::{
     codec::{get_codec, CompressionLevel},
     dictionary::{DictionaryDecoder, DictionaryEncoder},
 };
 
 /// Result alias.
-pub type Result<T> = std::result::Result<T, XerjError>;
+pub type Result<T> = std::result::Result<T, ArgosError>;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ColumnType
@@ -207,13 +207,13 @@ impl ColumnWriter {
 
         let mut buf = Vec::with_capacity(vals.len() * 8 + 8);
         buf.write_u64::<LittleEndian>(first as u64)
-            .map_err(|e| XerjError::internal(e.to_string()))?;
+            .map_err(|e| ArgosError::internal(e.to_string()))?;
         // total count (including first element)
         buf.write_u32::<LittleEndian>(vals.len() as u32)
-            .map_err(|e| XerjError::internal(e.to_string()))?;
+            .map_err(|e| ArgosError::internal(e.to_string()))?;
         for d in &deltas {
             buf.write_i64::<LittleEndian>(*d)
-                .map_err(|e| XerjError::internal(e.to_string()))?;
+                .map_err(|e| ArgosError::internal(e.to_string()))?;
         }
 
         get_codec(self.compression).compress(&buf)
@@ -232,13 +232,13 @@ impl ColumnWriter {
 
         let mut buf = Vec::with_capacity(vals.len() * 8 + 4);
         buf.write_u32::<LittleEndian>(vals.len() as u32)
-            .map_err(|e| XerjError::internal(e.to_string()))?;
+            .map_err(|e| ArgosError::internal(e.to_string()))?;
 
         let mut prev = 0i64;
         for &v in &vals {
             let delta = v - prev;
             buf.write_i64::<LittleEndian>(delta)
-                .map_err(|e| XerjError::internal(e.to_string()))?;
+                .map_err(|e| ArgosError::internal(e.to_string()))?;
             prev = v;
         }
 
@@ -258,10 +258,10 @@ impl ColumnWriter {
 
         let mut buf = Vec::with_capacity(vals.len() * 8 + 4);
         buf.write_u32::<LittleEndian>(vals.len() as u32)
-            .map_err(|e| XerjError::internal(e.to_string()))?;
+            .map_err(|e| ArgosError::internal(e.to_string()))?;
         for &v in &vals {
             buf.write_f64::<LittleEndian>(v)
-                .map_err(|e| XerjError::internal(e.to_string()))?;
+                .map_err(|e| ArgosError::internal(e.to_string()))?;
         }
 
         get_codec(self.compression).compress(&buf)
@@ -291,23 +291,23 @@ impl ColumnWriter {
             let dict_bytes = encoder.serialize();
 
             buf.write_u32::<LittleEndian>(dict_bytes.len() as u32)
-                .map_err(|e| XerjError::internal(e.to_string()))?;
+                .map_err(|e| ArgosError::internal(e.to_string()))?;
             buf.extend_from_slice(&dict_bytes);
             buf.write_u32::<LittleEndian>(strs.len() as u32)
-                .map_err(|e| XerjError::internal(e.to_string()))?;
+                .map_err(|e| ArgosError::internal(e.to_string()))?;
 
             for s in &strs {
                 let id = encoder.encode(s).unwrap_or(0);
                 buf.write_u16::<LittleEndian>(id)
-                    .map_err(|e| XerjError::internal(e.to_string()))?;
+                    .map_err(|e| ArgosError::internal(e.to_string()))?;
             }
         } else {
             buf.write_u32::<LittleEndian>(strs.len() as u32)
-                .map_err(|e| XerjError::internal(e.to_string()))?;
+                .map_err(|e| ArgosError::internal(e.to_string()))?;
             for s in &strs {
                 let bytes = s.as_bytes();
                 buf.write_u32::<LittleEndian>(bytes.len() as u32)
-                    .map_err(|e| XerjError::internal(e.to_string()))?;
+                    .map_err(|e| ArgosError::internal(e.to_string()))?;
                 buf.extend_from_slice(bytes);
             }
         }
@@ -337,7 +337,7 @@ impl ColumnWriter {
 
         let mut buf = Vec::new();
         buf.write_u32::<LittleEndian>(vals.len() as u32)
-            .map_err(|e| XerjError::internal(e.to_string()))?;
+            .map_err(|e| ArgosError::internal(e.to_string()))?;
         buf.extend_from_slice(&packed);
         get_codec(self.compression).compress(&buf)
     }
@@ -346,14 +346,14 @@ impl ColumnWriter {
         let mut buf = Vec::new();
         let count = self.column.values.len();
         buf.write_u32::<LittleEndian>(count as u32)
-            .map_err(|e| XerjError::internal(e.to_string()))?;
+            .map_err(|e| ArgosError::internal(e.to_string()))?;
         for v in &self.column.values {
             let bytes = match v {
                 ColumnValue::Binary(b) => b.as_slice(),
                 _ => &[],
             };
             buf.write_u32::<LittleEndian>(bytes.len() as u32)
-                .map_err(|e| XerjError::internal(e.to_string()))?;
+                .map_err(|e| ArgosError::internal(e.to_string()))?;
             buf.extend_from_slice(bytes);
         }
         get_codec(self.compression).compress(&buf)
@@ -406,10 +406,10 @@ impl ColumnReader {
         let mut cur = Cursor::new(raw);
         let first = cur
             .read_u64::<LittleEndian>()
-            .map_err(|e| XerjError::internal(e.to_string()))? as i64;
+            .map_err(|e| ArgosError::internal(e.to_string()))? as i64;
         let count = cur
             .read_u32::<LittleEndian>()
-            .map_err(|e| XerjError::internal(e.to_string()))? as usize;
+            .map_err(|e| ArgosError::internal(e.to_string()))? as usize;
 
         let mut result = Vec::with_capacity(count);
         let mut prev = first;
@@ -419,7 +419,7 @@ impl ColumnReader {
         for _ in 1..count {
             let dod = cur
                 .read_i64::<LittleEndian>()
-                .map_err(|e| XerjError::internal(e.to_string()))?;
+                .map_err(|e| ArgosError::internal(e.to_string()))?;
             let delta = prev_delta + dod;
             let v = prev + delta;
             result.push(ColumnValue::Timestamp(v));
@@ -433,13 +433,13 @@ impl ColumnReader {
         let mut cur = Cursor::new(raw);
         let count = cur
             .read_u32::<LittleEndian>()
-            .map_err(|e| XerjError::internal(e.to_string()))? as usize;
+            .map_err(|e| ArgosError::internal(e.to_string()))? as usize;
         let mut result = Vec::with_capacity(count);
         let mut prev = 0i64;
         for _ in 0..count {
             let delta = cur
                 .read_i64::<LittleEndian>()
-                .map_err(|e| XerjError::internal(e.to_string()))?;
+                .map_err(|e| ArgosError::internal(e.to_string()))?;
             let v = prev + delta;
             result.push(ColumnValue::I64(v));
             prev = v;
@@ -451,12 +451,12 @@ impl ColumnReader {
         let mut cur = Cursor::new(raw);
         let count = cur
             .read_u32::<LittleEndian>()
-            .map_err(|e| XerjError::internal(e.to_string()))? as usize;
+            .map_err(|e| ArgosError::internal(e.to_string()))? as usize;
         let mut result = Vec::with_capacity(count);
         for _ in 0..count {
             let v = cur
                 .read_f64::<LittleEndian>()
-                .map_err(|e| XerjError::internal(e.to_string()))?;
+                .map_err(|e| ArgosError::internal(e.to_string()))?;
             result.push(ColumnValue::F64(v));
         }
         Ok(result)
@@ -469,20 +469,20 @@ impl ColumnReader {
         if use_dict {
             let dict_len =
                 cur.read_u32::<LittleEndian>()
-                    .map_err(|e| XerjError::internal(e.to_string()))? as usize;
+                    .map_err(|e| ArgosError::internal(e.to_string()))? as usize;
             let mut dict_bytes = vec![0u8; dict_len];
             cur.read_exact(&mut dict_bytes)
-                .map_err(|e| XerjError::internal(e.to_string()))?;
+                .map_err(|e| ArgosError::internal(e.to_string()))?;
             let decoder = DictionaryDecoder::deserialize(&dict_bytes)?;
 
             let count = cur
                 .read_u32::<LittleEndian>()
-                .map_err(|e| XerjError::internal(e.to_string()))? as usize;
+                .map_err(|e| ArgosError::internal(e.to_string()))? as usize;
             let mut result = Vec::with_capacity(count);
             for _ in 0..count {
                 let id = cur
                     .read_u16::<LittleEndian>()
-                    .map_err(|e| XerjError::internal(e.to_string()))?;
+                    .map_err(|e| ArgosError::internal(e.to_string()))?;
                 let s = decoder.decode(id).unwrap_or("").to_owned();
                 result.push(ColumnValue::String(s));
             }
@@ -490,18 +490,18 @@ impl ColumnReader {
         } else {
             let count = cur
                 .read_u32::<LittleEndian>()
-                .map_err(|e| XerjError::internal(e.to_string()))? as usize;
+                .map_err(|e| ArgosError::internal(e.to_string()))? as usize;
             let mut result = Vec::with_capacity(count);
             for _ in 0..count {
                 let slen = cur
                     .read_u32::<LittleEndian>()
-                    .map_err(|e| XerjError::internal(e.to_string()))?
+                    .map_err(|e| ArgosError::internal(e.to_string()))?
                     as usize;
                 let mut sbytes = vec![0u8; slen];
                 cur.read_exact(&mut sbytes)
-                    .map_err(|e| XerjError::internal(e.to_string()))?;
+                    .map_err(|e| ArgosError::internal(e.to_string()))?;
                 let s = String::from_utf8(sbytes)
-                    .map_err(|e| XerjError::internal(format!("utf8: {e}")))?;
+                    .map_err(|e| ArgosError::internal(format!("utf8: {e}")))?;
                 result.push(ColumnValue::String(s));
             }
             Ok(result)
@@ -512,11 +512,11 @@ impl ColumnReader {
         let mut cur = Cursor::new(raw);
         let count = cur
             .read_u32::<LittleEndian>()
-            .map_err(|e| XerjError::internal(e.to_string()))? as usize;
+            .map_err(|e| ArgosError::internal(e.to_string()))? as usize;
         let byte_count = count.div_ceil(8);
         let mut packed = vec![0u8; byte_count];
         cur.read_exact(&mut packed)
-            .map_err(|e| XerjError::internal(e.to_string()))?;
+            .map_err(|e| ArgosError::internal(e.to_string()))?;
 
         let mut result = Vec::with_capacity(count);
         for i in 0..count {
@@ -530,15 +530,15 @@ impl ColumnReader {
         let mut cur = Cursor::new(raw);
         let count = cur
             .read_u32::<LittleEndian>()
-            .map_err(|e| XerjError::internal(e.to_string()))? as usize;
+            .map_err(|e| ArgosError::internal(e.to_string()))? as usize;
         let mut result = Vec::with_capacity(count);
         for _ in 0..count {
             let blen = cur
                 .read_u32::<LittleEndian>()
-                .map_err(|e| XerjError::internal(e.to_string()))? as usize;
+                .map_err(|e| ArgosError::internal(e.to_string()))? as usize;
             let mut bytes = vec![0u8; blen];
             cur.read_exact(&mut bytes)
-                .map_err(|e| XerjError::internal(e.to_string()))?;
+                .map_err(|e| ArgosError::internal(e.to_string()))?;
             result.push(ColumnValue::Binary(bytes));
         }
         Ok(result)

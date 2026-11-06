@@ -977,7 +977,7 @@ mod hidden_skip_tests {
     /// negation of a dotfile (`!.env.example`) is git's business and stays
     /// silent.
     #[test]
-    fn a_xerjignore_re_include_of_a_hidden_dir_is_refused_out_loud() {
+    fn a_argosignore_re_include_of_a_hidden_dir_is_refused_out_loud() {
         use super::walk_reporting;
         use crate::ignore_rules::{IgnoreOptions, HIDDEN_RULE};
 
@@ -1124,11 +1124,11 @@ mod hidden_skip_tests {
                 vec!["README.md".to_string(), "src/guide.md".to_string()],
                 "fixture drifted from git's own answer"
             );
-            let from_xerj: Vec<String> = rels
+            let from_argos: Vec<String> = rels
                 .iter()
                 .filter_map(|r| r.strip_prefix("vendored/").map(str::to_string))
                 .collect();
-            assert_eq!(from_xerj, from_git, "ARGOS and git must agree");
+            assert_eq!(from_argos, from_git, "ARGOS and git must agree");
         }
     }
 
@@ -1137,7 +1137,7 @@ mod hidden_skip_tests {
     /// deliberately keeps its authority across a nested checkout, so one file
     /// at the root can say "not this, anywhere below here".
     #[test]
-    fn a_root_xerjignore_still_reaches_into_a_nested_checkout() {
+    fn a_root_argosignore_still_reaches_into_a_nested_checkout() {
         use super::walk_reporting;
         use crate::ignore_rules::IgnoreOptions;
 

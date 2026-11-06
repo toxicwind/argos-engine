@@ -4,7 +4,7 @@ use std::path::Path;
 use std::process::{Command, Output};
 
 fn import(input: &Path, output: &Path) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_xerj"))
+    Command::new(env!("CARGO_BIN_EXE_argos"))
         .args(["sessions", "import", "--format", "claude-code", "--input"])
         .arg(input)
         .arg("--output")
@@ -50,7 +50,7 @@ fn sessions_cli_exports_only_redacted_conversation_and_refuses_overwrite() {
 fn sessions_cli_bad_format_is_usage_error_without_output() {
     let work = tempfile::tempdir().unwrap();
     let output = work.path().join("safe.jsonl");
-    let result = Command::new(env!("CARGO_BIN_EXE_xerj"))
+    let result = Command::new(env!("CARGO_BIN_EXE_argos"))
         .args([
             "sessions", "import", "--format", "unknown", "--input", "unused", "--output",
         ])

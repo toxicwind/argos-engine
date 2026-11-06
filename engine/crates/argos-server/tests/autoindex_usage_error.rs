@@ -15,7 +15,7 @@ use std::process::Command;
 
 #[test]
 fn autoindex_usage_error_prints_the_error_and_one_help_pointer() {
-    let out = Command::new(env!("CARGO_BIN_EXE_xerj"))
+    let out = Command::new(env!("CARGO_BIN_EXE_argos"))
         .args(["autoindex", "--approve", "full"])
         .output()
         .expect("run the argos binary");

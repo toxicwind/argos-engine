@@ -1,4 +1,4 @@
-//! API error handling — converts internal [`XerjError`] values into HTTP
+//! API error handling — converts internal [`ArgosError`] values into HTTP
 //! responses with the correct status code and an Elasticsearch-compatible
 //! JSON body.
 //!
@@ -22,7 +22,7 @@ use axum::{
 };
 use serde::Serialize;
 use serde_json::{json, Value};
-use argos_common::XerjError;
+use argos_common::ArgosError;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ES error body
@@ -73,13 +73,13 @@ pub struct EsErrorResponse {
     pub status: u16,
     /// Additive, non-ES field carrying an actionable recovery hint (e.g. for
     /// `index_not_found_exception`: nearby index names, the `ax-*` wildcard
-    /// an autoindex-managed cluster searches with). Same `_xerj` convention
+    /// an autoindex-managed cluster searches with). Same `_argos` convention
     /// as the hint on a successful `_search` response — see
     /// `es_compat::search_response_hint`. Absent whenever no handler had
     /// anything more specific to offer than the `reason` string already
     /// says, so this never becomes noise on errors that are already
     /// self-explanatory.
-    #[serde(rename = "_xerj", skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "_argos", skip_serializing_if = "Option::is_none")]
     pub argos_hint: Option<Value>,
 }
 
@@ -93,13 +93,13 @@ pub struct EsErrorResponse {
 /// type via `Result<T, ApiError>`.
 #[derive(Debug)]
 pub struct ApiError {
-    pub inner: XerjError,
+    pub inner: ArgosError,
     pub request_id: Option<String>,
     pub hint: Option<Value>,
 }
 
 impl ApiError {
-    pub fn new(inner: XerjError) -> Self {
+    pub fn new(inner: ArgosError) -> Self {
         Self {
             inner,
             request_id: None,
@@ -112,7 +112,7 @@ impl ApiError {
         self
     }
 
-    /// Attach an actionable `_xerj` recovery hint (see [`EsErrorResponse`]).
+    /// Attach an actionable `_argos` recovery hint (see [`EsErrorResponse`]).
     /// Additive only — never changes `error.type` / `error.reason` / status.
     pub fn with_hint(mut self, hint: Value) -> Self {
         self.hint = Some(hint);
@@ -120,8 +120,8 @@ impl ApiError {
     }
 }
 
-impl From<XerjError> for ApiError {
-    fn from(e: XerjError) -> Self {
+impl From<ArgosError> for ApiError {
+    fn from(e: ArgosError) -> Self {
         Self::new(e)
     }
 }
@@ -143,7 +143,7 @@ impl ApiError {
         // block (`read_only_allow_delete`) is rejected with HTTP 429
         // (`TOO_MANY_REQUESTS/12/disk usage exceeded flood-stage watermark`).
         // Both keep the `cluster_block_exception` type; only the status differs.
-        if let XerjError::IndexBlocked { block_type, .. } = &self.inner {
+        if let ArgosError::IndexBlocked { block_type, .. } = &self.inner {
             if block_type.contains("read_only_allow_delete") {
                 status_code = 429;
             }
@@ -154,8 +154,8 @@ impl ApiError {
         // our Display impl adds a "invalid mapping:" / "invalid query:" prefix
         // that doesn't match the published shape. Strip it for compat.
         let reason = match &self.inner {
-            XerjError::InvalidMapping { reason } => reason.clone(),
-            XerjError::InvalidQuery { reason } => reason.clone(),
+            ArgosError::InvalidMapping { reason } => reason.clone(),
+            ArgosError::InvalidQuery { reason } => reason.clone(),
             other => other.to_string(),
         };
 
@@ -220,7 +220,7 @@ impl ApiError {
         // sentence (e.g. "index template [x] missing"), which must keep its
         // existing shape. (RC4 Wave-3 item 4f.)
         let (res_type, res_id, res_uuid, top_index) = match &self.inner {
-            XerjError::IndexNotFound { .. } => match index_name.as_deref() {
+            ArgosError::IndexNotFound { .. } => match index_name.as_deref() {
                 Some(n) if is_plain_index_name(n) => {
                     reason = format!("no such index [{n}]");
                     (
@@ -235,7 +235,7 @@ impl ApiError {
             // A rejected name is not a mapping problem. ES puts the attempted
             // name and `index_uuid: "_na_"` on `invalid_index_name_exception`
             // and leaves the reason as the name rule that failed.
-            XerjError::InvalidIndexName { index, .. } => {
+            ArgosError::InvalidIndexName { index, .. } => {
                 (None, None, Some("_na_".to_string()), Some(index.clone()))
             }
             _ => (None, None, None, None),
@@ -282,7 +282,7 @@ impl IntoResponse for ApiError {
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Map a [`XerjError`] to an ES exception type string.
+/// Map a [`ArgosError`] to an ES exception type string.
 ///
 /// The returned strings match the `type` field in real ES error responses so
 /// that existing ES clients, dashboards, and alerting rules can handle argos
@@ -290,7 +290,7 @@ impl IntoResponse for ApiError {
 ///
 /// Mapping table:
 ///
-/// | `XerjError` variant | ES exception type | HTTP status |
+/// | `ArgosError` variant | ES exception type | HTTP status |
 /// |---|---|---|
 /// | `IndexNotFound` | `index_not_found_exception` | 404 |
 /// | `IndexAlreadyExists` | `resource_already_exists_exception` | 409 |
@@ -312,50 +312,50 @@ impl IntoResponse for ApiError {
 /// | `IndexBlocked` | `cluster_block_exception` | 403 |
 /// | `ClusterUnavailable` | `master_not_discovered_exception` or `cluster_unavailable_exception` | 503 |
 /// | `Internal` | `internal_server_error_exception` | 500 |
-fn argos_error_type(e: &XerjError) -> String {
+fn argos_error_type(e: &ArgosError) -> String {
     match e {
         // ── Index lifecycle ───────────────────────────────────────────────
-        XerjError::IndexNotFound { .. } => "index_not_found_exception",
-        XerjError::IndexAlreadyExists { .. } => "resource_already_exists_exception",
-        XerjError::InvalidIndexName { .. } => "invalid_index_name_exception",
+        ArgosError::IndexNotFound { .. } => "index_not_found_exception",
+        ArgosError::IndexAlreadyExists { .. } => "resource_already_exists_exception",
+        ArgosError::InvalidIndexName { .. } => "invalid_index_name_exception",
         // The index exists; its only copy cannot be opened. ES reports an
         // existing-but-unallocated index this way, so dashboards that already
         // understand a red shard understand this too.
-        XerjError::IndexUnavailable { .. } => "no_shard_available_action_exception",
+        ArgosError::IndexUnavailable { .. } => "no_shard_available_action_exception",
         // ── Document operations ───────────────────────────────────────────
-        XerjError::DocumentNotFound { .. } => "document_missing_exception",
+        ArgosError::DocumentNotFound { .. } => "document_missing_exception",
         // ── Mapping / schema ──────────────────────────────────────────────
-        XerjError::InvalidMapping { .. } => "mapper_parsing_exception",
+        ArgosError::InvalidMapping { .. } => "mapper_parsing_exception",
         // ── Query parsing / execution ─────────────────────────────────────
-        XerjError::InvalidQuery { .. } => "search_phase_execution_exception",
+        ArgosError::InvalidQuery { .. } => "search_phase_execution_exception",
         // ── Storage layer ─────────────────────────────────────────────────
-        XerjError::StorageError { .. } | XerjError::WalError { .. } => "store_exception",
+        ArgosError::StorageError { .. } | ArgosError::WalError { .. } => "store_exception",
         // ── Serialization ─────────────────────────────────────────────────
-        XerjError::SerializationError { .. } => "json_parse_exception",
-        XerjError::InvalidDocumentJson { .. } => "json_parse_exception",
+        ArgosError::SerializationError { .. } => "json_parse_exception",
+        ArgosError::InvalidDocumentJson { .. } => "json_parse_exception",
         // ── Configuration ─────────────────────────────────────────────────
-        XerjError::ConfigError { .. } => "action_request_validation_exception",
-        XerjError::ClusterStateUnavailable => "cluster_state_unavailable",
+        ArgosError::ConfigError { .. } => "action_request_validation_exception",
+        ArgosError::ClusterStateUnavailable => "cluster_state_unavailable",
         // ── Auth ──────────────────────────────────────────────────────────
-        XerjError::AuthError { .. } => "security_exception",
+        ArgosError::AuthError { .. } => "security_exception",
         // ── TLS ───────────────────────────────────────────────────────────
-        XerjError::TlsError { .. } => "connect_exception",
+        ArgosError::TlsError { .. } => "connect_exception",
         // ── Embedding / AI ────────────────────────────────────────────────
-        XerjError::EmbeddingError { .. } => "circuit_breaking_exception",
+        ArgosError::EmbeddingError { .. } => "circuit_breaking_exception",
         // ── Resource limits ───────────────────────────────────────────────
-        XerjError::ResourceExhausted { .. } => "es_rejected_execution_exception",
+        ArgosError::ResourceExhausted { .. } => "es_rejected_execution_exception",
         // ── Circuit breaker (parent memory breaker) ───────────────────────
-        XerjError::CircuitBreaking { .. } => "circuit_breaking_exception",
+        ArgosError::CircuitBreaking { .. } => "circuit_breaking_exception",
         // ── Optimistic concurrency ────────────────────────────────────────
-        XerjError::VersionConflict { .. } => "version_conflict_engine_exception",
+        ArgosError::VersionConflict { .. } => "version_conflict_engine_exception",
         // ── Result window ─────────────────────────────────────────────────
-        XerjError::ResultWindowTooLarge { .. } => "illegal_argument_exception",
+        ArgosError::ResultWindowTooLarge { .. } => "illegal_argument_exception",
         // ── Index blocks ──────────────────────────────────────────────────
-        XerjError::IndexBlocked { .. } => "cluster_block_exception",
+        ArgosError::IndexBlocked { .. } => "cluster_block_exception",
         // No leader is the ES "master not discovered" case. Any other reason
         // (timeout, leadership lost, shutting down) is a generic 503: the
         // write was not acknowledged and was not applied on this node.
-        XerjError::ClusterUnavailable { reason } => {
+        ArgosError::ClusterUnavailable { reason } => {
             if reason.contains("no elected raft leader") {
                 "master_not_discovered_exception"
             } else {
@@ -363,7 +363,7 @@ fn argos_error_type(e: &XerjError) -> String {
             }
         }
         // ── Catch-all ─────────────────────────────────────────────────────
-        XerjError::Internal { .. } => "internal_server_error_exception",
+        ArgosError::Internal { .. } => "internal_server_error_exception",
     }
     .to_string()
 }
@@ -371,14 +371,14 @@ fn argos_error_type(e: &XerjError) -> String {
 /// Extract the index name from an error, when available, for the ES
 /// `root_cause[].index` field. This lets clients identify which index
 /// triggered the error without parsing the human-readable reason string.
-fn extract_index_name(e: &XerjError) -> Option<String> {
+fn extract_index_name(e: &ArgosError) -> Option<String> {
     match e {
-        XerjError::IndexNotFound { name } | XerjError::IndexAlreadyExists { name } => {
+        ArgosError::IndexNotFound { name } | ArgosError::IndexAlreadyExists { name } => {
             Some(name.clone())
         }
-        XerjError::InvalidIndexName { index, .. } => Some(index.clone()),
-        XerjError::DocumentNotFound { index, .. } => Some(index.clone()),
-        XerjError::IndexBlocked { index, .. } | XerjError::IndexUnavailable { index, .. } => {
+        ArgosError::InvalidIndexName { index, .. } => Some(index.clone()),
+        ArgosError::DocumentNotFound { index, .. } => Some(index.clone()),
+        ArgosError::IndexBlocked { index, .. } | ArgosError::IndexUnavailable { index, .. } => {
             Some(index.clone())
         }
         _ => None,
@@ -410,7 +410,7 @@ pub struct NativeErrorResponse {
 
 /// Convenience to build a native error response.
 pub fn native_error(
-    e: XerjError,
+    e: ArgosError,
     request_id: Option<&str>,
     took_ms: u64,
 ) -> (StatusCode, axum::Json<NativeErrorResponse>) {
@@ -437,7 +437,7 @@ mod raw_document_error_tests {
                       trailing characters at line 1 column 9. Fix: replace that document body \
                       with exactly one complete UTF-8 JSON value, then retry the batch. Related \
                       help: `argos index --help` and https://argos.org/llms.txt";
-        let (status, body) = ApiError::new(XerjError::invalid_document_json(reason)).into_parts();
+        let (status, body) = ApiError::new(ArgosError::invalid_document_json(reason)).into_parts();
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert_eq!(body.error.error_type, "json_parse_exception");
         assert_eq!(body.error.root_cause[0].error_type, "json_parse_exception");

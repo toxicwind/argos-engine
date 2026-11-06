@@ -79,7 +79,7 @@ fn write_mixed_text_blank_pdf(path: &std::path::Path) {
 }
 
 fn run_worker(path: &std::path::Path) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_xerj"))
+    Command::new(env!("CARGO_BIN_EXE_argos"))
         .arg("__extract-pdf")
         .arg(path)
         .output()
@@ -264,7 +264,7 @@ fn pdf_worker_accepts_non_utf8_unix_paths() {
 fn parent_spawn_extracts_a_small_pdf_when_the_address_space_cap_is_refused_or_applied() {
     let _env = env_guard();
     let previous = std::env::var_os("ARGOS_PDF_WORKER_BIN");
-    std::env::set_var("ARGOS_PDF_WORKER_BIN", env!("CARGO_BIN_EXE_xerj"));
+    std::env::set_var("ARGOS_PDF_WORKER_BIN", env!("CARGO_BIN_EXE_argos"));
     struct Restore(Option<std::ffi::OsString>);
     impl Drop for Restore {
         fn drop(&mut self) {

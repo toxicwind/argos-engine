@@ -10,7 +10,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::error::XerjError;
+use crate::error::ArgosError;
 use crate::types::{FieldConfig, FieldType, Schema};
 
 /// Render epoch milliseconds as an ISO-8601 UTC string with millisecond
@@ -105,7 +105,7 @@ impl ManagedSchema {
     /// - The field config is invalid (checked by [`validate_field_config`]:
     ///   empty, padded or `_`-prefixed name, missing or zero vector
     ///   `dimensions`, non-positive boost, an indexed `binary` field).
-    pub fn add_field(&mut self, field: FieldConfig) -> Result<(), XerjError> {
+    pub fn add_field(&mut self, field: FieldConfig) -> Result<(), ArgosError> {
         validate_field_config(&field)?;
         self.schema.add_field(field)
     }
@@ -119,10 +119,10 @@ impl ManagedSchema {
         &mut self,
         value: &serde_json::Value,
         limit: u32,
-    ) -> Result<Vec<String>, XerjError> {
+    ) -> Result<Vec<String>, ArgosError> {
         let obj = value
             .as_object()
-            .ok_or_else(|| XerjError::invalid_mapping("document must be a JSON object"))?;
+            .ok_or_else(|| ArgosError::invalid_mapping("document must be a JSON object"))?;
 
         let mut added = Vec::new();
         for (key, val) in obj {
@@ -132,7 +132,7 @@ impl ManagedSchema {
 
             match self.dynamic {
                 DynamicMapping::Strict => {
-                    return Err(XerjError::invalid_mapping(format!(
+                    return Err(ArgosError::invalid_mapping(format!(
                         "field '{key}' is not in the schema and dynamic mapping is 'strict'"
                     )));
                 }
@@ -141,7 +141,7 @@ impl ManagedSchema {
                 }
                 DynamicMapping::Dynamic => {
                     if self.schema.field_count() as u32 >= limit {
-                        return Err(XerjError::resource_exhausted(format!(
+                        return Err(ArgosError::resource_exhausted(format!(
                             "index has reached the field limit of {limit}; \
                              field '{key}' cannot be auto-mapped"
                         )));
@@ -160,12 +160,12 @@ impl ManagedSchema {
     // ── Validation ────────────────────────────────────────────────────────────
 
     /// Validate that this schema is internally consistent.
-    pub fn validate(&self) -> Result<(), XerjError> {
+    pub fn validate(&self) -> Result<(), ArgosError> {
         // Field names must be unique (enforced by add_field but good to check)
         let mut seen = std::collections::HashSet::new();
         for field in &self.schema.fields {
             if !seen.insert(field.name.as_str()) {
-                return Err(XerjError::invalid_mapping(format!(
+                return Err(ArgosError::invalid_mapping(format!(
                     "duplicate field name: '{}'",
                     field.name
                 )));
@@ -182,14 +182,14 @@ impl ManagedSchema {
     /// Compatible means: every field present in both `self` and `other` has
     /// the same type. Either side may have fields the other lacks (schemas
     /// grow additively). Changing a field's type is never compatible.
-    pub fn is_compatible_with(&self, other: &ManagedSchema) -> Result<(), XerjError> {
+    pub fn is_compatible_with(&self, other: &ManagedSchema) -> Result<(), ArgosError> {
         for field in &self.schema.fields {
             // A field missing from `other` is fine — schemas grow additively,
             // so `self` having a field the snapshot lacks is allowed. Only a
             // TYPE change on a field both sides know is incompatible.
             if let Some(other_field) = other.field(&field.name) {
                 if other_field.field_type != field.field_type {
-                    return Err(XerjError::invalid_mapping(format!(
+                    return Err(ArgosError::invalid_mapping(format!(
                         "field '{}' type changed from '{}' to '{}'; \
                          type changes require reindexing",
                         field.name, field.field_type, other_field.field_type
@@ -282,20 +282,20 @@ fn is_iso8601_like(s: &str) -> bool {
 // ═════════════════════════════════════════════════════════════════════════════
 
 /// Validate an individual [`FieldConfig`].
-pub fn validate_field_config(field: &FieldConfig) -> Result<(), XerjError> {
+pub fn validate_field_config(field: &FieldConfig) -> Result<(), ArgosError> {
     // Name must be non-empty and not contain leading/trailing whitespace
     if field.name.trim().is_empty() {
-        return Err(XerjError::invalid_mapping("field name cannot be empty"));
+        return Err(ArgosError::invalid_mapping("field name cannot be empty"));
     }
     if field.name.trim() != field.name {
-        return Err(XerjError::invalid_mapping(format!(
+        return Err(ArgosError::invalid_mapping(format!(
             "field name '{}' must not have leading or trailing whitespace",
             field.name
         )));
     }
     // Field names must not start with '_' (reserved for meta-fields)
     if field.name.starts_with('_') {
-        return Err(XerjError::invalid_mapping(format!(
+        return Err(ArgosError::invalid_mapping(format!(
             "field name '{}' must not start with '_' (reserved for meta-fields)",
             field.name
         )));
@@ -305,13 +305,13 @@ pub fn validate_field_config(field: &FieldConfig) -> Result<(), XerjError> {
     if matches!(field.field_type, FieldType::Vector | FieldType::Chunk) {
         match field.options.dimensions {
             None => {
-                return Err(XerjError::invalid_mapping(format!(
+                return Err(ArgosError::invalid_mapping(format!(
                     "field '{}' of type '{}' requires 'dimensions' to be set",
                     field.name, field.field_type
                 )));
             }
             Some(0) => {
-                return Err(XerjError::invalid_mapping(format!(
+                return Err(ArgosError::invalid_mapping(format!(
                     "field '{}' dimensions must be > 0",
                     field.name
                 )));
@@ -322,7 +322,7 @@ pub fn validate_field_config(field: &FieldConfig) -> Result<(), XerjError> {
 
     // Boost must be positive
     if field.options.boost <= 0.0 {
-        return Err(XerjError::invalid_mapping(format!(
+        return Err(ArgosError::invalid_mapping(format!(
             "field '{}' boost must be > 0.0",
             field.name
         )));
@@ -330,7 +330,7 @@ pub fn validate_field_config(field: &FieldConfig) -> Result<(), XerjError> {
 
     // Binary fields cannot be indexed (they're too large and opaque)
     if field.field_type == FieldType::Binary && field.options.indexed {
-        return Err(XerjError::invalid_mapping(format!(
+        return Err(ArgosError::invalid_mapping(format!(
             "field '{}' of type 'binary' cannot be indexed",
             field.name
         )));

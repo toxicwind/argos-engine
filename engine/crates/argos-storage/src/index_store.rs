@@ -3452,7 +3452,7 @@ impl IndexStore {
     /// #320. `IndexStoreConfig.wal_min_retained_generations` is read once, at
     /// open, from the boot config file — and `Engine.config` is an
     /// `Arc<Config>` that is never mutated, so without this a floor set
-    /// through `PUT /_xerj/wal_tap` reached no writer at all: not the ones
+    /// through `PUT /_argos/wal_tap` reached no writer at all: not the ones
     /// already open, and not the ones opened after a restart either. The knob
     /// exists to stop a target outage turning into data loss, so "acknowledged
     /// but inert" is the one failure mode it must not have.

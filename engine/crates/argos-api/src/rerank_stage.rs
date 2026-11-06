@@ -915,11 +915,11 @@ pub fn unsupported_on(endpoint: &str) -> Value {
     })
 }
 
-/// `GET /_xerj/rerank` — whether a rerank provider is configured.
+/// `GET /_argos/rerank` — whether a rerank provider is configured.
 ///
 /// Reports THAT a key is set and where it came from; never the key, and the
 /// endpoint only with userinfo, query and fragment stripped. Superuser-only,
-/// like the rest of the `/_xerj/*` operator namespace (`authz.rs`).
+/// like the rest of the `/_argos/*` operator namespace (`authz.rs`).
 pub async fn rerank_status(State(state): State<AppState>) -> Json<Value> {
     Json(status_document(&state.rerank))
 }

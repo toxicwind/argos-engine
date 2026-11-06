@@ -140,7 +140,7 @@ impl CatParams {
                 "" | "true" | "1" | "yes" => true,
                 "false" | "0" | "no" => false,
                 other => {
-                    return Err(ApiError::new(argos_common::XerjError::invalid_query(
+                    return Err(ApiError::new(argos_common::ArgosError::invalid_query(
                         format!("unknown v value `{other}` (expected true or false)"),
                     )))
                 }
@@ -149,7 +149,7 @@ impl CatParams {
         let bytes = match bytes {
             None => None,
             Some(raw) => Some(ByteUnit::parse(raw).ok_or_else(|| {
-                ApiError::new(argos_common::XerjError::invalid_query(format!(
+                ApiError::new(argos_common::ArgosError::invalid_query(format!(
                     "unknown bytes value `{raw}` (expected one of: b, k, kb, m, mb, g, gb, t, tb, p, pb)"
                 )))
             })?),

@@ -6,12 +6,12 @@
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
-use argos_common::XerjError;
+use argos_common::ArgosError;
 
 use crate::ingest::HourBucket;
 
 /// Result alias.
-pub type Result<T> = std::result::Result<T, XerjError>;
+pub type Result<T> = std::result::Result<T, ArgosError>;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // RetentionPolicy

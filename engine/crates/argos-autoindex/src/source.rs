@@ -286,7 +286,7 @@ pub fn classify_key(rel: &str) -> KeyVerdict {
         if component.starts_with('.') {
             let is_ignore_file = index == last
                 && (*component == crate::ignore_rules::GITIGNORE
-                    || *component == crate::ignore_rules::XERJIGNORE);
+                    || *component == crate::ignore_rules::ARGOSIGNORE);
             if !is_ignore_file {
                 return KeyVerdict::Skip(crate::ignore_rules::HIDDEN_RULE);
             }
