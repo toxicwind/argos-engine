@@ -23,7 +23,7 @@ setup:
 ---
 "hybrid query with learned fusion is rejected (400)":
 
-  # Learned fusion is not implemented. XERJ fails loud rather than
+  # Learned fusion is not implemented. ARGOS fails loud rather than
   # silently substituting RRF, which would misrepresent the ranking.
   - do:
       catch: bad_request

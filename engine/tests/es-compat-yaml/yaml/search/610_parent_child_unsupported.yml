@@ -23,7 +23,7 @@ setup:
 ---
 "has_child query is rejected (400)":
 
-  # XERJ is single-type per index and never materializes a parent/child
+  # ARGOS is single-type per index and never materializes a parent/child
   # join, so has_child is rejected at parse time rather than silently
   # running the inner query on flat docs (which returned wrong results).
   - do:

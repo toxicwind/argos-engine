@@ -37,9 +37,9 @@ These are **not** the same. A persistent HNSW graph is production-first (data lo
 
 | ID | Item | Where | Effort | Gate |
 |---|---|---|---|---|
-| 6.1-P1 | Replace stub 200-OK with `501 Not Implemented` on EQL, Watcher, Transform, ILM execute, ingest-pipeline processors, percolator, ES\|QL, Anomaly Detection | `xerj-api/src/es_compat.rs` (~10 handlers) | 1 d | Stub endpoints return `501 + Retry-After` referencing roadmap URL |
-| 6.1-P2 | Document the deployment-security model in `engine/README.md` and `landing/security/index.html`: "xerj expects to run behind a TLS-terminating reverse proxy with OS-level FDE" | docs only | 0.5 d | One-page `engine/reports/SECURITY_DEPLOYMENT_MODEL.md` linked from README |
-| 6.1-P3 | Add a startup banner: "TLS terminated externally" if `tls.enabled=false`; "RBAC not enforced" always | `xerj-server/src/main.rs` | 0.5 d | Operator sees the banner in stdout on startup |
+| 6.1-P1 | Replace stub 200-OK with `501 Not Implemented` on EQL, Watcher, Transform, ILM execute, ingest-pipeline processors, percolator, ES\|QL, Anomaly Detection | `argos-api/src/es_compat.rs` (~10 handlers) | 1 d | Stub endpoints return `501 + Retry-After` referencing roadmap URL |
+| 6.1-P2 | Document the deployment-security model in `engine/README.md` and `landing/security/index.html`: "argos expects to run behind a TLS-terminating reverse proxy with OS-level FDE" | docs only | 0.5 d | One-page `engine/reports/SECURITY_DEPLOYMENT_MODEL.md` linked from README |
+| 6.1-P3 | Add a startup banner: "TLS terminated externally" if `tls.enabled=false`; "RBAC not enforced" always | `argos-server/src/main.rs` | 0.5 d | Operator sees the banner in stdout on startup |
 | 6.1-P4 | Open-source the BRIEF_GAPS.md alongside marketing PDFs (don't hide the gaps from customers) | brief/ | 0.5 d | Public-facing `gaps.html` page on landing site |
 
 ## POV win
@@ -59,17 +59,17 @@ None — this milestone is purely about restoring honesty before the next pitch.
 
 | ID | Item | Where | Effort | Gate |
 |---|---|---|---|---|
-| 6.2-P1 | **Persist HNSW graph** to disk. Define an on-disk format (header + nodes + neighbor-lists + level-promotion) co-located with the index segment dir. Load on restart. Periodic checkpoint after N inserts or M seconds. | `xerj-vector/src/hnsw.rs` + new `hnsw_codec.rs` | 8 d | After kill -9 + restart on a 1M-vector index, query latency p99 returns to within 10% of pre-crash within 5 s (vs O(N log N) rebuild today) |
+| 6.2-P1 | **Persist HNSW graph** to disk. Define an on-disk format (header + nodes + neighbor-lists + level-promotion) co-located with the index segment dir. Load on restart. Periodic checkpoint after N inserts or M seconds. | `argos-vector/src/hnsw.rs` + new `hnsw_codec.rs` | 8 d | After kill -9 + restart on a 1M-vector index, query latency p99 returns to within 10% of pre-crash within 5 s (vs O(N log N) rebuild today) |
 | 6.2-P2 | **Soft-delete on HNSW graph.** Tombstone bit per node; filtered out of beam search; physically removed during merge. | same | 4 d | `delete_document` followed by kNN does not return the deleted doc (today: it's still in neighbor lists for ~hours) |
-| 6.2-P3 | **Segment-level integrity checksums.** Blake3 hash per stored / postings / doc-values block; verified on read; fails fast on corruption. | `xerj-storage/src/segment.rs` | 4 d | A bit-flip in a segment file produces an `Err(Corruption)` on read, not silent garbage |
-| 6.2-P4 | **PIT garbage collection.** Per-PIT TTL (default 5 min, configurable); background sweep evicts expired PITs. | `xerj-engine/src/engine.rs` (PitContext) | 2 d | An open PIT not refreshed within TTL is dropped; memory does not grow with abandoned PITs |
+| 6.2-P3 | **Segment-level integrity checksums.** Blake3 hash per stored / postings / doc-values block; verified on read; fails fast on corruption. | `argos-storage/src/segment.rs` | 4 d | A bit-flip in a segment file produces an `Err(Corruption)` on read, not silent garbage |
+| 6.2-P4 | **PIT garbage collection.** Per-PIT TTL (default 5 min, configurable); background sweep evicts expired PITs. | `argos-engine/src/engine.rs` (PitContext) | 2 d | An open PIT not refreshed within TTL is dropped; memory does not grow with abandoned PITs |
 | 6.2-P5 | One chaos test that does: ingest 1M docs + vectors, kill -9 mid-flush, restart, verify all docs and vectors recoverable; verify HNSW graph reload time. | `tests/chaos/` | 3 d | Test green on every CI run |
 
 ## POV win
 
 | ID | Item | Effort | Gate |
 |---|---|---|---|
-| 6.2-V1 | "xerj survives kill -9" video (60 s) on landing/security/durability — show the chaos test on screen | 1 d | Video on landing page |
+| 6.2-V1 | "argos survives kill -9" video (60 s) on landing/security/durability — show the chaos test on screen | 1 d | Video on landing page |
 
 ## Out of scope
 
@@ -86,19 +86,19 @@ This milestone takes us from "ES-compat search engine with bolted-on vectors" to
 
 | ID | Item | Where | Effort | Gate |
 |---|---|---|---|---|
-| 7-P1 | **Wire `hybrid` executor** (RRF fusion of BM25 + kNN). Single search request, two sub-queries, rank merge with k=60 default + configurable; both `linear` (weighted sum) and `rrf` strategies supported. | `xerj-engine/src/index.rs` add `QueryNode::Hybrid` arm; `xerj-query/src/executor.rs` add `merge_hybrid()` | 8 d | YAML test `hybrid_search_basic.yml` passes; benchmark p95 for hybrid < 50 ms on 1M docs |
+| 7-P1 | **Wire `hybrid` executor** (RRF fusion of BM25 + kNN). Single search request, two sub-queries, rank merge with k=60 default + configurable; both `linear` (weighted sum) and `rrf` strategies supported. | `argos-engine/src/index.rs` add `QueryNode::Hybrid` arm; `argos-query/src/executor.rs` add `merge_hybrid()` | 8 d | YAML test `hybrid_search_basic.yml` passes; benchmark p95 for hybrid < 50 ms on 1M docs |
 | 7-P2 | **Wire `semantic` executor** (auto-embed query text → kNN). Calls `EmbeddingProxy` with cached client; on success runs filtered kNN. On embedding-proxy timeout, falls back to BM25 (configurable: error vs fallback). | same files; +async path | 5 d | YAML test `semantic_search_basic.yml` passes; in-process embedding cache hits 80%+ for repeated queries |
-| 7-P3 | **Wire `function_score` time-decay** (gauss/exp/linear over date fields). | `xerj-engine/src/scoring.rs` | 3 d | All three decay functions return scores within 1e-9 of ES reference for unit cases |
-| 7-P4 | **Persistent agent memory** — back the in-memory `AgentMemory` store with the same WAL+segment layer the rest of xerj uses. Same recall semantics, but survives restart. | `xerj-ai/src/memory.rs` + new `xerj-ai/src/memory_store.rs` | 6 d | Restart test: write 100K memories, kill -9, restart, all 100K recallable |
-| 7-P5 | **Token-budget retrieval cap.** New search param `token_budget` (default unlimited). Sum of `_source` token counts across returned hits ≤ budget; truncate from the bottom. | `xerj-query/src/executor.rs` | 2 d | YAML test verifies returned hits' source token sum ≤ budget |
+| 7-P3 | **Wire `function_score` time-decay** (gauss/exp/linear over date fields). | `argos-engine/src/scoring.rs` | 3 d | All three decay functions return scores within 1e-9 of ES reference for unit cases |
+| 7-P4 | **Persistent agent memory** — back the in-memory `AgentMemory` store with the same WAL+segment layer the rest of argos uses. Same recall semantics, but survives restart. | `argos-ai/src/memory.rs` + new `argos-ai/src/memory_store.rs` | 6 d | Restart test: write 100K memories, kill -9, restart, all 100K recallable |
+| 7-P5 | **Token-budget retrieval cap.** New search param `token_budget` (default unlimited). Sum of `_source` token counts across returned hits ≤ budget; truncate from the bottom. | `argos-query/src/executor.rs` | 2 d | YAML test verifies returned hits' source token sum ≤ budget |
 | 7-P6 | **AI integration test suite** — currently zero. Cover hybrid + semantic + rerank + memory + chunker + embedding-proxy mock. | new `tests/ai-integration/` | 4 d | 50+ tests green, runs on every PR |
 
 ## POV win
 
 | ID | Item | Effort | Gate |
 |---|---|---|---|
-| 7-V1 | **Cross-encoder reranker hook** — POST a list of (query, doc) pairs to a configurable HTTP reranker endpoint (Cohere Rerank, Voyage, custom); blend with kNN scores via reciprocal-rank or replace. Reference adapter for Cohere v3. | `xerj-ai/src/rerank.rs` (new); param `rerank: { model, top_n }` in search body | 5 d | Live demo: hybrid search → top 100 → rerank → top 10; nDCG@10 improves measurably on MS MARCO subset |
-| 7-V2 | **Cohere + Anthropic + Voyage embedding adapters** beyond OpenAI-compatible. Auth styles, response shapes. | `xerj-ai/src/embed.rs` extend with adapter trait | 4 d | All three vendors tested with real keys, results identical (within float tolerance) to vendor's own SDK |
+| 7-V1 | **Cross-encoder reranker hook** — POST a list of (query, doc) pairs to a configurable HTTP reranker endpoint (Cohere Rerank, Voyage, custom); blend with kNN scores via reciprocal-rank or replace. Reference adapter for Cohere v3. | `argos-ai/src/rerank.rs` (new); param `rerank: { model, top_n }` in search body | 5 d | Live demo: hybrid search → top 100 → rerank → top 10; nDCG@10 improves measurably on MS MARCO subset |
+| 7-V2 | **Cohere + Anthropic + Voyage embedding adapters** beyond OpenAI-compatible. Auth styles, response shapes. | `argos-ai/src/embed.rs` extend with adapter trait | 4 d | All three vendors tested with real keys, results identical (within float tolerance) to vendor's own SDK |
 | 7-V3 | **One enterprise pilot customer** running v0.7 on a real RAG workload (≥ 1M docs, ≥ 100 QPS). | sales/SE | parallel | Customer signs reference letter |
 | 7-V4 | **AI-track demo notebook** in `playground/` — Jupyter notebook that ingests Wikipedia subset, embeds with OpenAI, runs hybrid + semantic + rerank, shows the difference in result quality. | playground/ | 3 d | Notebook ships in repo; embedded video on landing/ai/index.html |
 
@@ -120,30 +120,30 @@ This milestone takes us from "ES-compat search engine with bolted-on vectors" to
 
 # v0.8 — "Cloud-native" (8 weeks)
 
-This is the milestone where xerj stops being a binary you `scp` to a box and becomes something an SRE deploys with `helm install xerj` or applies a Kubernetes Custom Resource for.
+This is the milestone where argos stops being a binary you `scp` to a box and becomes something an SRE deploys with `helm install argos` or applies a Kubernetes Custom Resource for.
 
 ## Production-first
 
 | ID | Item | Where | Effort | Gate |
 |---|---|---|---|---|
-| 8-P1 | **Real snapshot implementation** — segment serialization to local FS / S3 / GCS; incremental snapshots (only new segments); restore with checksum verification; snapshot manifest format. | `xerj-engine/src/snapshot.rs` (new); `xerj-storage/src/backend/s3.rs` extend | 8 d | YAML test: create snapshot, delete index, restore from snapshot, all docs queryable; snapshot integrity Blake3-verified on restore |
-| 8-P2 | **Backup automation** — scheduled snapshots (cron-style); SLM policy execution; retention enforcement (e.g. keep daily 30, weekly 12, monthly 12). | new `xerj-engine/src/slm.rs` | 4 d | Configure a daily SLM policy with 30-day retention; verify after 31 days only the 30 most-recent exist |
-| 8-P3 | **OTLP trace emit** — convert tokio-tracing spans to OTLP and push to a configured collector. Minimum: index, search, bulk, kNN, hybrid spans. | `xerj-api/src/trace.rs` (new); add `opentelemetry-otlp` dep | 4 d | Spans visible in Jaeger / Honeycomb / Datadog; trace ID round-trips from incoming `traceparent` header |
-| 8-P4 | **Liveness vs readiness probes** — `/health/live` (always 200 if process alive) and `/health/ready` (200 only when `Engine::new` finished + replay done + at least one shard available). | `xerj-api/src/router.rs` | 1 d | k8s probe configs in Helm chart use these endpoints |
-| 8-P5 | **Hot config reload** — SIGHUP re-reads config file; applies changes that are safe to apply at runtime (limits, log level, merge policy); rejects others (data_dir, ports) with clear error. | `xerj-server/src/main.rs` | 4 d | `kill -HUP` changes `RUST_LOG` level without dropping any in-flight request |
-| 8-P6 | **Slow query log** — configurable threshold (default 1 s p99); emits to stderr + Prometheus metric; ring buffer of last N slow queries available via `/_nodes/hot_threads`-style endpoint. | `xerj-engine/src/index.rs` search hook | 2 d | YAML test: send a guaranteed-slow query, verify it appears in `/v1/admin/slow_queries` |
+| 8-P1 | **Real snapshot implementation** — segment serialization to local FS / S3 / GCS; incremental snapshots (only new segments); restore with checksum verification; snapshot manifest format. | `argos-engine/src/snapshot.rs` (new); `argos-storage/src/backend/s3.rs` extend | 8 d | YAML test: create snapshot, delete index, restore from snapshot, all docs queryable; snapshot integrity Blake3-verified on restore |
+| 8-P2 | **Backup automation** — scheduled snapshots (cron-style); SLM policy execution; retention enforcement (e.g. keep daily 30, weekly 12, monthly 12). | new `argos-engine/src/slm.rs` | 4 d | Configure a daily SLM policy with 30-day retention; verify after 31 days only the 30 most-recent exist |
+| 8-P3 | **OTLP trace emit** — convert tokio-tracing spans to OTLP and push to a configured collector. Minimum: index, search, bulk, kNN, hybrid spans. | `argos-api/src/trace.rs` (new); add `opentelemetry-otlp` dep | 4 d | Spans visible in Jaeger / Honeycomb / Datadog; trace ID round-trips from incoming `traceparent` header |
+| 8-P4 | **Liveness vs readiness probes** — `/health/live` (always 200 if process alive) and `/health/ready` (200 only when `Engine::new` finished + replay done + at least one shard available). | `argos-api/src/router.rs` | 1 d | k8s probe configs in Helm chart use these endpoints |
+| 8-P5 | **Hot config reload** — SIGHUP re-reads config file; applies changes that are safe to apply at runtime (limits, log level, merge policy); rejects others (data_dir, ports) with clear error. | `argos-server/src/main.rs` | 4 d | `kill -HUP` changes `RUST_LOG` level without dropping any in-flight request |
+| 8-P6 | **Slow query log** — configurable threshold (default 1 s p99); emits to stderr + Prometheus metric; ring buffer of last N slow queries available via `/_nodes/hot_threads`-style endpoint. | `argos-engine/src/index.rs` search hook | 2 d | YAML test: send a guaranteed-slow query, verify it appears in `/v1/admin/slow_queries` |
 
 ## POV win
 
 | ID | Item | Effort | Gate |
 |---|---|---|---|
-| 8-V1 | **Helm chart** — `helm install xerj/xerj` with values.yaml covering data_dir, replica count, storage class, TLS secret, prometheus annotations, autoscaling. | `deploy/helm/xerj/` (new) | 5 d | Chart linted; chart-testing CI; reference deploy on minikube + EKS + GKE + AKS |
-| 8-V2 | **Kubernetes operator + CRDs** — `XerjCluster`, `XerjIndex`, `XerjSnapshotPolicy`. Operator written in Go (kubebuilder) or Rust (kube-rs); reconciles to running pods. | new repo `xerj-operator/` | 12 d | `kubectl apply -f xerj-cluster.yaml` brings up a 3-node cluster with 1 index and a snapshot policy, all without imperative kubectl |
-| 8-V3 | **HPA-friendly custom metrics** — pending docs, replication lag, query queue depth, p99 latency exposed in a shape that Kubernetes Custom Metrics API can scale on. | `xerj-common/src/metrics.rs` | 3 d | HPA scales replica count when query queue depth > 100 for 60 s; shrinks back when queue empty |
-| 8-V4 | **Storage tiering** — hot tier (local SSD), warm tier (S3 / GCS / Azure Blob); automatic promotion based on `last_query_time` (default: warm → hot on first query, hot → warm after 7 days untouched). | `xerj-storage/src/tier.rs` (new) | 8 d | YAML test: ingest, promote to warm, query, verify result identical to hot, measure latency penalty (target p99 + 100 ms acceptable) |
-| 8-V5 | **GCS + Azure Blob backends** to match S3 (currently in deps but un-wired). | `xerj-storage/src/backend/{gcs,azure}.rs` | 4 d | Snapshot+restore round-trip works on each backend |
-| 8-V6 | **Multi-arch container** — single `xerj/xerj:0.8.0` image manifest covering linux/amd64 + linux/arm64 (and optionally distroless). | `Dockerfile` + GH Actions buildx | 2 d | `docker pull xerj/xerj:0.8.0` works on both archs from a single tag |
-| 8-V7 | **Reference cloud deploys** — Terraform modules for AWS EKS, GCP GKE, Azure AKS. | `deploy/terraform/{aws,gcp,azure}/` | 6 d | `terraform apply` brings up a 3-node xerj cluster on each cloud |
+| 8-V1 | **Helm chart** — `helm install argos/argos` with values.yaml covering data_dir, replica count, storage class, TLS secret, prometheus annotations, autoscaling. | `deploy/helm/argos/` (new) | 5 d | Chart linted; chart-testing CI; reference deploy on minikube + EKS + GKE + AKS |
+| 8-V2 | **Kubernetes operator + CRDs** — `XerjCluster`, `XerjIndex`, `XerjSnapshotPolicy`. Operator written in Go (kubebuilder) or Rust (kube-rs); reconciles to running pods. | new repo `argos-operator/` | 12 d | `kubectl apply -f argos-cluster.yaml` brings up a 3-node cluster with 1 index and a snapshot policy, all without imperative kubectl |
+| 8-V3 | **HPA-friendly custom metrics** — pending docs, replication lag, query queue depth, p99 latency exposed in a shape that Kubernetes Custom Metrics API can scale on. | `argos-common/src/metrics.rs` | 3 d | HPA scales replica count when query queue depth > 100 for 60 s; shrinks back when queue empty |
+| 8-V4 | **Storage tiering** — hot tier (local SSD), warm tier (S3 / GCS / Azure Blob); automatic promotion based on `last_query_time` (default: warm → hot on first query, hot → warm after 7 days untouched). | `argos-storage/src/tier.rs` (new) | 8 d | YAML test: ingest, promote to warm, query, verify result identical to hot, measure latency penalty (target p99 + 100 ms acceptable) |
+| 8-V5 | **GCS + Azure Blob backends** to match S3 (currently in deps but un-wired). | `argos-storage/src/backend/{gcs,azure}.rs` | 4 d | Snapshot+restore round-trip works on each backend |
+| 8-V6 | **Multi-arch container** — single `argos/argos:0.8.0` image manifest covering linux/amd64 + linux/arm64 (and optionally distroless). | `Dockerfile` + GH Actions buildx | 2 d | `docker pull argos/argos:0.8.0` works on both archs from a single tag |
+| 8-V7 | **Reference cloud deploys** — Terraform modules for AWS EKS, GCP GKE, Azure AKS. | `deploy/terraform/{aws,gcp,azure}/` | 6 d | `terraform apply` brings up a 3-node argos cluster on each cloud |
 
 ## Brief corrections by v0.8
 
@@ -160,30 +160,30 @@ This is the milestone where xerj stops being a binary you `scp` to a box and bec
 
 # v0.9 — "Security + compliance" (8 weeks)
 
-This milestone makes xerj procurement-ready for regulated industries (FinServ, Healthcare, Public-Sector, Defense).
+This milestone makes argos procurement-ready for regulated industries (FinServ, Healthcare, Public-Sector, Defense).
 
 ## Production-first
 
 | ID | Item | Where | Effort | Gate |
 |---|---|---|---|---|
-| 9-P1 | **In-process TLS** — wire `tokio_rustls::TlsAcceptor` into the Axum listener; load cert/key from `tls.cert_path` / `tls.key_path`. mTLS optional (`tls.client_ca_path`). | `xerj-server/src/main.rs` | 4 d | Plain TCP rejected when `tls.enabled=true`; mTLS challenge succeeds with valid client cert, fails without |
-| 9-P2 | **RBAC** — roles (admin, write, read, read_only_index, snapshot_admin); per-index permissions; FLS (field-level mask) and DLS (per-doc filter query). API: `PUT /_security/role/{name}`, `PUT /_security/user/{name}`. | `xerj-api/src/auth.rs` extend; new `xerj-api/src/rbac.rs` | 12 d | YAML test: read-only role gets 403 on write; FLS user sees `_source.salary` redacted; DLS user only sees docs matching their `customer_id` filter |
-| 9-P3 | **API key hashing + rotation** — bcrypt-stored keys; per-key TTL; per-key rate limit. | `xerj-api/src/auth.rs` | 3 d | Keys stored as `$2b$12$...` not plaintext; expired key 401s; per-key rate limit 429s before global limit fires |
-| 9-P4 | **Tamper-evident audit log** — every search/index/delete/admin op writes to a WORM segment (append-only, hash-chain over previous entry). Queryable via `GET /_audit/_search`. Configurable retention. | new `xerj-engine/src/audit.rs` | 6 d | YAML test: 1000 ops + 1 simulated tamper attempt → audit verifier detects break in hash chain |
-| 9-P5 | **GDPR sync-erasure mode** — `DELETE /{index}/_doc/{id}?force=true` triggers immediate segment merge for that doc; returns deletion certificate (signed receipt). | `xerj-engine/src/index.rs` | 3 d | Doc gone from disk before HTTP response returns |
-| 9-P6 | **Engine-level encryption at rest** — AES-256-GCM on segment + WAL + audit log; per-index key wrapped by master key; master key from env/file/KMS. | new `xerj-storage/src/crypt.rs`; integrate into segment + WAL writers | 10 d | All on-disk artifacts unreadable without the master key; `cat segment.dat` shows ciphertext; key rotation rewraps without rewriting data |
-| 9-P7 | **Data retention enforcement** — background task runs the `logs.retention_days` policy (and per-index override); deletes documents past retention; deletion logged to audit. | `xerj-engine/src/retention.rs` (new) | 3 d | Set retention=1d; insert doc with timestamp 2d ago; verify it's gone within one cycle |
+| 9-P1 | **In-process TLS** — wire `tokio_rustls::TlsAcceptor` into the Axum listener; load cert/key from `tls.cert_path` / `tls.key_path`. mTLS optional (`tls.client_ca_path`). | `argos-server/src/main.rs` | 4 d | Plain TCP rejected when `tls.enabled=true`; mTLS challenge succeeds with valid client cert, fails without |
+| 9-P2 | **RBAC** — roles (admin, write, read, read_only_index, snapshot_admin); per-index permissions; FLS (field-level mask) and DLS (per-doc filter query). API: `PUT /_security/role/{name}`, `PUT /_security/user/{name}`. | `argos-api/src/auth.rs` extend; new `argos-api/src/rbac.rs` | 12 d | YAML test: read-only role gets 403 on write; FLS user sees `_source.salary` redacted; DLS user only sees docs matching their `customer_id` filter |
+| 9-P3 | **API key hashing + rotation** — bcrypt-stored keys; per-key TTL; per-key rate limit. | `argos-api/src/auth.rs` | 3 d | Keys stored as `$2b$12$...` not plaintext; expired key 401s; per-key rate limit 429s before global limit fires |
+| 9-P4 | **Tamper-evident audit log** — every search/index/delete/admin op writes to a WORM segment (append-only, hash-chain over previous entry). Queryable via `GET /_audit/_search`. Configurable retention. | new `argos-engine/src/audit.rs` | 6 d | YAML test: 1000 ops + 1 simulated tamper attempt → audit verifier detects break in hash chain |
+| 9-P5 | **GDPR sync-erasure mode** — `DELETE /{index}/_doc/{id}?force=true` triggers immediate segment merge for that doc; returns deletion certificate (signed receipt). | `argos-engine/src/index.rs` | 3 d | Doc gone from disk before HTTP response returns |
+| 9-P6 | **Engine-level encryption at rest** — AES-256-GCM on segment + WAL + audit log; per-index key wrapped by master key; master key from env/file/KMS. | new `argos-storage/src/crypt.rs`; integrate into segment + WAL writers | 10 d | All on-disk artifacts unreadable without the master key; `cat segment.dat` shows ciphertext; key rotation rewraps without rewriting data |
+| 9-P7 | **Data retention enforcement** — background task runs the `logs.retention_days` policy (and per-index override); deletes documents past retention; deletion logged to audit. | `argos-engine/src/retention.rs` (new) | 3 d | Set retention=1d; insert doc with timestamp 2d ago; verify it's gone within one cycle |
 
 ## POV win
 
 | ID | Item | Effort | Gate |
 |---|---|---|---|
-| 9-V1 | **OIDC / OAuth 2.0 SSO** — accept Bearer JWTs from a configured OIDC IdP (Auth0 / Okta / Azure AD / Google Workspace); map JWT claims to roles. | `xerj-api/src/auth_oidc.rs` (new) | 5 d | Sign in via Auth0 / Okta; token authorizes per RBAC mapping |
+| 9-V1 | **OIDC / OAuth 2.0 SSO** — accept Bearer JWTs from a configured OIDC IdP (Auth0 / Okta / Azure AD / Google Workspace); map JWT claims to roles. | `argos-api/src/auth_oidc.rs` (new) | 5 d | Sign in via Auth0 / Okta; token authorizes per RBAC mapping |
 | 9-V2 | **SAML 2.0 federation** (gateway-style — not full IdP) for environments that mandate SAML. | optional v1.0 if time-constrained | 4 d | Demo with Okta SAML against a Kibana-style frontend |
-| 9-V3 | **SOC 2 Type I in flight** — engage auditor (Vanta / Drata / direct CPA), document controls, evidence collection turned on. Certification follows in 6 months; "in flight" status is the v0.9 milestone. | external + ops | 3 weeks elapsed | Letter from auditor naming xerj as engaged customer |
+| 9-V3 | **SOC 2 Type I in flight** — engage auditor (Vanta / Drata / direct CPA), document controls, evidence collection turned on. Certification follows in 6 months; "in flight" status is the v0.9 milestone. | external + ops | 3 weeks elapsed | Letter from auditor naming argos as engaged customer |
 | 9-V4 | **ISO 27001 gap assessment** — formal gap report from a 27001 lead auditor; remediation plan dated. | external | 2 weeks elapsed | Gap report received |
 | 9-V5 | **Customer-facing security pack** — one-page deployment-security model + SOC 2 status letter + ISO gap status + threat model + dependency provenance / SBOM. | docs | 3 d | Pack is a single PDF, downloadable from landing/security/ |
-| 9-V6 | **PII detection at ingest** (optional pipeline processor) — regex + heuristics for email, phone, SSN, credit card; flagged into a `_metadata.pii` array. | `xerj-engine/src/pipeline/pii.rs` (new) | 4 d | YAML test: ingest sample doc; `_metadata.pii` contains the detected categories |
+| 9-V6 | **PII detection at ingest** (optional pipeline processor) — regex + heuristics for email, phone, SSN, credit card; flagged into a `_metadata.pii` array. | `argos-engine/src/pipeline/pii.rs` (new) | 4 d | YAML test: ingest sample doc; `_metadata.pii` contains the detected categories |
 
 ## Brief corrections by v0.9
 
@@ -208,16 +208,16 @@ This milestone makes xerj procurement-ready for regulated industries (FinServ, H
 |---|---|---|---|
 | 1.0-RC-P1 | **ES YAML conformance run on every supported endpoint** — current: 1304/1329 on covered subset. Target: ≥ 1320/1329 on supported endpoints; the rest documented as out-of-scope (anomaly detection, ES\|QL, etc.) with 501 responses. | 5 d | CI gate on this number per release |
 | 1.0-RC-P2 | **Chaos test matrix** — kill -9, disk-full, network partition, clock skew, CPU throttle. Each cluster topology survives. | 5 d | All scenarios green on every PR |
-| 1.0-RC-P3 | **Perf-regression CI** — ingest, search, agg, kNN, hybrid, semantic benchmarks committed to history; PRs blocked if p99 regresses > 10%. | 3 d | Bench dashboard at `bench.xerj.io` |
+| 1.0-RC-P3 | **Perf-regression CI** — ingest, search, agg, kNN, hybrid, semantic benchmarks committed to history; PRs blocked if p99 regresses > 10%. | 3 d | Bench dashboard at `bench.argos.io` |
 | 1.0-RC-P4 | **LTS branch** — `release/v1.0` cut; backport policy documented; semver guarantees codified. | 1 d | Branch exists; backport CI green |
-| 1.0-RC-P5 | **Migration guide from ES** — concrete steps to switch from ES 7.x / 8.x to xerj, with rollback procedure (the wire-protocol guarantee makes this practical). | 5 d | Customer can follow guide unaided in a half-day spike |
+| 1.0-RC-P5 | **Migration guide from ES** — concrete steps to switch from ES 7.x / 8.x to argos, with rollback procedure (the wire-protocol guarantee makes this practical). | 5 d | Customer can follow guide unaided in a half-day spike |
 
 ## POV win
 
 | ID | Item | Effort | Gate |
 |---|---|---|---|
 | 1.0-RC-V1 | **Customer-facing security & compliance pack v2** — SOC 2 Type I in late stage; full SBOM in CycloneDX; pen-test report from external firm; vulnerability disclosure policy. | 5 d | Single PDF on landing/security/ |
-| 1.0-RC-V2 | **Comparison microsite** — `compare.xerj.io` with side-by-side feature matrix vs ES 8.x, OpenSearch, Pinecone, Qdrant, Weaviate, Vespa. Honest. Includes a "what we do NOT do" section. | 5 d | Microsite live; press kit ready |
+| 1.0-RC-V2 | **Comparison microsite** — `compare.argos.io` with side-by-side feature matrix vs ES 8.x, OpenSearch, Pinecone, Qdrant, Weaviate, Vespa. Honest. Includes a "what we do NOT do" section. | 5 d | Microsite live; press kit ready |
 | 1.0-RC-V3 | **Two reference customers** in production on v0.9 → v1.0-rc; reference letters published. | parallel | Logos + quotes on landing/customers |
 
 ---
@@ -252,7 +252,7 @@ These don't fit a single milestone; they need a part-time stream:
 | **ES YAML conformance** | Drive 1304 → 1320+ on supported; 0% on out-of-scope returning 501 | search-engine eng | every PR |
 | **Bench-as-CI** | Track ingest, search, agg, kNN, hybrid, semantic latencies vs main; alert on >10% regression | perf eng | every PR |
 | **SBOM + vulnerability scanning** | `cargo audit`, `cargo deny`, `grype` on container | security eng | every PR |
-| **Documentation site** | docs.xerj.io with versioned docs (MkDocs / Docusaurus); API reference auto-generated from OpenAPI spec | docs | continuous |
+| **Documentation site** | docs.argos.io with versioned docs (MkDocs / Docusaurus); API reference auto-generated from OpenAPI spec | docs | continuous |
 | **Customer success motion** | One pilot per milestone; weekly check-ins; feedback loop into roadmap | sales eng | weekly |
 | **Brief / website honesty audit** | Every milestone: re-run the fairness review; fix any regressions in claim accuracy | product marketing | each milestone |
 
@@ -321,4 +321,4 @@ At a sustained 4-engineer core (16 dev-weeks per calendar month), this plan is *
 
 ---
 
-*Compiled by xerj engineering 2026-04-25. Lives next to `FEATURE_FAIRNESS_REVIEW_v0.6.0_2026-04-25.md`. Update each milestone — keep the delivery % running on the front page.*
+*Compiled by argos engineering 2026-04-25. Lives next to `FEATURE_FAIRNESS_REVIEW_v0.6.0_2026-04-25.md`. Update each milestone — keep the delivery % running on the front page.*

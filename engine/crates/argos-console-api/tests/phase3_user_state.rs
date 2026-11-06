@@ -1,0 +1,703 @@
+//! End-to-end tests for the user-state surface (prefs, dashboards, views,
+//! data-sources) — phase 3.
+//!
+//! These are the endpoints the Argos Console SPA depends on for v1.0 to drop
+//! `localStorage` writes.  Every endpoint requires an authenticated
+//! session, so the suite uses a test-only helper that bypasses the
+//! WebAuthn dance by minting a session cookie directly. (Production
+//! flows always go through the real passkey path; the helper exists
+//! only inside #[cfg(test)] code paths.)
+
+use axum::{body::Body, http::Request, Router};
+use http_body_util::BodyExt;
+use serde_json::{json, Value};
+use tempfile::TempDir;
+use tower::ServiceExt;
+use argos_common::config::Config;
+use argos_common::types::{FieldConfig, FieldType, Schema};
+use argos_console_api::{
+    auth::{sessions, store},
+    state::ClusterMode,
+    argos_console_router, ConsoleState,
+};
+use argos_engine::Engine;
+
+struct TestApp {
+    router: Router,
+    cookie: String,
+    engine: Engine,
+    _dir: TempDir,
+}
+
+async fn boot_with_session() -> TestApp {
+    let dir = TempDir::new().unwrap();
+    let mut cfg = Config::default();
+    cfg.server.data_dir = dir.path().to_str().unwrap().to_string();
+    let engine = Engine::new(cfg).expect("engine");
+    let outcome = argos_console_api::bootstrap::run(&engine, dir.path(), "http://localhost:9200")
+        .await
+        .unwrap();
+    let state = ConsoleState::new(
+        engine.clone(),
+        "local".into(),
+        outcome.master_key,
+        ClusterMode::Standalone,
+    );
+
+    // Synthesize an active owner user + a session for them, so the
+    // tests can hit the protected routes without WebAuthn round-trips.
+    let user = store::User {
+        id: "owner-test".to_string(),
+        email: "owner@example.com".to_string(),
+        display_name: "Owner".to_string(),
+        role: "owner".to_string(),
+        status: store::UserStatus::Active,
+        created_at: argos_console_api::time::now_iso(),
+        last_seen_at: Some(argos_console_api::time::now_iso()),
+    };
+    store::upsert_user(&engine, &user).await.unwrap();
+    let (_session, signed) = sessions::mint_session(&state, &user.id, "passkey", None, None)
+        .await
+        .unwrap();
+    let cookie = format!("argos_session={signed}");
+
+    let router = argos_console_router(state);
+    TestApp {
+        router,
+        cookie,
+        engine,
+        _dir: dir,
+    }
+}
+
+async fn body_json(resp: axum::response::Response) -> (axum::http::StatusCode, Value) {
+    let status = resp.status();
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    let v = if bytes.is_empty() {
+        Value::Null
+    } else {
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null)
+    };
+    (status, v)
+}
+
+fn req(method: &str, path: &str, cookie: &str, body: Option<Value>) -> Request<Body> {
+    let body = match body {
+        Some(b) => Body::from(b.to_string()),
+        None => Body::empty(),
+    };
+    Request::builder()
+        .method(method)
+        .uri(path)
+        .header("cookie", cookie)
+        .header("content-type", "application/json")
+        .body(body)
+        .unwrap()
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PREFS
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn prefs_default_when_unset() {
+    let app = boot_with_session().await;
+    let r = app
+        .router
+        .oneshot(req("GET", "/_argos-console/api/v1/prefs", &app.cookie, None))
+        .await
+        .unwrap();
+    let (status, body) = body_json(r).await;
+    assert_eq!(status, 200);
+    assert!(body["data"]["theme"].is_string(), "got body: {body}");
+}
+
+#[tokio::test]
+async fn prefs_round_trip() {
+    let app = boot_with_session().await;
+
+    let put = req(
+        "PUT",
+        "/_argos-console/api/v1/prefs",
+        &app.cookie,
+        Some(json!({
+            "theme": "light",
+            "time": "1H",
+            "cluster": "REMOTE"
+        })),
+    );
+    let r = app.router.clone().oneshot(put).await.unwrap();
+    assert_eq!(r.status(), 200);
+
+    let r = app
+        .router
+        .oneshot(req("GET", "/_argos-console/api/v1/prefs", &app.cookie, None))
+        .await
+        .unwrap();
+    let (_, body) = body_json(r).await;
+    assert_eq!(body["data"]["theme"], "light");
+    assert_eq!(body["data"]["time"], "1H");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DASHBOARDS
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn dashboards_create_get_list_patch_delete() {
+    let app = boot_with_session().await;
+
+    // CREATE
+    let r = app
+        .router
+        .clone()
+        .oneshot(req(
+            "POST",
+            "/_argos-console/api/v1/dashboards",
+            &app.cookie,
+            Some(json!({ "name": "AI Overview", "visibility": "private" })),
+        ))
+        .await
+        .unwrap();
+    let (status, body) = body_json(r).await;
+    assert_eq!(status, 201, "create: {body}");
+    let dash_id = body["data"]["id"].as_str().unwrap().to_string();
+    assert_eq!(body["data"]["name"], "AI Overview");
+    assert_eq!(body["data"]["version"], 1);
+
+    // GET ONE
+    let r = app
+        .router
+        .clone()
+        .oneshot(req(
+            "GET",
+            &format!("/_argos-console/api/v1/dashboards/{dash_id}"),
+            &app.cookie,
+            None,
+        ))
+        .await
+        .unwrap();
+    let (status, body) = body_json(r).await;
+    assert_eq!(status, 200);
+    assert_eq!(body["data"]["id"], dash_id);
+
+    // LIST
+    let r = app
+        .router
+        .clone()
+        .oneshot(req(
+            "GET",
+            "/_argos-console/api/v1/dashboards",
+            &app.cookie,
+            None,
+        ))
+        .await
+        .unwrap();
+    let (_, body) = body_json(r).await;
+    let arr = body["data"]["dashboards"].as_array().unwrap();
+    assert!(
+        arr.iter().any(|d| d["id"] == dash_id),
+        "missing in list: {body}"
+    );
+
+    // PATCH (rename) — exercise the etag check path with a correct etag
+    let patch = Request::builder()
+        .method("PATCH")
+        .uri(format!("/_argos-console/api/v1/dashboards/{dash_id}"))
+        .header("cookie", &app.cookie)
+        .header("content-type", "application/json")
+        .header("if-match", "W/\"1\"")
+        .body(Body::from(json!({ "name": "Renamed" }).to_string()))
+        .unwrap();
+    let r = app.router.clone().oneshot(patch).await.unwrap();
+    let (status, body) = body_json(r).await;
+    assert_eq!(status, 200, "patch: {body}");
+    assert_eq!(body["data"]["name"], "Renamed");
+    assert_eq!(body["data"]["version"], 2);
+
+    // PATCH with stale etag → 409
+    let stale = Request::builder()
+        .method("PATCH")
+        .uri(format!("/_argos-console/api/v1/dashboards/{dash_id}"))
+        .header("cookie", &app.cookie)
+        .header("content-type", "application/json")
+        .header("if-match", "W/\"1\"")
+        .body(Body::from(json!({ "name": "Should fail" }).to_string()))
+        .unwrap();
+    let r = app.router.clone().oneshot(stale).await.unwrap();
+    assert_eq!(r.status(), 409, "stale etag must 409");
+
+    // DELETE
+    let r = app
+        .router
+        .clone()
+        .oneshot(req(
+            "DELETE",
+            &format!("/_argos-console/api/v1/dashboards/{dash_id}"),
+            &app.cookie,
+            None,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 204);
+
+    // GET after delete → 404
+    let r = app
+        .router
+        .oneshot(req(
+            "GET",
+            &format!("/_argos-console/api/v1/dashboards/{dash_id}"),
+            &app.cookie,
+            None,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 404);
+}
+
+/// Issue #210 — a write WITHOUT If-Match must be rejected with 428
+/// Precondition Required, not silently accepted. Before the fix,
+/// `enforce_etag` returned Ok on a missing header, so two writers that
+/// never sent it both succeeded and the second clobbered the first
+/// (lost update with no error).
+#[tokio::test]
+async fn dashboard_write_without_if_match_is_428() {
+    let app = boot_with_session().await;
+
+    // CREATE (no If-Match needed — there is no prior version to guard).
+    let r = app
+        .router
+        .clone()
+        .oneshot(req(
+            "POST",
+            "/_argos-console/api/v1/dashboards",
+            &app.cookie,
+            Some(json!({ "name": "Original", "visibility": "private" })),
+        ))
+        .await
+        .unwrap();
+    let (status, body) = body_json(r).await;
+    assert_eq!(status, 201, "create: {body}");
+    let dash_id = body["data"]["id"].as_str().unwrap().to_string();
+
+    // PATCH without If-Match → 428 Precondition Required.
+    let r = app
+        .router
+        .clone()
+        .oneshot(req(
+            "PATCH",
+            &format!("/_argos-console/api/v1/dashboards/{dash_id}"),
+            &app.cookie,
+            Some(json!({ "name": "Writer B clobber" })),
+        ))
+        .await
+        .unwrap();
+    let (status, body) = body_json(r).await;
+    assert_eq!(status, 428, "PATCH without If-Match must 428: {body}");
+    assert_eq!(body["error"]["code"], "precondition_required", "{body}");
+
+    // PUT without If-Match → 428 as well.
+    let r = app
+        .router
+        .clone()
+        .oneshot(req(
+            "PUT",
+            &format!("/_argos-console/api/v1/dashboards/{dash_id}"),
+            &app.cookie,
+            Some(json!({ "name": "Writer B clobber", "visibility": "private" })),
+        ))
+        .await
+        .unwrap();
+    let (status, body) = body_json(r).await;
+    assert_eq!(status, 428, "PUT without If-Match must 428: {body}");
+
+    // Neither headerless write took effect.
+    let r = app
+        .router
+        .clone()
+        .oneshot(req(
+            "GET",
+            &format!("/_argos-console/api/v1/dashboards/{dash_id}"),
+            &app.cookie,
+            None,
+        ))
+        .await
+        .unwrap();
+    let (_, body) = body_json(r).await;
+    assert_eq!(
+        body["data"]["name"], "Original",
+        "rejected write must not land"
+    );
+    assert_eq!(body["data"]["version"], 1);
+
+    // The same PATCH with a correct If-Match still succeeds.
+    let ok = Request::builder()
+        .method("PATCH")
+        .uri(format!("/_argos-console/api/v1/dashboards/{dash_id}"))
+        .header("cookie", &app.cookie)
+        .header("content-type", "application/json")
+        .header("if-match", "W/\"1\"")
+        .body(Body::from(json!({ "name": "Legit edit" }).to_string()))
+        .unwrap();
+    let r = app.router.clone().oneshot(ok).await.unwrap();
+    let (status, body) = body_json(r).await;
+    assert_eq!(status, 200, "write WITH If-Match must pass: {body}");
+    assert_eq!(body["data"]["version"], 2);
+}
+
+#[tokio::test]
+async fn dashboards_unauth_returns_401() {
+    let app = boot_with_session().await;
+    let r = app
+        .router
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/_argos-console/api/v1/dashboards")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 401);
+}
+
+#[tokio::test]
+async fn dashboard_create_rejects_unknown_visibility() {
+    let app = boot_with_session().await;
+    let r = app
+        .router
+        .oneshot(req(
+            "POST",
+            "/_argos-console/api/v1/dashboards",
+            &app.cookie,
+            Some(json!({ "name": "x", "visibility": "totally-not-real" })),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 400);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// VIEWS
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn views_round_trip() {
+    let app = boot_with_session().await;
+
+    // Need a dashboard first
+    let r = app
+        .router
+        .clone()
+        .oneshot(req(
+            "POST",
+            "/_argos-console/api/v1/dashboards",
+            &app.cookie,
+            Some(json!({ "name": "D", "visibility": "private" })),
+        ))
+        .await
+        .unwrap();
+    let (_, body) = body_json(r).await;
+    let dash_id = body["data"]["id"].as_str().unwrap().to_string();
+
+    // Create view
+    let r = app
+        .router
+        .clone()
+        .oneshot(req(
+            "POST",
+            "/_argos-console/api/v1/views",
+            &app.cookie,
+            Some(json!({
+                "dashboard_id": dash_id, "name": "Last 24h",
+                "time": { "from": "now-24h", "to": "now" }
+            })),
+        ))
+        .await
+        .unwrap();
+    let (status, body) = body_json(r).await;
+    assert_eq!(status, 201, "{body}");
+    let view_id = body["data"]["id"].as_str().unwrap().to_string();
+
+    // List filtered by dashboard
+    let r = app
+        .router
+        .clone()
+        .oneshot(req(
+            "GET",
+            &format!("/_argos-console/api/v1/views?dashboard={dash_id}"),
+            &app.cookie,
+            None,
+        ))
+        .await
+        .unwrap();
+    let (_, body) = body_json(r).await;
+    assert_eq!(body["data"]["total"], 1);
+    assert_eq!(body["data"]["views"][0]["id"], view_id);
+
+    // Delete
+    let r = app
+        .router
+        .oneshot(req(
+            "DELETE",
+            &format!("/_argos-console/api/v1/views/{view_id}"),
+            &app.cookie,
+            None,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 204);
+}
+
+/// A write-block on `.argos_views` must not produce `204 No Content`.
+/// `delete_document` returns `Err` when the index refuses writes; swallowing
+/// that error told the SPA the view was gone while it stayed searchable.
+#[tokio::test]
+async fn views_delete_on_write_block_is_not_204() {
+    let app = boot_with_session().await;
+
+    let r = app
+        .router
+        .clone()
+        .oneshot(req(
+            "POST",
+            "/_argos-console/api/v1/dashboards",
+            &app.cookie,
+            Some(json!({ "name": "D", "visibility": "private" })),
+        ))
+        .await
+        .unwrap();
+    let (_, body) = body_json(r).await;
+    let dash_id = body["data"]["id"].as_str().unwrap().to_string();
+
+    let r = app
+        .router
+        .clone()
+        .oneshot(req(
+            "POST",
+            "/_argos-console/api/v1/views",
+            &app.cookie,
+            Some(json!({
+                "dashboard_id": dash_id, "name": "Keep me",
+                "time": { "from": "now-24h", "to": "now" }
+            })),
+        ))
+        .await
+        .unwrap();
+    let (status, body) = body_json(r).await;
+    assert_eq!(status, 201, "{body}");
+    let view_id = body["data"]["id"].as_str().unwrap().to_string();
+
+    app.engine
+        .get_index(argos_console_api::indices::VIEWS)
+        .expect("views index")
+        .set_block("write")
+        .await
+        .unwrap();
+
+    let r = app
+        .router
+        .clone()
+        .oneshot(req(
+            "DELETE",
+            &format!("/_argos-console/api/v1/views/{view_id}"),
+            &app.cookie,
+            None,
+        ))
+        .await
+        .unwrap();
+    let (status, body) = body_json(r).await;
+    assert_ne!(
+        status, 204,
+        "write-blocked delete must not report success: {body}"
+    );
+    assert_eq!(status, 500, "engine write-block maps to internal: {body}");
+
+    let r = app
+        .router
+        .oneshot(req(
+            "GET",
+            &format!("/_argos-console/api/v1/views/{view_id}"),
+            &app.cookie,
+            None,
+        ))
+        .await
+        .unwrap();
+    let (status, body) = body_json(r).await;
+    assert_eq!(status, 200, "view must still be readable: {body}");
+    assert_eq!(body["data"]["name"], "Keep me");
+}
+
+/// delete-then-create is not atomic: a replacement that the engine rejects
+/// (here, an unparseable `Date` field) must leave the previous user row in
+/// place. The old helper deleted first, so a failed create dropped the only
+/// copy.
+#[tokio::test]
+async fn upsert_user_keeps_the_row_when_the_replacement_is_rejected() {
+    let app = boot_with_session().await;
+    let original = store::get_user(&app.engine, "owner-test")
+        .await
+        .unwrap()
+        .expect("boot user");
+    assert_eq!(original.email, "owner@example.com");
+
+    let mut bad = original.clone();
+    bad.email = "replacement@example.com".into();
+    bad.last_seen_at = Some("not-a-date".into());
+    let err = store::upsert_user(&app.engine, &bad)
+        .await
+        .expect_err("invalid date must be rejected");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("last_seen_at") || msg.contains("date"),
+        "expected a date-parse error, got {msg}"
+    );
+
+    let still = store::get_user(&app.engine, "owner-test")
+        .await
+        .unwrap()
+        .expect("rejected replacement must not delete the live user");
+    assert_eq!(still.email, "owner@example.com");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DATA SOURCES
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn data_sources_lists_built_in_connection() {
+    let app = boot_with_session().await;
+    let r = app
+        .router
+        .oneshot(req(
+            "GET",
+            "/_argos-console/api/v1/data-sources/connections",
+            &app.cookie,
+            None,
+        ))
+        .await
+        .unwrap();
+    let (status, body) = body_json(r).await;
+    assert_eq!(status, 200);
+    let conns = body["data"]["connections"].as_array().unwrap();
+    assert!(!conns.is_empty(), "must auto-provision built-in connection");
+    assert_eq!(conns[0]["id"], "built-in");
+    assert_eq!(conns[0]["kind"], "argos-local");
+    assert_eq!(conns[0]["managed"], true);
+    assert_eq!(conns[0]["status"], "green");
+}
+
+#[tokio::test]
+async fn data_sources_list_indices_for_built_in() {
+    let app = boot_with_session().await;
+    let r = app
+        .router
+        .oneshot(req(
+            "GET",
+            "/_argos-console/api/v1/data-sources/connections/built-in/indices",
+            &app.cookie,
+            None,
+        ))
+        .await
+        .unwrap();
+    let (status, body) = body_json(r).await;
+    assert_eq!(status, 200);
+    assert!(body["data"]["indices"].is_array());
+    // System indices are skipped — fresh data dir must list nothing.
+    assert_eq!(body["data"]["total"], 0);
+}
+
+#[tokio::test]
+async fn data_sources_unknown_connection_returns_501() {
+    let app = boot_with_session().await;
+    let r = app
+        .router
+        .oneshot(req(
+            "GET",
+            "/_argos-console/api/v1/data-sources/connections/elasticsearch-prod/indices",
+            &app.cookie,
+            None,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 501);
+}
+
+#[tokio::test]
+async fn data_sources_fields_for_built_in_are_live_schema() {
+    // The built-in connection must surface the *real* engine schema for an
+    // index — verbatim field names and types, never a fabricated map.
+    let app = boot_with_session().await;
+
+    let mut schema = Schema::empty();
+    schema
+        .add_field(FieldConfig::new("title", FieldType::Keyword))
+        .unwrap();
+    schema
+        .add_field(FieldConfig::new("views", FieldType::Long))
+        .unwrap();
+    app.engine
+        .create_index("catalog", schema)
+        .expect("create index");
+
+    let r = app
+        .router
+        .oneshot(req(
+            "GET",
+            "/_argos-console/api/v1/data-sources/connections/built-in/indices/catalog/fields",
+            &app.cookie,
+            None,
+        ))
+        .await
+        .unwrap();
+    let (status, body) = body_json(r).await;
+    assert_eq!(status, 200, "{body}");
+    let fields = body["data"]["fields"].as_array().unwrap();
+    let title = fields
+        .iter()
+        .find(|f| f["name"] == "title")
+        .unwrap_or_else(|| panic!("missing title field: {body}"));
+    // Type comes straight from the live engine schema.
+    assert_eq!(title["type"], "keyword", "{body}");
+    let views = fields
+        .iter()
+        .find(|f| f["name"] == "views")
+        .unwrap_or_else(|| panic!("missing views field: {body}"));
+    assert_eq!(views["type"], "long", "{body}");
+}
+
+#[tokio::test]
+async fn data_sources_fields_unknown_connection_returns_501() {
+    // Field listing for any non-built-in connection id must fail loud with
+    // 501 — the API never fabricates an external adapter's schema.
+    let app = boot_with_session().await;
+    let r = app
+        .router
+        .oneshot(req(
+            "GET",
+            "/_argos-console/api/v1/data-sources/connections/elasticsearch-prod/indices/logs/fields",
+            &app.cookie,
+            None,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 501);
+}
+
+#[tokio::test]
+async fn known_routes_include_phase3() {
+    let routes = argos_console_api::router::known_routes();
+    for r in &[
+        "/_argos-console/api/v1/prefs",
+        "/_argos-console/api/v1/dashboards",
+        "/_argos-console/api/v1/dashboards/:id",
+        "/_argos-console/api/v1/views",
+        "/_argos-console/api/v1/views/:id",
+        "/_argos-console/api/v1/data-sources/connections",
+        "/_argos-console/api/v1/data-sources/connections/:id/indices",
+        "/_argos-console/api/v1/data-sources/connections/:id/indices/:name/fields",
+    ] {
+        assert!(routes.contains(r), "missing route: {r}");
+    }
+}

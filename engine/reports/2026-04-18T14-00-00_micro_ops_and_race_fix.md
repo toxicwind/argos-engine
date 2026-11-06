@@ -118,9 +118,9 @@ the flush-ingest oscillation**.  To continue climbing:
 
 ## Files
 
-- `engine/crates/xerj-storage/src/index_store.rs` — `wal_append_batch_raw`;
+- `engine/crates/argos-storage/src/index_store.rs` — `wal_append_batch_raw`;
   unique tmp name in `save_snapshot`.
-- `engine/crates/xerj-storage/src/wal.rs` — `prune` tolerates `NotFound`.
-- `engine/crates/xerj-engine/src/memtable.rs` — `insert_raw_bytes_fresh`.
-- `engine/crates/xerj-engine/src/index.rs` — `index_batch_sync_raw`
+- `engine/crates/argos-storage/src/wal.rs` — `prune` tolerates `NotFound`.
+- `engine/crates/argos-engine/src/memtable.rs` — `insert_raw_bytes_fresh`.
+- `engine/crates/argos-engine/src/index.rs` — `index_batch_sync_raw`
   rewired to the raw WAL path, batch doc_count atomic, fresh-insert.

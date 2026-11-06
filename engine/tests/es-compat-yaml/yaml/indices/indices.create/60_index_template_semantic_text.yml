@@ -62,7 +62,7 @@ setup:
         body:
           settings:
             index:
-              xerj_ingest_shards: 1
+              argos_ingest_shards: 1
             index.query.strict_unknown_fields: true
           mappings:
             properties:
@@ -82,7 +82,7 @@ setup:
       indices.get_settings:
         index: js2281-auto
   - match: { js2281-auto.settings.index.default_pipeline: "tmpl_copy" }
-  - match: { js2281-auto.settings.index.xerj_ingest_shards: "1" }
+  - match: { js2281-auto.settings.index.argos_ingest_shards: "1" }
 
 ---
 "The first bulk write auto-creates from the template":

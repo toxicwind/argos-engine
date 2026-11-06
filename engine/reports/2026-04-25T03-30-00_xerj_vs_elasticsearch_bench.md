@@ -1,9 +1,9 @@
-# XERJ vs Elasticsearch — head-to-head benchmark
+# ARGOS vs Elasticsearch — head-to-head benchmark
 
 **Date**: 2026-04-25
 **Hardware**: same host (32-core, 119 GB RAM, tmpfs data dirs)
-**XERJ**: `prod/v1-readiness` @ `bed1a46`, `:19500` ES-compat port
-**ES**:    `8.13.0` (matching XERJ's wire-version self-report), `:19400`,
+**ARGOS**: `prod/v1-readiness` @ `bed1a46`, `:19500` ES-compat port
+**ES**:    `8.13.0` (matching ARGOS's wire-version self-report), `:19400`,
            single-node, security disabled, `Xms=Xmx=2g`
 **Loopback HTTP** for both — no network in the path
 **Identical wire payloads** for every benchmark (same generated NDJSON,
@@ -11,7 +11,7 @@ same query JSON, same ES API shape)
 
 ## TL;DR
 
-| Dimension | ES 8.13 | XERJ | XERJ delta |
+| Dimension | ES 8.13 | ARGOS | ARGOS delta |
 |---|---|---|---|
 | **Index creation** (PUT /idx) | 93.9 ms | 2.4 ms | **39× faster** |
 | **PUT /_doc/{id} ?refresh=true** p50 | 6.14 ms | 0.32 ms | **19× faster** |
@@ -35,11 +35,11 @@ same query JSON, same ES API shape)
 | **Crash recovery** (kill -9 → boot → docs) | 1000/1000 in 6.05s | 1000/1000 in **7 ms** | **863× faster cold start** |
 | **Data loss across restart** | 0% | 0% | tied |
 
-XERJ is **strictly faster on every latency metric** (single-doc CRUD,
+ARGOS is **strictly faster on every latency metric** (single-doc CRUD,
 search across all query types, kNN), uses **3.9× less RAM**, recovers
 from crash **863× faster**, and matches ES on bulk throughput.  ES is
 better on **disk efficiency** (1.8× smaller), and ES has clean graceful
-shutdown.  XERJ has a graceful-shutdown hang regression that needs
+shutdown.  ARGOS has a graceful-shutdown hang regression that needs
 fixing before any prod environment that does rolling restarts.
 
 ## Setup details
@@ -47,9 +47,9 @@ fixing before any prod environment that does rolling restarts.
 ```
 ES   /home/claude/elasticsearch-8.13.0  port 19400  Xms=Xmx=2g
      /tmp/es-bench-data
-XERJ /home/claude/ai/xerj.ai/engine/target/release/xerj
+ARGOS /home/claude/ai/argos.ai/engine/target/release/argos
      port 19500
-     /tmp/xerj-bench-data
+     /tmp/argos-bench-data
      auth disabled, default config
 ```
 
@@ -70,24 +70,24 @@ Vector tests added a `dense_vector` field with `dims=8`, cosine similarity, `ind
 
 ### 1 · Index creation (mapping PUT)
 
-| | ES | XERJ |
+| | ES | ARGOS |
 |---|---:|---:|
 | `PUT /bench` | 93.9 ms | **2.4 ms** |
 
 ### 2 · Single-doc CRUD (n=100, ?refresh=true on writes)
 
-| Op | ES p50 / p95 / p99 / max | XERJ p50 / p95 / p99 / max |
+| Op | ES p50 / p95 / p99 / max | ARGOS p50 / p95 / p99 / max |
 |---|---|---|
 | `PUT /_doc/{id}`    | 6.14 / 10.31 / 61.51 / 61.51 ms | **0.32 / 0.61 / 0.87 / 0.87 ms** |
 | `GET /_doc/{id}`    | 0.94 /  1.57 /  8.41 /  8.41 ms | **0.30 / 0.36 / 0.46 / 0.46 ms** |
 | `DELETE /_doc/{id}` | 4.91 /  7.84 / 26.18 / 26.18 ms | **0.30 / 0.47 / 0.55 / 0.55 ms** |
 
 ES's p99 spikes (61 ms PUT max, 26 ms DELETE max) come from the JVM —
-GC pauses and translog rotation.  XERJ's max is consistently <1 ms.
+GC pauses and translog rotation.  ARGOS's max is consistently <1 ms.
 
 ### 3 · Bulk ingest 100K docs (20 × 5K-doc batches, ?refresh=true)
 
-| | ES | XERJ |
+| | ES | ARGOS |
 |---|---:|---:|
 | Throughput  | **102,921 docs/s** | 99,108 docs/s |
 | Wall time   | 0.97 s | 1.01 s |
@@ -96,13 +96,13 @@ GC pauses and translog rotation.  XERJ's max is consistently <1 ms.
 | count post-bulk | 100,000 | 100,000 |
 | match_all post-bulk (`track_total_hits`) | 100,000 | 100,000 |
 
-ES is 3.8% faster on raw throughput at this scale.  XERJ's per-batch
+ES is 3.8% faster on raw throughput at this scale.  ARGOS's per-batch
 p99 is half of ES's — ES has a single 151 ms spike (likely a translog
-fsync), XERJ's worst batch is 78 ms.
+fsync), ARGOS's worst batch is 78 ms.
 
 ### 4 · Search latency (1000 sequential queries, mixed types)
 
-| Query | ES p50 / p99 / max | XERJ p50 / p99 / max |
+| Query | ES p50 / p99 / max | ARGOS p50 / p99 / max |
 |---|---|---|
 | `term`  | 0.79 / 3.12 / 11.5 ms | **0.31 / 0.67 / 0.69 ms** |
 | `range` | 0.79 / 2.35 /  6.0 ms | **0.31 / 0.58 / 0.78 ms** |
@@ -111,12 +111,12 @@ fsync), XERJ's worst batch is 78 ms.
 | terms `agg` | 1.06 / 2.85 / 2.9 ms | **0.32 / 1.61 / 1.73 ms** |
 | top-K sort | 4.28 / 9.07 / 11.0 ms | **0.34 / 0.60 / 0.99 ms** |
 
-XERJ's worst case (across all six query types) is 1.73 ms (terms agg
+ARGOS's worst case (across all six query types) is 1.73 ms (terms agg
 p99).  ES's best case (bool p99) is 2.20 ms.
 
 ### 5 · kNN (1000 dense_vector docs, k=10, num_candidates=100)
 
-| | ES | XERJ |
+| | ES | ARGOS |
 |---|---:|---:|
 | Bulk 1K vectors throughput | 10,219 docs/s | **22,974 docs/s** |
 | count post-flush | 1000 | 1000 |
@@ -127,13 +127,13 @@ p99).  ES's best case (bool p99) is 2.20 ms.
 
 ### 6 · Footprint (post 1K-vector index)
 
-| | ES | XERJ |
+| | ES | ARGOS |
 |---|---:|---:|
 | RSS | 2,857 MB | **727 MB** |
 | Disk (data dir) | **19 MB** | 34 MB |
 
 ES uses 3.9× more RAM for the same index.  ES is 1.8× more compact on
-disk, mostly from Lucene's posting compression — XERJ stores raw doc
+disk, mostly from Lucene's posting compression — ARGOS stores raw doc
 bytes plus FTS sidecars and doc-values columns.
 
 ### 7 · Durability — graceful restart
@@ -146,7 +146,7 @@ restart      : ready in 6.05 s
 post-restart : count=1000, visible=1000  ·  0% loss
 ```
 
-#### XERJ
+#### ARGOS
 ```
 pre-shutdown: count=1000, visible=1000
 SIGTERM      : ★ HANG — listeners shut down, merge ran, then process
@@ -164,14 +164,14 @@ snapshot.json + segments/ and replays the (empty) tail of the WAL.
 ```
 
 ES's graceful shutdown story is cleaner — 2.72 s exit, 6.05 s restart,
-no manual intervention.  XERJ's data durability story is equivalent
+no manual intervention.  ARGOS's data durability story is equivalent
 (0% loss after either SIGTERM-then-kill OR direct kill-9), and its
 restart is **863× faster** (7 ms vs 6.05 s).  But the SIGTERM hang
 needs fixing.
 
-### Known issue (bench-revealed regression) — XERJ SIGTERM hangs
+### Known issue (bench-revealed regression) — ARGOS SIGTERM hangs
 
-In the durability test the SIGTERM handler in xerj-server invokes
+In the durability test the SIGTERM handler in argos-server invokes
 `Engine::flush_all_force()` after `tokio::join!(rest, es, grpc)`
 returns.  Server log shows the flush completed, snapshots were written,
 WAL checkpoints fired, and the Index was dropped — but the process
@@ -191,11 +191,11 @@ the hang on rolling restart.
 
 ## Observations
 
-1. **ES wins disk + graceful-shutdown.** XERJ wins everything else.
-2. **ES wins bulk throughput by 3.8% at 100K**, but XERJ's per-batch
+1. **ES wins disk + graceful-shutdown.** ARGOS wins everything else.
+2. **ES wins bulk throughput by 3.8% at 100K**, but ARGOS's per-batch
    tail latency is half of ES's (78 ms vs 151 ms p99), which matters
    more for sustained workloads.
-3. **For vector / kNN workloads XERJ is materially faster** — 2.25×
+3. **For vector / kNN workloads ARGOS is materially faster** — 2.25×
    on bulk vector ingest and 3.3× on kNN search.  Worth highlighting
    for AI-data POVs.
 4. **The 7-ms cold start vs ES's 6-second cold start** is a real
@@ -208,8 +208,8 @@ All test scripts:
 - `/tmp/bench.py`     · main benchmark (CRUD, bulk, search latency)
 - `/tmp/bench2.py`    · kNN + footprint
 - `/tmp/dura.py`      · durability head-to-head
-- `/tmp/dura-xerj.py` · XERJ-only durability rerun
+- `/tmp/dura-argos.py` · ARGOS-only durability rerun
 
 Both daemons stay running after the bench so the numbers can be
-re-verified by hand.  Wipe `/tmp/{es,xerj}-bench-data` between runs
+re-verified by hand.  Wipe `/tmp/{es,argos}-bench-data` between runs
 for a clean baseline.

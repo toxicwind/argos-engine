@@ -1,8 +1,8 @@
 # v0.8.0 — "Cloud-native"
 
 **Released:** 2026-04-26
-**Theme:** xerj stops being a binary you `scp` to a box and becomes
-something an SRE deploys with `helm install xerj`.
+**Theme:** argos stops being a binary you `scp` to a box and becomes
+something an SRE deploys with `helm install argos`.
 
 ## What shipped
 
@@ -14,11 +14,11 @@ something an SRE deploys with `helm install xerj`.
   reason during WAL replay or while loading large segment counts.
 - Both endpoints mounted on the native (8080) and ES-compat (9200)
   routers.
-- Files: `crates/xerj-api/src/native.rs::liveness/readiness`,
-  `crates/xerj-api/src/router.rs`.
+- Files: `crates/argos-api/src/native.rs::liveness/readiness`,
+  `crates/argos-api/src/router.rs`.
 
 ### 8-P6 — Slow query log
-- New `xerj-engine/src/slow_query.rs` — bounded ring buffer (default
+- New `argos-engine/src/slow_query.rs` — bounded ring buffer (default
   256), per-process atomic threshold (default 1 s).  4 unit tests.
 - Search hot path records via `engine.slow_query.maybe_record()` only
   when took ≥ threshold (zero cost otherwise).
@@ -30,7 +30,7 @@ something an SRE deploys with `helm install xerj`.
     runtime, no restart.
 
 ### 8-V1 — Helm chart skeleton
-- `deploy/helm/xerj/` — Chart.yaml, values.yaml, helpers, statefulset,
+- `deploy/helm/argos/` — Chart.yaml, values.yaml, helpers, statefulset,
   services (clip + headless).
 - StatefulSet with PVC volumeClaimTemplate (50 Gi default).
 - Probes wired to the v0.8 endpoints.
@@ -69,7 +69,7 @@ something an SRE deploys with `helm install xerj`.
 ## Files
 
 ```
-deploy/helm/xerj/
+deploy/helm/argos/
 ├── Chart.yaml
 ├── values.yaml
 └── templates/
@@ -78,10 +78,10 @@ deploy/helm/xerj/
     └── statefulset.yaml
 
 engine/Dockerfile                                    (multi-arch + HEALTHCHECK)
-engine/crates/xerj-api/src/native.rs                (probes + admin endpoints)
-engine/crates/xerj-api/src/router.rs                (route wiring on both routers)
-engine/crates/xerj-api/src/es_compat.rs             (slow-query record on search)
-engine/crates/xerj-engine/src/lib.rs                (mod slow_query)
-engine/crates/xerj-engine/src/slow_query.rs         (new)
-engine/crates/xerj-engine/src/engine.rs             (slow_query field)
+engine/crates/argos-api/src/native.rs                (probes + admin endpoints)
+engine/crates/argos-api/src/router.rs                (route wiring on both routers)
+engine/crates/argos-api/src/es_compat.rs             (slow-query record on search)
+engine/crates/argos-engine/src/lib.rs                (mod slow_query)
+engine/crates/argos-engine/src/slow_query.rs         (new)
+engine/crates/argos-engine/src/engine.rs             (slow_query field)
 ```

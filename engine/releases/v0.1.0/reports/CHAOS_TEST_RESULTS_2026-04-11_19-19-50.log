@@ -1,5 +1,5 @@
 warning: unused import: `rayon::prelude`
-  --> crates/xerj-vector/src/hnsw.rs:17:5
+  --> crates/argos-vector/src/hnsw.rs:17:5
    |
 17 | use rayon::prelude::*;
    |     ^^^^^^^^^^^^^^
@@ -7,7 +7,7 @@ warning: unused import: `rayon::prelude`
    = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
 
 warning: variable `curr_dist` is assigned to, but never used
-   --> crates/xerj-vector/src/hnsw.rs:166:13
+   --> crates/argos-vector/src/hnsw.rs:166:13
     |
 166 |         let mut curr_dist = {
     |             ^^^^^^^^^^^^^
@@ -16,7 +16,7 @@ warning: variable `curr_dist` is assigned to, but never used
     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
 
 warning: value assigned to `curr_dist` is never read
-   --> crates/xerj-vector/src/hnsw.rs:225:17
+   --> crates/argos-vector/src/hnsw.rs:225:17
     |
 225 |                 curr_dist = candidates[0].0;
     |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -25,7 +25,7 @@ warning: value assigned to `curr_dist` is never read
     = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
 
 warning: value assigned to `curr_dist` is never read
-   --> crates/xerj-vector/src/hnsw.rs:175:13
+   --> crates/argos-vector/src/hnsw.rs:175:13
     |
 175 |             curr_dist = new_dist;
     |             ^^^^^^^^^^^^^^^^^^^^
@@ -33,7 +33,7 @@ warning: value assigned to `curr_dist` is never read
     = help: maybe it is overwritten before being read?
 
 warning: field `id` is never read
-  --> crates/xerj-vector/src/hnsw.rs:61:5
+  --> crates/argos-vector/src/hnsw.rs:61:5
    |
 60 | struct Node {
    |        ---- field in this struct
@@ -44,7 +44,7 @@ warning: field `id` is never read
    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
 
 warning: field `bucket` is never read
-   --> crates/xerj-storage/src/backend.rs:194:5
+   --> crates/argos-storage/src/backend.rs:194:5
     |
 193 | pub struct S3Backend {
     |            --------- field in this struct
@@ -55,7 +55,7 @@ warning: field `bucket` is never read
     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
 
 warning: field `depth` is never read
-   --> crates/xerj-storage/src/backend.rs:281:9
+   --> crates/argos-storage/src/backend.rs:281:9
     |
 278 |     pub struct Entry {
     |                ----- field in this struct
@@ -64,15 +64,15 @@ warning: field `depth` is never read
     |         ^^^^^
 
 warning: constant `CHKPT_LEN` is never used
-  --> crates/xerj-storage/src/wal.rs:60:7
+  --> crates/argos-storage/src/wal.rs:60:7
    |
 60 | const CHKPT_LEN: u64 = 28; // generation(8) + offset(8) + max_seq(8) + crc(4)
    |       ^^^^^^^^^
 
-warning: `xerj-vector` (lib) generated 5 warnings
-warning: `xerj-storage` (lib) generated 3 warnings
+warning: `argos-vector` (lib) generated 5 warnings
+warning: `argos-storage` (lib) generated 3 warnings
 warning: unused import: `Write`
-  --> crates/xerj-logs/src/columnar.rs:10:29
+  --> crates/argos-logs/src/columnar.rs:10:29
    |
 10 | use std::io::{Cursor, Read, Write};
    |                             ^^^^^
@@ -80,13 +80,13 @@ warning: unused import: `Write`
    = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
 
 warning: unused imports: `ColumnType`, `ColumnValue`, and `Column`
-  --> crates/xerj-logs/src/ingest.rs:14:23
+  --> crates/argos-logs/src/ingest.rs:14:23
    |
 14 | use crate::columnar::{Column, ColumnType, ColumnValue};
    |                       ^^^^^^  ^^^^^^^^^^  ^^^^^^^^^^^
 
 warning: field `bucket` is never read
-   --> crates/xerj-logs/src/ingest.rs:166:5
+   --> crates/argos-logs/src/ingest.rs:166:5
     |
 165 | struct Memtable {
     |        -------- field in this struct
@@ -95,9 +95,9 @@ warning: field `bucket` is never read
     |
     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
 
-warning: `xerj-logs` (lib) generated 3 warnings (run `cargo fix --lib -p xerj-logs` to apply 2 suggestions)
+warning: `argos-logs` (lib) generated 3 warnings (run `cargo fix --lib -p argos-logs` to apply 2 suggestions)
 warning: unused variable: `negative`
-    --> crates/xerj-engine/src/index.rs:3351:41
+    --> crates/argos-engine/src/index.rs:3351:41
      |
 3351 |         QueryNode::Boosting { positive, negative, .. } => {
      |                                         ^^^^^^^^ help: try ignoring the field: `negative: _`
@@ -105,7 +105,7 @@ warning: unused variable: `negative`
      = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
 
 warning: value assigned to `pos` is never read
-   --> crates/xerj-engine/src/sql.rs:344:65
+   --> crates/argos-engine/src/sql.rs:344:65
     |
 344 |             Some(Token::Num(n)) => { limit = Some(*n as usize); pos += 1; }
     |                                                                 ^^^^^^^^
@@ -114,7 +114,7 @@ warning: value assigned to `pos` is never read
     = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
 
 warning: function `execute_agg` is never used
-   --> crates/xerj-engine/src/aggs.rs:391:4
+   --> crates/argos-engine/src/aggs.rs:391:4
     |
 391 | fn execute_agg(name: &str, body: &Value, docs: &[Value]) -> Value {
     |    ^^^^^^^^^^^
@@ -122,18 +122,18 @@ warning: function `execute_agg` is never used
     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
 
 warning: function `execute_agg_with_all` is never used
-   --> crates/xerj-engine/src/aggs.rs:395:4
+   --> crates/argos-engine/src/aggs.rs:395:4
     |
 395 | fn execute_agg_with_all(name: &str, body: &Value, docs: &[Value], all_docs: &[Value]) -> Value {
     |    ^^^^^^^^^^^^^^^^^^^^
 
 warning: function `hash_doc_id` is never used
-    --> crates/xerj-engine/src/index.rs:4362:4
+    --> crates/argos-engine/src/index.rs:4362:4
      |
 4362 | fn hash_doc_id(doc_id: &str) -> u32 {
      |    ^^^^^^^^^^^
 
-warning: `xerj-engine` (lib) generated 5 warnings (run `cargo fix --lib -p xerj-engine` to apply 1 suggestion)
+warning: `argos-engine` (lib) generated 5 warnings (run `cargo fix --lib -p argos-engine` to apply 1 suggestion)
     Finished `release` profile [optimized] target(s) in 0.06s
      Running tests/chaos_tests.rs (target/release/deps/chaos_tests-00e3caecdbf0e260)
 
@@ -236,7 +236,7 @@ test chaos_schema_evolution ... ok
   RESULT: PASS  duration=0.1s
 
 ╔══════════════════════════════════════════════════════════════════╗
-║  CHAOS TEST RESULTS — xerj SLA & Durability                   ║
+║  CHAOS TEST RESULTS — argos SLA & Durability                   ║
 ╠══════════════════════════════════════════════════════════════════╣
 ║  Test                     │ Iterations │ Pass │ Fail │ Duration  ║
 ║  ──────────────────────── │ ────────── │ ──── │ ──── │ ───────── ║

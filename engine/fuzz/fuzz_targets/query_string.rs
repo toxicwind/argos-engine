@@ -28,14 +28,14 @@ fuzz_target!(|data: &[u8]| {
                 "default_operator": default_operator,
             }
         });
-        let _ = xerj_query::parse_query(&body);
+        let _ = argos_query::parse_query(&body);
     }
 
     // No `default_field`: takes the `*`/multi-field lowering branch, which has
     // different range-syntax handling from the single-field one.
     let body = serde_json::json!({ "query_string": { "query": query } });
-    let _ = xerj_query::parse_query(&body);
+    let _ = argos_query::parse_query(&body);
 
     let body = serde_json::json!({ "simple_query_string": { "query": query } });
-    let _ = xerj_query::parse_query(&body);
+    let _ = argos_query::parse_query(&body);
 });

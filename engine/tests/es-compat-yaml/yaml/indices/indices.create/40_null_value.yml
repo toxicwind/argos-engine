@@ -1,10 +1,10 @@
 ---
 # Mapping `null_value`: an explicit JSON `null` (and a `null` array element) is
 # indexed as the declared substitute, while `_source` keeps the `null` the
-# client sent. XERJ-authored case (ES semantics: docs `null-value.html`).
+# client sent. ARGOS-authored case (ES semantics: docs `null-value.html`).
 "null_value substitutes explicit nulls at index time and leaves _source alone":
   - skip:
-      awaits_fix: "XERJ ignores mapping null_value (fix follows in fix/es-mapping-null-value)"
+      awaits_fix: "ARGOS ignores mapping null_value (fix follows in fix/es-mapping-null-value)"
   - do:
       indices.create:
         index: test_null_value

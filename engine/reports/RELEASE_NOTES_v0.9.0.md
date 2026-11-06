@@ -1,13 +1,13 @@
 # v0.9.0 — "Security + compliance" (initial)
 
 **Released:** 2026-04-26
-**Theme:** make xerj procurement-ready for regulated industries
+**Theme:** make argos procurement-ready for regulated industries
 (FinServ, Healthcare, Public Sector).
 
 ## What shipped
 
 ### 9-P2 — Role-based access control (skeleton)
-- New crate module `xerj-engine/src/rbac.rs`.
+- New crate module `argos-engine/src/rbac.rs`.
 - `Privilege` enum: ReadIndex, WriteIndex, AdminIndex, SnapshotCreate,
   SnapshotRestore, SecurityAdmin, AuditRead.
 - `Role`: name + privileges + index pattern allow list ("*" or
@@ -24,7 +24,7 @@
   - `DELETE /_security/role/{name}`
 
 ### 9-P4 — Tamper-evident audit log
-- New crate module `xerj-engine/src/audit.rs`.
+- New crate module `argos-engine/src/audit.rs`.
 - Bounded ring (default 4096 entries, ~1 MB at capacity).
 - Each entry: seq, at_ms, op, subject, resource, outcome, note,
   SHA-256 hash.

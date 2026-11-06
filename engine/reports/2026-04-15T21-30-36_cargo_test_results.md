@@ -1,7 +1,7 @@
 # Cargo Test Results
 **Date**: 2026-04-15 21:30:36 MDT
 **Machine**: drai, 32 cores, 119Gi RAM
-**xerj version**: 0.1.0
+**argos version**: 0.1.0
 **Commit**: c7fa334 revert: M5.24 dv_cache LRU — didn't help either
 
 ## Summary
@@ -18,7 +18,7 @@
 ### Failure details
 ```
 
-thread 'chaos_flush_during_writes' (616108) panicked at crates/xerj-engine/tests/chaos_tests.rs:849:5:
+thread 'chaos_flush_during_writes' (616108) panicked at crates/argos-engine/tests/chaos_tests.rs:849:5:
 assertion `left == right` failed: docs after restart mismatch
   left: 10000
  right: 5000
@@ -32,7 +32,7 @@ note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
   Seeded 500 docs (flushed to segment). Beginning 100 rapid restarts…
 --
 
-thread 'chaos_rapid_restart_loop' (616111) panicked at crates/xerj-engine/tests/chaos_tests.rs:549:5:
+thread 'chaos_rapid_restart_loop' (616111) panicked at crates/argos-engine/tests/chaos_tests.rs:549:5:
 assertion `left == right` failed: rapid restart failed on 100 iterations
   left: 100
  right: 0

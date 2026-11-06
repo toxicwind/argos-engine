@@ -2,7 +2,7 @@
 # If the local machine which is running the test is low on disk space
 # We can have one unassigned shard
 #
-# XERJ note (2026-10-06): skipped with a reason. This case used to "pass"
+# ARGOS note (2026-10-06): skipped with a reason. This case used to "pass"
 # because /_cluster/health echoed the requested wait_for_nodes count back as
 # number_of_nodes — a fabricated topology on a single node (issue #1169).
 # Health now reports real configured membership and times out an unsatisfiable
@@ -13,7 +13,7 @@
 "cluster health basic test, wait for both nodes to join":
   - skip:
       version: "all"
-      reason: "requires a genuine 2-node cluster; XERJ reports real membership now (xerj-org/xerj#1169)"
+      reason: "requires a genuine 2-node cluster; ARGOS reports real membership now (argos-org/argos#1169)"
   - do:
       cluster.health:
         wait_for_nodes: 2

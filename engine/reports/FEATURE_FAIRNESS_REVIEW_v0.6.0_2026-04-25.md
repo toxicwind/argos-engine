@@ -1,12 +1,12 @@
-# xerj v0.6.0 — Feature fairness review
+# argos v0.6.0 — Feature fairness review
 
 **Audience:** internal release governance — buyers, exec, eng leadership.
-**Question this answers:** if we sell xerj as the **all-in-one ES killer for AI-transformation enterprises**, how much of that pitch is real?
+**Question this answers:** if we sell argos as the **all-in-one ES killer for AI-transformation enterprises**, how much of that pitch is real?
 
 **Method:** four parallel audits cross-referenced.
 1. Marketing/website/PDF inventory of every concrete claim ever made (238 distinct claims across landing pages, brief.html, exec-brief.html, tech-brief.html, README, BRIEF_GAPS.md).
-2. AI/vector/RAG implementation depth (xerj-vector, xerj-ai, xerj-query parser+executor).
-3. Security / compliance / durability (xerj-api auth, xerj-storage WAL/snapshot, xerj-cluster Raft).
+2. AI/vector/RAG implementation depth (argos-vector, argos-ai, argos-query parser+executor).
+3. Security / compliance / durability (argos-api auth, argos-storage WAL/snapshot, argos-cluster Raft).
 4. Operations / cloud-native / baremetal / ES feature parity (metrics, k8s, Docker, target-cpu, ES handler count, ES YAML pass rate).
 
 **Honesty rule:** parser-only stubs do not count as "shipped." A query type that the parser accepts but the executor crashes on is a 0% feature, not a 50% feature. The review distinguishes:
@@ -39,7 +39,7 @@
 
 ## Headline finding
 
-**xerj v0.6.0 is a strong ES-compatible search + vector engine. It is NOT an "AI transformation platform" yet.**
+**argos v0.6.0 is a strong ES-compatible search + vector engine. It is NOT an "AI transformation platform" yet.**
 
 The single biggest gap between marketing and reality is at the AI layer:
 
@@ -63,12 +63,12 @@ These are not minor gaps. They are the four or five features that distinguish "E
 ### 1. Core search — 78% delivered
 
 **Shipped, production-grade:**
-- BM25 full-text (xerj-fts, k1=1.2 b=0.75)
+- BM25 full-text (argos-fts, k1=1.2 b=0.75)
 - 38 ES query types (match, term, range, prefix, wildcard, regexp, fuzzy, query_string, simple_query_string, bool, dis_max, boosting, constant_score, multi_match, match_phrase, match_phrase_prefix, match_all, match_none, ids, exists, terms, geo_distance, geo_bounding_box, knn, nested, function_score …)
 - Aggregations: terms (exact, not HyperLogLog), range, histogram, date_histogram, filter, missing, composite, avg/sum/min/max/stats, value_count, cardinality, percentiles (HDR + tdigest), top_hits, scripted_metric (safe subset)
 - Mappings, dynamic mapping, index aliases, index templates (basic), ILM/SLM API surface (storage only)
 - Bulk, scroll, point-in-time, msearch, async_search (synchronous under the hood)
-- 187 ES API endpoints exposed in `xerj-api/src/es_compat.rs`
+- 187 ES API endpoints exposed in `argos-api/src/es_compat.rs`
 
 **Test signal:** 1304/1329 (98.1%) ES YAML test pass rate on the suites we cover. The 22 failures are pre-existing precision / Lucene-exact issues (HoltWinters, _tsid Murmur128, HDR multi-shard, BM25 max_score, two-level field collapsing, date_nanos cross-index, flattened synth-source).
 
@@ -92,9 +92,9 @@ These are not minor gaps. They are the four or five features that distinguish "E
 This is **the** category where the marketing and the code diverge most.
 
 **Shipped, production-grade:**
-- Embedding proxy (xerj-ai/src/embed.rs) — async HTTP client to OpenAI-compatible endpoints, semaphore-bounded concurrency, exponential-backoff retry, configurable timeout, batch embedding
-- Text chunker (xerj-ai/src/chunker.rs) — sentence-aware with overlap, UTF-8 safe, parent-doc tracking
-- Agent memory store (xerj-ai/src/memory.rs) — semantic-similarity dedup, recency blending — **but in-memory only, lost on restart**
+- Embedding proxy (argos-ai/src/embed.rs) — async HTTP client to OpenAI-compatible endpoints, semaphore-bounded concurrency, exponential-backoff retry, configurable timeout, batch embedding
+- Text chunker (argos-ai/src/chunker.rs) — sentence-aware with overlap, UTF-8 safe, parent-doc tracking
+- Agent memory store (argos-ai/src/memory.rs) — semantic-similarity dedup, recency blending — **but in-memory only, lost on restart**
 
 **Stubs (parser accepts, executor crashes):**
 - `hybrid` query — RRF fusion not implemented
@@ -127,7 +127,7 @@ This is **the** category where the marketing and the code diverge most.
 - **OAuth / OIDC / SAML** — not implemented.
 - **Audit logging** — only infrastructure tracing (request IDs, structured logs to stderr). No tamper-evident WORM audit trail, no per-user accountability. Cannot satisfy SOC 2 / HIPAA audit-trail requirements without an external SIEM.
 
-The painless-execute endpoint hardening that landed in v0.6.0 (input limits, no eval) is a **good** security-hygiene win, but it doesn't change the picture: xerj is "secure-by-deployment" (behind a proxy with FDE) not "secure-by-engine."
+The painless-execute endpoint hardening that landed in v0.6.0 (input limits, no eval) is a **good** security-hygiene win, but it doesn't change the picture: argos is "secure-by-deployment" (behind a proxy with FDE) not "secure-by-engine."
 
 ### 5. Compliance — 26% delivered
 
@@ -166,7 +166,7 @@ The painless-execute endpoint hardening that landed in v0.6.0 (input limits, no 
 ### 7. Operations — 36% delivered
 
 **Shipped:**
-- Prometheus metrics (xerj-common/src/metrics.rs) — 17 metrics, exponential histograms, per-index labels for queries + indexing
+- Prometheus metrics (argos-common/src/metrics.rs) — 17 metrics, exponential histograms, per-index labels for queries + indexing
 - Health endpoints (`/_cluster/health`, `/_cat/health`, `/_nodes`)
 - Structured logging via `tracing` (JSON output available, not default)
 - Graceful SIGTERM shutdown (fixed in v0.5.9)
@@ -176,13 +176,13 @@ The painless-execute endpoint hardening that landed in v0.6.0 (input limits, no 
   103 settings, all optional — still ~29x fewer than ES.]
 
 **Missing:**
-- Distributed tracing (OTLP log ingest works; **xerj does not emit spans**)
+- Distributed tracing (OTLP log ingest works; **argos does not emit spans**)
 - Slow query log
 - Hot config reload (no SIGHUP, no API)
 - Liveness vs readiness probe distinction (everything returns "green")
 - `/_nodes/hot_threads`-style diagnostic dump
 - Rich profile API (parameter accepted, timings discarded)
-- Admin CLI subcommands (`xerj index list` etc.) — only server flags exist
+- Admin CLI subcommands (`argos index list` etc.) — only server flags exist
 
 ### 8. Cloud-native — 15% delivered
 
@@ -251,7 +251,7 @@ For pure throughput on commodity 16–32-core boxes the auto-vectorization path 
 | Percolator | **stub — type recognized, no reverse-search** | 0% |
 | Synonyms graph / query rules | missing | 0% |
 
-The headline message: when xerj implements an ES feature, it implements it well. When it doesn't, it often **wires the endpoint as a 200-OK stub**, which is a misleading user experience. **Stub endpoints should return 501 Not Implemented or be removed before they reach a customer.** That's a v0.6.x cleanup task.
+The headline message: when argos implements an ES feature, it implements it well. When it doesn't, it often **wires the endpoint as a 200-OK stub**, which is a misleading user experience. **Stub endpoints should return 501 Not Implemented or be removed before they reach a customer.** That's a v0.6.x cleanup task.
 
 ---
 
@@ -295,8 +295,8 @@ Battle reports under `engine/releases/v0.1.0/reports/` and `engine/reports/` giv
 
 1. **Stop shipping stubs as 200-OK endpoints.** EQL, Watcher, Transform, ILM execution, ingest-pipeline processors, percolator should return `501 Not Implemented` with a Retry-After header pointing at the roadmap, OR be removed from the router. Today they silently lie.
 2. **Soften the brief on three claims** — "audit-grade by default" → "audit-ready primitives," "unified RBAC" → "API-key authentication (RBAC roadmap v0.7)," "hybrid in one query" → either ship the executor in v0.6.1 or describe it as RRF-on-top.
-3. **Document the deployment-security model.** The brief should say plainly: *xerj expects to run behind a TLS-terminating reverse proxy with OS-level FDE*. That's a deployment architecture, not a hidden gap.
-4. **Persist the HNSW graph.** Restart-time graph rebuild is the single biggest correctness gap for anyone who pitches xerj as a vector DB.
+3. **Document the deployment-security model.** The brief should say plainly: *argos expects to run behind a TLS-terminating reverse proxy with OS-level FDE*. That's a deployment architecture, not a hidden gap.
+4. **Persist the HNSW graph.** Restart-time graph rebuild is the single biggest correctness gap for anyone who pitches argos as a vector DB.
 5. **Implement snapshot serialization.** The wire format works; the engine doesn't actually back up data. This is a P0 for any enterprise customer.
 
 **v0.7 should focus on the AI gap:**
@@ -456,4 +456,4 @@ Battle reports under `engine/releases/v0.1.0/reports/` and `engine/reports/` giv
 
 ---
 
-*Compiled by xerj engineering 2026-04-25 from four parallel audits. Internal release governance document — share with the brief team before the next public revision.*
+*Compiled by argos engineering 2026-04-25 from four parallel audits. Internal release governance document — share with the brief team before the next public revision.*

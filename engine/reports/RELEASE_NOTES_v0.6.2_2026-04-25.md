@@ -1,4 +1,4 @@
-# xerj v0.6.2 — vector durability
+# argos v0.6.2 — vector durability
 
 **Tag:** `v0.6.2`
 **Date:** 2026-04-25

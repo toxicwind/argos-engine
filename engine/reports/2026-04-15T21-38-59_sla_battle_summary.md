@@ -1,7 +1,7 @@
 # SLA Battle Test Results
 **Date**: 2026-04-15 21:38:59 MDT
 **Machine**: drai, 32 cores, 119Gi RAM
-**xerj version**: v0.1.0
+**argos version**: v0.1.0
 **Commit**: c7fa334 revert: M5.24 dv_cache LRU — didn't help either
 
 ## Summary

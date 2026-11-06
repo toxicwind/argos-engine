@@ -1,28 +1,28 @@
 version: "3.9"
 
 services:
-  xerj:
+  argos:
     build: .
-    container_name: xerj
+    container_name: argos
     restart: unless-stopped
     ports:
       - "8080:8080"   # Native REST API
       - "9200:9200"   # Elasticsearch-compatible REST API
       - "8081:8081"   # gRPC API
     volumes:
-      - xerj-data:/data
+      - argos-data:/data
     environment:
-      XERJ_LOG: info
-      # The image already sets both (see Dockerfile): xerj defaults to a
+      ARGOS_LOG: info
+      # The image already sets both (see Dockerfile): argos defaults to a
       # loopback bind, which inside a container means nothing published on
       # `ports:` above would ever answer. Repeated here so the exposure is
       # visible in the file you actually edit — the published ports are
       # cleartext HTTP, so put TLS in front of them before this leaves a
       # trusted network.
-      XERJ_BIND_ADDRESS: "0.0.0.0"
-      XERJ_ALLOW_INSECURE_NETWORK_BIND: "true"
+      ARGOS_BIND_ADDRESS: "0.0.0.0"
+      ARGOS_ALLOW_INSECURE_NETWORK_BIND: "true"
     command: ["--data-dir", "/data"]
 
 volumes:
-  xerj-data:
+  argos-data:
     driver: local

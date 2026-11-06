@@ -10,7 +10,7 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use xerj_engine::painless::{check_script_limits, eval_painless, PainlessCtx};
+use argos_engine::painless::{check_script_limits, eval_painless, PainlessCtx};
 
 fuzz_target!(|data: &[u8]| {
     let Ok(src) = std::str::from_utf8(data) else {

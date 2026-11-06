@@ -33,12 +33,12 @@ and feature shipped during the v0.5.x → v1.0 cycle.
 #### Wire compatibility
 - ES wire protocol on `:9200`: 38 query types, all aggregations,
   bulk, scroll, index templates, aliases, kNN, hybrid, semantic.
-- Native REST on `:8080` for first-class xerj idioms (search-
+- Native REST on `:8080` for first-class argos idioms (search-
   discover, dashboard summary, OTLP ingest, syslog ingest).
 - gRPC on `:8081` (placeholder for v1.x).
 
 #### Bundled UI
-- Xerj Console embedded SPA at `http://<host>:9200/_xerj-console/`.
+- Argos Console embedded SPA at `http://<host>:9200/_argos-console/`.
 - 36 static files compiled into the binary at build time.
 - Zero external dependencies.
 
@@ -47,7 +47,7 @@ and feature shipped during the v0.5.x → v1.0 cycle.
 - Slow query log + admin endpoints (`GET/DELETE
   /v1/admin/slow_queries`, `PUT
   /v1/admin/slow_queries/threshold/:ms`).
-- Helm chart at `deploy/helm/xerj/` (StatefulSet + PVC + probes
+- Helm chart at `deploy/helm/argos/` (StatefulSet + PVC + probes
   + headless service + non-root security context).
 - Multi-arch Dockerfile with HEALTHCHECK wired to readiness.
 
@@ -61,7 +61,7 @@ and feature shipped during the v0.5.x → v1.0 cycle.
 ## Compared with Elasticsearch (real measurements, same 32-core
 host, identical wire payloads)
 
-| Dimension | ES 8.13 | Xerj | Delta |
+| Dimension | ES 8.13 | Argos | Delta |
 |---|---:|---:|---:|
 | Cold start | 6.05 s | 4 ms | **863× faster** |
 | RSS (1 K-vector index) | 2,857 MB | 727 MB | **3.9× less** |

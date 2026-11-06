@@ -15,5 +15,5 @@ fuzz_target!(|data: &[u8]| {
     if sql.len() > 8192 {
         return;
     }
-    let _ = xerj_engine::sql::parse_sql(sql);
+    let _ = argos_engine::sql::parse_sql(sql);
 });

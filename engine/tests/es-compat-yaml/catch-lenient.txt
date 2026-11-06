@@ -1,5 +1,5 @@
-# Cases whose `catch:` expectation XERJ does not meet yet (see `mod catch_lenient`
-# in src/main.rs). Each one asks for an error that XERJ does not return: it
+# Cases whose `catch:` expectation ARGOS does not meet yet (see `mod catch_lenient`
+# in src/main.rs). Each one asks for an error that ARGOS does not return: it
 # answers 2xx, a different status, or an error whose body does not match.
 #
 # Before the runner checked `catch:` at all, every one of these passed

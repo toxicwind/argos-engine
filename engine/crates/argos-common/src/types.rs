@@ -1,0 +1,743 @@
+//! Core domain types for the argos engine.
+//!
+//! These types flow through every layer of the system. Keeping them in
+//! `argos-common` prevents circular crate dependencies.
+
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use std::fmt;
+use std::str::FromStr;
+use uuid::Uuid;
+
+use crate::error::XerjError;
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Primitive IDs
+// ═════════════════════════════════════════════════════════════════════════════
+
+/// Internal document identifier — a monotonically increasing u64 assigned by
+/// the storage layer. Not exposed through the API.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct DocId(pub u64);
+
+impl fmt::Display for DocId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<u64> for DocId {
+    fn from(v: u64) -> Self {
+        Self(v)
+    }
+}
+
+/// Segment identifier — unique within an index.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct SegmentId(pub u64);
+
+impl fmt::Display for SegmentId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<u64> for SegmentId {
+    fn from(v: u64) -> Self {
+        Self(v)
+    }
+}
+
+/// Monotonic sequence number — used by the WAL to order operations globally.
+/// Also serves as the external document version when no explicit version is
+/// provided.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct SeqNo(pub u64);
+
+impl fmt::Display for SeqNo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<u64> for SeqNo {
+    fn from(v: u64) -> Self {
+        Self(v)
+    }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// IndexName
+// ═════════════════════════════════════════════════════════════════════════════
+
+/// A validated index name.
+///
+/// Rules (intentionally stricter than Elasticsearch):
+/// - Lowercase ASCII letters, digits, `-`, and `_` only.
+/// - Must start with a letter.
+/// - 1–255 characters.
+/// - Must not start with `_` or `-`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct IndexName(String);
+
+impl IndexName {
+    /// Create a new `IndexName`, validating the input.
+    pub fn new(name: impl Into<String>) -> Result<Self, XerjError> {
+        let name = name.into();
+        Self::validate(&name)?;
+        Ok(Self(name))
+    }
+
+    /// Returns the inner string slice.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// Validate an index name against the traversal/charset rules without
+    /// constructing an `IndexName`. Public so handler boundaries (e.g. the
+    /// es_compat `create_index` surface, #80) can reject `..`/separators/NUL
+    /// locally instead of relying solely on the deeper `IndexName::new` guard.
+    pub fn validate(name: &str) -> Result<(), XerjError> {
+        let reject = |reason: String| XerjError::invalid_index_name(name, reason);
+        if name.len() > 255 {
+            return Err(reject(format!(
+                "index name too long: {} chars (max 255)",
+                name.len()
+            )));
+        }
+        // chars().next() returns None iff `name` is empty — fold the
+        // empty-name check into the extraction so the two facts can't
+        // drift apart in a future refactor.
+        let Some(first) = name.chars().next() else {
+            return Err(reject("index name cannot be empty".to_string()));
+        };
+        // Reject the literal names "." and ".." and any name containing a
+        // path separator. Previously a leading '.' was carved out for system
+        // indices (`.kibana`) and '.' was allowed in the body of the name,
+        // which let `..` through — `IndexName::new("..")` succeeded and
+        // `data_dir.join("..")` traversed out of the data directory.
+        if name == "." || name == ".." {
+            return Err(reject(format!(
+                "index name must not be '.' or '..' (got '{name}')"
+            )));
+        }
+        if name.contains('/') || name.contains('\\') || name.contains('\0') {
+            return Err(reject(format!(
+                "index name must not contain a path separator (got '{name}')"
+            )));
+        }
+        // Allow leading '.' for system indices like .kibana, .security-* etc.
+        if !first.is_ascii_lowercase() && first != '.' {
+            return Err(reject(format!(
+                "index name must start with a lowercase letter or '.', got '{first}'"
+            )));
+        }
+        // After a leading dot, the rest of the name is validated normally.
+        let rest = if first == '.' { &name[1..] } else { name };
+        for ch in rest.chars() {
+            if !matches!(ch, 'a'..='z' | '0'..='9' | '-' | '_' | '.') {
+                return Err(reject(format!(
+                    "index name contains invalid character '{ch}' \
+                     (only lowercase letters, digits, '-', '_', '.' allowed)"
+                )));
+            }
+        }
+        // A leading dot is permitted (system indices), but a doubled ".."
+        // anywhere in the name is a path-traversal vector — reject it the
+        // same way the /_memory/{ns} validator does.
+        if name.contains("..") {
+            return Err(reject(format!(
+                "index name must not contain '..' (got '{name}')"
+            )));
+        }
+        Ok(())
+    }
+}
+
+impl fmt::Display for IndexName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl FromStr for IndexName {
+    type Err = XerjError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::new(s)
+    }
+}
+
+impl AsRef<str> for IndexName {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// The reserved index namespace
+// ═════════════════════════════════════════════════════════════════════════════
+
+/// Index-name prefix reserved for agent-memory namespaces and second brains.
+///
+/// This lives here — not in `argos-api::authz`, where the namespace is
+/// enforced on the data plane — because more than one HTTP surface has to
+/// know it: `argos-console-api`'s data-sources proxy talks to the engine
+/// in-process, outside `argos-api`'s middleware stack, and the two crates
+/// are deliberately decoupled peers (neither may depend on the other).
+/// `argos-common` is the one crate both already share, so the prefix cannot
+/// drift between the surfaces that guard it. `argos-api::authz` re-exports
+/// both names; the writers of the name (`memory_api::MEMORY_PREFIX`,
+/// `graph_api::edges_index`) still resolve to this single definition.
+pub const RESERVED_INDEX_PREFIX: &str = ".argos-memory-";
+
+/// Is `index` inside the reserved namespace?
+pub fn is_reserved_index(index: &str) -> bool {
+    index.starts_with(RESERVED_INDEX_PREFIX)
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Field types
+// ═════════════════════════════════════════════════════════════════════════════
+
+/// Every data type a field can have in a argos index.
+///
+/// Designed to be a superset of Elasticsearch's core types while adding
+/// `Chunk` (chunked text for RAG) and `Vector` as first-class citizens.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FieldType {
+    /// Analysed text — tokenised, not aggregatable.
+    Text,
+    /// Exact-match string — not tokenised, aggregatable (like ES `keyword`).
+    Keyword,
+    /// 64-bit signed integer.
+    Long,
+    /// 64-bit IEEE 754 float.
+    Double,
+    /// Boolean (`true` / `false`).
+    Boolean,
+    /// ISO-8601 timestamp or milliseconds-since-epoch.
+    Date,
+    /// IPv4 or IPv6 address stored as a 128-bit integer.
+    Ip,
+    /// Dense floating-point vector for ANN search.
+    Vector,
+    /// Pre-chunked text fragment with an associated embedding vector.
+    /// Stores the chunk text, its vector, metadata, and a parent document
+    /// reference — designed for RAG retrieval pipelines.
+    Chunk,
+    /// Latitude/longitude point.
+    GeoPoint,
+    /// Raw bytes, stored Base64-encoded in JSON responses.
+    Binary,
+    /// Nested JSON object stored as a sub-document with its own field namespace.
+    Object,
+    /// Nested array of objects, each queryable independently (like ES `nested`).
+    Nested,
+}
+
+impl fmt::Display for FieldType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            Self::Text => "text",
+            Self::Keyword => "keyword",
+            Self::Long => "long",
+            Self::Double => "double",
+            Self::Boolean => "boolean",
+            Self::Date => "date",
+            Self::Ip => "ip",
+            Self::Vector => "vector",
+            Self::Chunk => "chunk",
+            Self::GeoPoint => "geo_point",
+            Self::Binary => "binary",
+            Self::Object => "object",
+            Self::Nested => "nested",
+        };
+        f.write_str(s)
+    }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Date precision
+// ═════════════════════════════════════════════════════════════════════════════
+
+/// Declared resolution of a [`FieldType::Date`] field.
+///
+/// ARGOS collapses ES `date` AND `date_nanos` onto the single native type
+/// [`FieldType::Date`], so before #790 the engine had no way to tell them
+/// apart and had to *guess* a value's scale from the value itself (">= 4
+/// fractional-second digits means nanoseconds"). That guess is per-VALUE, so
+/// one column could hold both millisecond and nanosecond keys — six orders of
+/// magnitude apart — and no single comparison could be right against both.
+///
+/// Recording the mapping's declared precision makes the scale a property of
+/// the FIELD, which is what every date-ordered path needs to agree on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DatePrecision {
+    /// ES `date` — millisecond resolution. Sub-millisecond digits truncate,
+    /// exactly as ES does.
+    Millis,
+    /// ES `date_nanos` — nanosecond resolution.
+    Nanos,
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Field options
+// ═════════════════════════════════════════════════════════════════════════════
+
+/// Per-field configuration options.
+///
+/// Not all options apply to all field types; inapplicable options are ignored
+/// at index-build time with a warning.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FieldOptions {
+    /// Enable full-text analysis. Only meaningful for `Text` fields (default: `true` for `Text`).
+    #[serde(default = "bool_true")]
+    pub analyzed: bool,
+    /// Store the original field value for retrieval (default: `true`).
+    #[serde(default = "bool_true")]
+    pub stored: bool,
+    /// Build an inverted index / BKD tree for this field (default: `true`).
+    #[serde(default = "bool_true")]
+    pub indexed: bool,
+    /// Build doc-values column store for sorting and aggregation (default: `true`).
+    #[serde(default = "bool_true")]
+    pub doc_values: bool,
+    /// Override the analyzer for this field (inherits from `fts.default_analyzer` if `None`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub analyzer: Option<String>,
+    /// Include term position information for phrase queries (default: `true` for `Text`).
+    #[serde(default = "bool_true")]
+    pub term_positions: bool,
+    /// Dimensionality — required for `Vector` and `Chunk` fields.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dimensions: Option<usize>,
+    /// Similarity metric override for this vector field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub similarity: Option<String>,
+    /// Vector quantization scheme for this dense_vector field.
+    ///
+    /// `Some("scalar8")` makes the kNN paths score this field from
+    /// 1-byte-per-dimension SQ8 codes written at INGEST time into a flat,
+    /// slot-addressed u8 array (`Sq8CodeStore`, #392) — one slot per document,
+    /// rewritten on update, codebook fitted from the ingested vectors (widened
+    /// and re-encoded when a value lands outside it, never clamped). The kNN
+    /// scoring working set is those codes (1 byte/dim) instead of the f32
+    /// `_source` vectors (4 bytes/dim), and a document's `_score` is a function
+    /// of the index state alone, not of the query's candidate set. `_source`
+    /// keeps the original f32 vectors, so total resident memory does not shrink
+    /// 4× — the vector working set the scoring path touches does. When the
+    /// store cannot serve (open-time walk not yet converged, a publication
+    /// race, coverage broken by a wrong-dimension write), queries fall back to
+    /// the exact `_source` scan. `None`/absent keeps the exact full-precision
+    /// f32 brute-force path. Set from the mapping's `index_options.type`
+    /// (`int8_hnsw`/`int8_flat` → `scalar8`) in es_compat.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quantization: Option<String>,
+    /// Null value to substitute when the field is missing from a document.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub null_value: Option<serde_json::Value>,
+    /// Maximum string length advertised for keyword indexing (ES
+    /// `ignore_above`). Recorded on the auto-created `keyword` sub-field of
+    /// dynamically mapped string fields so the ES-compat mapping renders the
+    /// exact default shape ES emits (`ignore_above: 256`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ignore_above: Option<u32>,
+    /// Declared resolution of a `Date` field (#790, #889).
+    ///
+    /// `Some(Millis)` for an ES `date`, `Some(Nanos)` for an ES `date_nanos`;
+    /// query-time date normalisation pins the whole column to that scale (see
+    /// `argos-engine`'s `DateScale`).
+    ///
+    /// `None` means "the mapping predates this flag" — a schema.json written by
+    /// an older build. `Index::open` back-fills it from the index's persisted
+    /// `es_mapping.json`, which still carries the original type string (#889);
+    /// what survives as `None` is a field no mapping blob describes, and that
+    /// keeps the legacy per-value guess rather than being defaulted to a scale
+    /// nobody declared.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub date_precision: Option<DatePrecision>,
+    /// Allow the field to appear more than once in a document (always `true` for arrays).
+    #[serde(default = "bool_true")]
+    pub multi_value: bool,
+    /// Boost factor for relevance scoring (default: `1.0`).
+    #[serde(default = "float_one")]
+    pub boost: f32,
+}
+
+fn bool_true() -> bool {
+    true
+}
+fn float_one() -> f32 {
+    1.0
+}
+
+impl Default for FieldOptions {
+    fn default() -> Self {
+        Self {
+            analyzed: true,
+            stored: true,
+            indexed: true,
+            doc_values: true,
+            analyzer: None,
+            term_positions: true,
+            dimensions: None,
+            similarity: None,
+            quantization: None,
+            null_value: None,
+            ignore_above: None,
+            date_precision: None,
+            multi_value: true,
+            boost: 1.0,
+        }
+    }
+}
+
+/// Optional embedding configuration attached to a field.
+///
+/// When present, ingest vectorises this field with the server's
+/// `--embed-mode`. `endpoint` and `model` are recorded from a mapping's
+/// `inference_endpoint` / `inference_id` and are not consulted at ingest;
+/// a mismatch is a warning on the mapping response, not a different embedder.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EmbeddingConfig {
+    /// Override the global `embedding.default_endpoint`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub endpoint: Option<String>,
+    /// Override the global `embedding.default_model`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// Target field name where the resulting vector should be stored.
+    /// Defaults to `"<field_name>_vector"`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_field: Option<String>,
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// FieldConfig
+// ═════════════════════════════════════════════════════════════════════════════
+
+/// Complete configuration for a single field in an index mapping.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FieldConfig {
+    /// Fully-qualified field name (dot-separated for nested fields).
+    pub name: String,
+    /// Data type.
+    pub field_type: FieldType,
+    /// Indexing and storage options.
+    #[serde(default)]
+    pub options: FieldOptions,
+    /// Optional embedding pipeline configuration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub embedding: Option<EmbeddingConfig>,
+    /// Sub-fields. Two distinct meanings, keyed off this field's own type:
+    /// on `Object`/`Nested` these are real child *properties*; on a leaf type
+    /// they are ES *multi-fields* — the same value indexed a second way, e.g.
+    /// the `keyword` sub-field auto-created on dynamically mapped strings
+    /// (#209). The ES-compat mapping renderer picks `properties` vs `fields`
+    /// on exactly that distinction.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fields: Vec<FieldConfig>,
+}
+
+impl FieldConfig {
+    /// Create a simple field with default options.
+    ///
+    /// A `Date` field created through the native API is an ES `date`:
+    /// millisecond resolution. `date_nanos` has no native type of its own and
+    /// only ever arrives as an ES mapping string, so the ES-compat mapping
+    /// paths override `options.date_precision` for it (#790). Anything that
+    /// forgets to therefore lands on `Millis`, which is the ES default — never
+    /// on a silently different scale.
+    pub fn new(name: impl Into<String>, field_type: FieldType) -> Self {
+        let mut options = FieldOptions::default();
+        if field_type == FieldType::Date {
+            options.date_precision = Some(DatePrecision::Millis);
+        }
+        Self {
+            name: name.into(),
+            field_type,
+            options,
+            embedding: None,
+            fields: Vec::new(),
+        }
+    }
+
+    /// Builder: set a specific option.
+    pub fn with_options(mut self, options: FieldOptions) -> Self {
+        self.options = options;
+        self
+    }
+
+    /// Builder: attach an embedding configuration.
+    pub fn with_embedding(mut self, embedding: EmbeddingConfig) -> Self {
+        self.embedding = Some(embedding);
+        self
+    }
+
+    /// Returns `true` if this field should produce an inverted index entry.
+    pub fn is_searchable(&self) -> bool {
+        self.options.indexed
+    }
+
+    /// Returns `true` if this field can be used in sorting and aggregations.
+    pub fn is_aggregatable(&self) -> bool {
+        self.options.doc_values && !matches!(self.field_type, FieldType::Text | FieldType::Binary)
+    }
+
+    /// This field plus every nested child, recursively -- both real
+    /// `properties` children of an `Object`/`Nested` field and leaf
+    /// multi-fields under `fields` live in the same `fields` vec (see the
+    /// dual meaning documented on that field above), so one count covers
+    /// both. `Schema::field_count()` sums this over every top-level field
+    /// instead of just counting `self.fields.len()`, since a single
+    /// top-level `Object` field can carry unboundedly many nested
+    /// children once dynamic mapping recurses into them (see
+    /// `argos-engine`'s `dynamic_field_config_at_depth`) -- an
+    /// un-recursive count would let nested fields bypass every
+    /// `max_fields_per_index` mapping-explosion guard entirely.
+    pub fn total_field_count(&self) -> usize {
+        1 + self
+            .fields
+            .iter()
+            .map(FieldConfig::total_field_count)
+            .sum::<usize>()
+    }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Schema
+// ═════════════════════════════════════════════════════════════════════════════
+
+/// Index schema — the ordered collection of field configs plus version metadata.
+///
+/// See also the richer [`crate::schema`] module which wraps this type with
+/// dynamic mapping logic.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Schema {
+    /// All fields in definition order.
+    pub fields: Vec<FieldConfig>,
+    /// Schema version — incremented on every `add_field` call.
+    pub version: u64,
+    /// Timestamp of the last schema modification.
+    pub updated_at: DateTime<Utc>,
+}
+
+impl Schema {
+    /// Create an empty schema at version 0.
+    pub fn empty() -> Self {
+        Self {
+            fields: Vec::new(),
+            version: 0,
+            updated_at: Utc::now(),
+        }
+    }
+
+    /// Return the field config for the given name, if it exists.
+    pub fn field(&self, name: &str) -> Option<&FieldConfig> {
+        self.fields.iter().find(|f| f.name == name)
+    }
+
+    /// Mutable counterpart to [`Self::field`] -- lets a caller merge new
+    /// dynamically-discovered nested children into an already-registered
+    /// top-level field's own `fields` in place, instead of only ever being
+    /// able to add brand-new top-level fields via [`Self::add_field`].
+    pub fn field_mut(&mut self, name: &str) -> Option<&mut FieldConfig> {
+        self.fields.iter_mut().find(|f| f.name == name)
+    }
+
+    /// Return `true` if a field with this name already exists.
+    pub fn has_field(&self, name: &str) -> bool {
+        self.field(name).is_some()
+    }
+
+    /// Add a field, bumping the schema version.
+    ///
+    /// Returns an error if a field with this name already exists.
+    pub fn add_field(&mut self, field: FieldConfig) -> Result<(), XerjError> {
+        if self.has_field(&field.name) {
+            return Err(XerjError::invalid_mapping(format!(
+                "field '{}' already exists in schema",
+                field.name
+            )));
+        }
+        self.fields.push(field);
+        self.version += 1;
+        self.updated_at = Utc::now();
+        Ok(())
+    }
+
+    /// Total number of fields, counting every nested child at every depth
+    /// -- not just top-level fields. Every `max_fields_per_index`
+    /// mapping-explosion guard in the engine (both the dynamic-ingest path
+    /// and the explicit `PUT _mapping`/`POST .../evolve` path, #76 S5-5)
+    /// calls this to bound real schema growth; counting only
+    /// `self.fields.len()` would let a single top-level `Object` field
+    /// carry unboundedly many nested children uncounted, once dynamic
+    /// mapping recurses into them (see `argos-engine`'s
+    /// `dynamic_field_config_at_depth`).
+    pub fn field_count(&self) -> usize {
+        self.fields.iter().map(FieldConfig::total_field_count).sum()
+    }
+}
+
+impl Default for Schema {
+    fn default() -> Self {
+        Self::empty()
+    }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Document
+// ═════════════════════════════════════════════════════════════════════════════
+
+/// A document in the index.
+///
+/// `Document` is the boundary type between the API layer and the storage
+/// layer. The `source` field holds the raw JSON as provided by the indexing
+/// request; the engine does not transform it beyond validation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Document {
+    /// User-visible document ID (string for API compatibility).
+    pub id: String,
+    /// Internal document ID assigned by the storage layer.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub doc_id: Option<DocId>,
+    /// Sequence number at the time this version was written.
+    pub seq_no: SeqNo,
+    /// Document version — incremented on every update.
+    pub version: u64,
+    /// The raw document source.
+    pub source: serde_json::Value,
+    /// Index this document belongs to.
+    pub index: IndexName,
+    /// Ingestion timestamp.
+    pub timestamp: DateTime<Utc>,
+}
+
+impl Document {
+    /// Create a new document with a generated UUID as the ID.
+    pub fn new(index: IndexName, source: serde_json::Value) -> Self {
+        Self {
+            id: Uuid::new_v4().to_string(),
+            doc_id: None,
+            seq_no: SeqNo(0),
+            version: 1,
+            source,
+            index,
+            timestamp: Utc::now(),
+        }
+    }
+
+    /// Create a document with an explicit user-provided ID.
+    pub fn with_id(id: impl Into<String>, index: IndexName, source: serde_json::Value) -> Self {
+        Self {
+            id: id.into(),
+            doc_id: None,
+            seq_no: SeqNo(0),
+            version: 1,
+            source,
+            index,
+            timestamp: Utc::now(),
+        }
+    }
+
+    /// Returns the source JSON object, or `None` if the source is not an object.
+    pub fn source_object(&self) -> Option<&serde_json::Map<String, serde_json::Value>> {
+        self.source.as_object()
+    }
+
+    /// Look up a field value in the source by dot-separated path.
+    ///
+    /// For example, `doc.get_field("user.name")` navigates `source["user"]["name"]`.
+    pub fn get_field(&self, path: &str) -> Option<&serde_json::Value> {
+        let mut current = &self.source;
+        for segment in path.split('.') {
+            current = current.get(segment)?;
+        }
+        Some(current)
+    }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Tests
+// ═════════════════════════════════════════════════════════════════════════════
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn index_name_valid() {
+        assert!(IndexName::new("my-index-01").is_ok());
+        assert!(IndexName::new("logs").is_ok());
+        assert!(IndexName::new("a").is_ok());
+        // System indices with leading dot are allowed.
+        assert!(IndexName::new(".kibana").is_ok());
+        assert!(IndexName::new(".kibana_1").is_ok());
+        assert!(IndexName::new(".security-7").is_ok());
+    }
+
+    #[test]
+    fn index_name_invalid() {
+        assert!(IndexName::new("").is_err()); // empty
+        assert!(IndexName::new("MyIndex").is_err()); // uppercase
+        assert!(IndexName::new("_private").is_err()); // starts with _
+        assert!(IndexName::new("bad name").is_err()); // space
+        assert!(IndexName::new("1bad").is_err()); // starts with digit
+                                                  // Path-traversal vectors (regression: leading-dot carve-out plus '.'
+                                                  // in the body previously let "."/".."/"a/../b" through).
+        assert!(IndexName::new(".").is_err()); // literal dot
+        assert!(IndexName::new("..").is_err()); // literal double-dot
+        assert!(IndexName::new("...").is_err()); // triple
+        assert!(IndexName::new("a..b").is_err()); // embedded ..
+        assert!(IndexName::new(".kibana..").is_err()); // trailing .. on system index
+        assert!(IndexName::new("a/b").is_err()); // forward slash
+        assert!(IndexName::new("a\\b").is_err()); // backslash
+        assert!(IndexName::new("a\0b").is_err()); // NUL
+    }
+
+    #[test]
+    fn schema_field_add_dedup() {
+        let mut schema = Schema::empty();
+        schema
+            .add_field(FieldConfig::new("title", FieldType::Text))
+            .unwrap();
+        assert_eq!(schema.version, 1);
+
+        let result = schema.add_field(FieldConfig::new("title", FieldType::Keyword));
+        assert!(result.is_err(), "duplicate field should be rejected");
+    }
+
+    #[test]
+    fn document_get_nested_field() {
+        let source = serde_json::json!({
+            "user": { "name": "Alice", "age": 30 }
+        });
+        let idx = IndexName::new("test").unwrap();
+        let doc = Document::new(idx, source);
+
+        assert_eq!(
+            doc.get_field("user.name"),
+            Some(&serde_json::json!("Alice"))
+        );
+        assert_eq!(doc.get_field("user.missing"), None);
+        assert_eq!(doc.get_field("missing"), None);
+    }
+
+    #[test]
+    fn field_types_round_trip_json() {
+        let types = [
+            FieldType::Text,
+            FieldType::Vector,
+            FieldType::Chunk,
+            FieldType::GeoPoint,
+        ];
+        for ft in &types {
+            let json = serde_json::to_string(ft).unwrap();
+            let back: FieldType = serde_json::from_str(&json).unwrap();
+            assert_eq!(*ft, back);
+        }
+    }
+}

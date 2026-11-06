@@ -13,7 +13,7 @@ Load before test:  1.45, 2.98, 3.42
 
 ### Run 1
 ```
- xerj index: complete
+ argos index: complete
 ═══════════════════════════════════════════════════════════
  index          : battle-20m
  file           : /tmp/nginx_20m.ndjson
@@ -28,17 +28,17 @@ Load before test:  1.45, 2.98, 3.42
  workers        : 32
  batch size     : 10000
 ═══════════════════════════════════════════════════════════
-[2m2026-04-16T19:02:18.362448Z[0m [32m INFO[0m [2mxerj_engine::index[0m[2m:[0m memtable flushed to segment with FTS index [3msegment_id[0m[2m=[0m"b7de93c3-2cdf-4263-a1ec-4ca76c7ca183" [3mdoc_count[0m[2m=[0m290000
-[2m2026-04-16T19:02:18.366797Z[0m [32m INFO[0m [2mxerj_storage::wal[0m[2m:[0m WAL checkpoint written [3mgeneration[0m[2m=[0m74 [3mmax_seq_no[0m[2m=[0m19600071
-[2m2026-04-16T19:02:18.367094Z[0m [32m INFO[0m [2mxerj_storage::index_store[0m[2m:[0m segment flushed [3msegment_id[0m[2m=[0m"ec7c3146-2354-4898-8b32-c94d259cc3dc" [3mdoc_count[0m[2m=[0m92809 [3mmin_seq[0m[2m=[0m19231471 [3mmax_seq[0m[2m=[0m19600071
-[2m2026-04-16T19:02:18.371415Z[0m [33m WARN[0m [2mxerj_engine::index[0m[2m:[0m merge: failed to parse stored as RawValue: Serde("invalid type: newtype struct, expected any valid JSON value") at character 0
-[2m2026-04-16T19:02:18.401408Z[0m [32m INFO[0m [2mxerj_engine::index[0m[2m:[0m memtable flushed to segment with FTS index [3msegment_id[0m[2m=[0m"ec7c3146-2354-4898-8b32-c94d259cc3dc" [3mdoc_count[0m[2m=[0m92809
-[2m2026-04-16T19:02:18.822164Z[0m [33m WARN[0m [2mxerj_engine::index[0m[2m:[0m merge: failed to parse stored as RawValue: Serde("invalid type: newtype struct, expected any valid JSON value") at character 0
+[2m2026-04-16T19:02:18.362448Z[0m [32m INFO[0m [2margos_engine::index[0m[2m:[0m memtable flushed to segment with FTS index [3msegment_id[0m[2m=[0m"b7de93c3-2cdf-4263-a1ec-4ca76c7ca183" [3mdoc_count[0m[2m=[0m290000
+[2m2026-04-16T19:02:18.366797Z[0m [32m INFO[0m [2margos_storage::wal[0m[2m:[0m WAL checkpoint written [3mgeneration[0m[2m=[0m74 [3mmax_seq_no[0m[2m=[0m19600071
+[2m2026-04-16T19:02:18.367094Z[0m [32m INFO[0m [2margos_storage::index_store[0m[2m:[0m segment flushed [3msegment_id[0m[2m=[0m"ec7c3146-2354-4898-8b32-c94d259cc3dc" [3mdoc_count[0m[2m=[0m92809 [3mmin_seq[0m[2m=[0m19231471 [3mmax_seq[0m[2m=[0m19600071
+[2m2026-04-16T19:02:18.371415Z[0m [33m WARN[0m [2margos_engine::index[0m[2m:[0m merge: failed to parse stored as RawValue: Serde("invalid type: newtype struct, expected any valid JSON value") at character 0
+[2m2026-04-16T19:02:18.401408Z[0m [32m INFO[0m [2margos_engine::index[0m[2m:[0m memtable flushed to segment with FTS index [3msegment_id[0m[2m=[0m"ec7c3146-2354-4898-8b32-c94d259cc3dc" [3mdoc_count[0m[2m=[0m92809
+[2m2026-04-16T19:02:18.822164Z[0m [33m WARN[0m [2margos_engine::index[0m[2m:[0m merge: failed to parse stored as RawValue: Serde("invalid type: newtype struct, expected any valid JSON value") at character 0
 ```
 
 ### Run 2
 ```
- xerj index: complete
+ argos index: complete
 ═══════════════════════════════════════════════════════════
  index          : battle-20m
  file           : /tmp/nginx_20m.ndjson
@@ -53,13 +53,13 @@ Load before test:  1.45, 2.98, 3.42
  workers        : 32
  batch size     : 10000
 ═══════════════════════════════════════════════════════════
-[2m2026-04-16T19:02:49.987180Z[0m [32m INFO[0m [2mxerj_engine::index[0m[2m:[0m memtable flushed to segment with FTS index [3msegment_id[0m[2m=[0m"c7677585-6e40-48a4-bd49-8e7a5b9f1a27" [3mdoc_count[0m[2m=[0m220000
-[2m2026-04-16T19:02:51.188702Z[0m [32m INFO[0m [2mxerj_engine::index[0m[2m:[0m merge background task exiting (index dropped)
+[2m2026-04-16T19:02:49.987180Z[0m [32m INFO[0m [2margos_engine::index[0m[2m:[0m memtable flushed to segment with FTS index [3msegment_id[0m[2m=[0m"c7677585-6e40-48a4-bd49-8e7a5b9f1a27" [3mdoc_count[0m[2m=[0m220000
+[2m2026-04-16T19:02:51.188702Z[0m [32m INFO[0m [2margos_engine::index[0m[2m:[0m merge background task exiting (index dropped)
 ```
 
 ### Run 3
 ```
- xerj index: complete
+ argos index: complete
 ═══════════════════════════════════════════════════════════
  index          : battle-20m
  file           : /tmp/nginx_20m.ndjson
@@ -74,12 +74,12 @@ Load before test:  1.45, 2.98, 3.42
  workers        : 32
  batch size     : 10000
 ═══════════════════════════════════════════════════════════
-[2m2026-04-16T19:03:21.565688Z[0m [33m WARN[0m [2mxerj_engine::index[0m[2m:[0m merge: failed to parse stored as RawValue: Serde("invalid type: newtype struct, expected any valid JSON value") at character 0
-[2m2026-04-16T19:03:22.019874Z[0m [33m WARN[0m [2mxerj_engine::index[0m[2m:[0m merge: failed to parse stored as RawValue: Serde("invalid type: newtype struct, expected any valid JSON value") at character 0
-[2m2026-04-16T19:03:22.147596Z[0m [33m WARN[0m [2mxerj_engine::index[0m[2m:[0m merge: failed to parse stored as RawValue: Serde("invalid type: newtype struct, expected any valid JSON value") at character 0
-[2m2026-04-16T19:03:22.269918Z[0m [33m WARN[0m [2mxerj_engine::index[0m[2m:[0m merge: failed to parse stored as RawValue: Serde("invalid type: newtype struct, expected any valid JSON value") at character 0
-[2m2026-04-16T19:03:22.390758Z[0m [33m WARN[0m [2mxerj_engine::index[0m[2m:[0m merge: failed to parse stored as RawValue: Serde("invalid type: newtype struct, expected any valid JSON value") at character 0
-[2m2026-04-16T19:03:22.492760Z[0m [33m WARN[0m [2mxerj_engine::index[0m[2m:[0m merge: failed to parse stored as RawValue: Serde("invalid type: newtype struct, expected any valid JSON value") at character 0
+[2m2026-04-16T19:03:21.565688Z[0m [33m WARN[0m [2margos_engine::index[0m[2m:[0m merge: failed to parse stored as RawValue: Serde("invalid type: newtype struct, expected any valid JSON value") at character 0
+[2m2026-04-16T19:03:22.019874Z[0m [33m WARN[0m [2margos_engine::index[0m[2m:[0m merge: failed to parse stored as RawValue: Serde("invalid type: newtype struct, expected any valid JSON value") at character 0
+[2m2026-04-16T19:03:22.147596Z[0m [33m WARN[0m [2margos_engine::index[0m[2m:[0m merge: failed to parse stored as RawValue: Serde("invalid type: newtype struct, expected any valid JSON value") at character 0
+[2m2026-04-16T19:03:22.269918Z[0m [33m WARN[0m [2margos_engine::index[0m[2m:[0m merge: failed to parse stored as RawValue: Serde("invalid type: newtype struct, expected any valid JSON value") at character 0
+[2m2026-04-16T19:03:22.390758Z[0m [33m WARN[0m [2margos_engine::index[0m[2m:[0m merge: failed to parse stored as RawValue: Serde("invalid type: newtype struct, expected any valid JSON value") at character 0
+[2m2026-04-16T19:03:22.492760Z[0m [33m WARN[0m [2margos_engine::index[0m[2m:[0m merge: failed to parse stored as RawValue: Serde("invalid type: newtype struct, expected any valid JSON value") at character 0
 ```
 
 ## Historical Comparison
@@ -97,10 +97,10 @@ Load before test:  1.45, 2.98, 3.42
 ## System
 - 32 cores x86_64, 119Gi RAM
 - CPU ~96% idle before test (ES 8.13 running at ~3% background)
-- xerj uses all 32 cores: rayon parallel scanner + tokio flush/WAL
+- argos uses all 32 cores: rayon parallel scanner + tokio flush/WAL
 
 ## ES 8.13 Head-to-Head
-| Metric | XERJ | ES 8.13 | Ratio |
+| Metric | ARGOS | ES 8.13 | Ratio |
 |---|---|---|---|
 | Ingest rate (20M) | 790,000/s | 25,773/s | **30.6× faster** |
 | Total rate (20M) | 720,000/s | 25,773/s | **27.9× faster** |
@@ -110,7 +110,7 @@ Load before test:  1.45, 2.98, 3.42
 
 Note: elasticdump is HTTP-bound (Node.js single-threaded client). A fairer
 comparison would be ES _bulk API with concurrent clients, which typically
-achieves ~80-100k/s. Even at 100k/s, XERJ is still 7-8× faster.
+achieves ~80-100k/s. Even at 100k/s, ARGOS is still 7-8× faster.
 
 ## Analysis
 - Run 1 slower (page cache cold from cleanup). Runs 2-3 consistent ~790k/s ingest.

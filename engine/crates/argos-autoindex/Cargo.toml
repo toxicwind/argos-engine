@@ -1,0 +1,182 @@
+[package]
+name = "argos-autoindex"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "argos autoindex — point it at any folder and make the contents AI-searchable with zero configuration"
+
+[dependencies]
+# The machine-resource policy (cores, memory safe zone, thread priority) is
+# shared with the server: one policy, one place (#240).
+argos-common = { path = "../argos-common" }
+# Session exports use the same native PII redactor as ingest pipelines.
+argos-wasm = { path = "../argos-wasm" }
+uuid.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+# Durable sync_begin replay needs exact decimal-to-f64 recovery without
+# selecting serde_json's slower float parser for the whole server binary.
+simd-json.workspace = true
+chrono.workspace = true
+regex = "1"
+# Corpus recipes (`argos corpus build`) are authored TOML: human-readable and
+# commented, so licence reasoning sits next to the source it justifies and
+# ships verbatim inside the pack as provenance.
+toml.workspace = true
+walkdir = "2"
+# gitignore/.argosignore matching (#276). ripgrep's matcher, used for its
+# semantics only — traversal stays on walkdir so the existing symlink,
+# hidden-file and unreadable-entry behaviour is unchanged.
+# Licence: Unlicense OR MIT — compatible with ARGOS's Apache-2.0.
+ignore = "0.4"
+encoding_rs = "0.8"
+# `--watch`: cross-platform filesystem notifications (inotify on Linux,
+# FSEvents on macOS, ReadDirectoryChangesW on Windows), so live reindexing is
+# one code path rather than three.
+# Licence: CC0-1.0 — a public-domain dedication, no copyleft and no attribution
+# condition, so redistributing it inside Apache-2.0 ARGOS is unrestricted. Noted
+# because CC0 carries no express patent grant, unlike Apache-2.0 itself; its
+# transitive deps here are inotify (ISC), notify-types (CC0-1.0), mio (MIT),
+# bitflags/log/libc (MIT OR Apache-2.0). Verified against each crate's own
+# metadata, not against a summary.
+# The debouncer is ours (`watch.rs`): notify-debouncer-full keeps a second file
+# cache and its own rename bookkeeping, which is precisely the state this
+# crate's journal already owns.
+notify = "8.2"
+xxhash-rust.workspace = true
+memchr.workspace = true
+rayon.workspace = true
+libc = "0.2"
+tempfile.workspace = true
+fs2 = "0.4"
+# ES-compat HTTP client. Blocking mode: all of autoindex is synchronous
+# (std threads), invoked from the server binary via spawn_blocking.
+reqwest = { workspace = true, features = ["blocking"] }
+# SigV4 for the object-storage watcher (`objwatch::s3`): HMAC-SHA256 chain and
+# the payload digest. Both are already in this workspace's lock file at these
+# versions (argos-cluster, argos-fts, argos-api), so this adds no new package —
+# and it is far less than `aws-sdk-s3` would pull into a synchronous crate that
+# needs exactly two S3 verbs. See objwatch/s3.rs for why not the SDK.
+sha2 = "0.10"
+hmac = "0.12"
+# ed25519 detached signatures over pack SHA256SUMS (`harvest/sign.rs`).
+# Already in the lock file via the TLS stack (rustls→ring 0.17), so this adds
+# no new native build; here it is only a direct dependency of the corpus-pack
+# publish/verify path.
+ring.workspace = true
+
+
+# --- AST code extraction (tree-sitter). Grammars expose a tree-sitter-language
+# LanguageFn, decoupled from the core version, so one core serves all. ---
+# Core 0.26: forced by tree-sitter-perl 1.1.2, the only #295 grammar with a
+# hard (`links`) core dep — same story as the c-sharp 0.24→0.25 bump. Every
+# other grammar binds through tree-sitter-language and does not care.
+tree-sitter = { workspace = true }
+tree-sitter-python = "0.23"
+tree-sitter-c = "0.23"
+tree-sitter-rust = "0.23"
+tree-sitter-javascript = "0.23"
+tree-sitter-go = "0.23"
+tree-sitter-typescript = "0.23"
+tree-sitter-java = "0.23"
+tree-sitter-cpp = "0.23"
+tree-sitter-ruby = "0.23"
+tree-sitter-php = "0.23"
+tree-sitter-c-sharp = "0.23"
+tree-sitter-bash = "0.23"
+# --- #295 Tier 1: mainstream languages users expect. Versions are the ones
+# checked against crates.io in the issue; each must expose a Language loadable
+# by core 0.26 (ABI 13–15) — the all-grammars smoke test enforces that.
+# NOT `tree-sitter-kotlin` (0.3.8): that crate hard-links core >=0.21,<0.23
+# and cannot coexist with core 0.26. The `-ng` fork is the maintained
+# tree-sitter-language binding of the same fwcd grammar.
+tree-sitter-kotlin-ng = "1.1"
+tree-sitter-swift = "0.7"
+tree-sitter-scala = "0.26"
+tree-sitter-dart = "0.2"
+tree-sitter-lua = "0.5"
+tree-sitter-perl = "1.1"
+tree-sitter-r = "1.3"
+tree-sitter-julia = "0.23"
+tree-sitter-haskell = "0.23"
+tree-sitter-elixir = "0.3"
+# --- #295 Tier 2: common in ecosystems we already serve.
+# NOT tree-sitter-clojure: its only release (0.1.0) hard-links core ^0.25.6,
+# mutually exclusive with the core 0.26 that Tier 1's perl grammar forces.
+# The -orchard crate packages the same sogaiu grammar through
+# tree-sitter-language (core is a dev-dependency only), so it loads fine.
+tree-sitter-clojure-orchard = "0.2"
+tree-sitter-scheme = "0.24"
+# `.sql` DDL is indexed as code by extract/sqlsrc.rs (statement scanner,
+# #2337). It is not a registry extension: claiming `.sql` would steal
+# sqldump files. tree-sitter-sql 0.0.2 is a different, abandoned crate.
+tree-sitter-erlang = "0.20"
+tree-sitter-ocaml = "0.25"
+tree-sitter-zig = "1.1"
+tree-sitter-objc = "3.0"
+tree-sitter-groovy = "0.1"
+tree-sitter-powershell = "0.26"
+tree-sitter-fsharp = "0.3"
+tree-sitter-nix = "0.3"
+# --- #295 Tier 3: long tail, only where the grammar proves solid.
+# NOT tree-sitter-nim / tree-sitter-crystal: their only releases (0.1.0) are
+# toy grammars (~17 node types, no module/struct/def nodes — verified in
+# their node-types.json); they cannot parse real code in either language and
+# no alternative crate exists on crates.io.
+tree-sitter-fortran = "0.6"
+tree-sitter-matlab = "1.3"
+tree-sitter-solidity = "1.2"
+streaming-iterator = "0.1"
+
+
+# Format-family extractors (new deps, isolated to this crate):
+flate2 = "1"                                     # gzip streaming (rust backend)
+pdf_oxide = { version = "=0.3.75", default-features = false, features = ["legacy-crypto"] }
+csv = "1"                                        # streaming CSV with sniffed dialect
+quick-xml = "0.41"                               # XML pull parser + DOCX internals
+zip = { version = "9", default-features = false, features = ["deflate"] }  # DOCX container
+# --- Legacy Microsoft Office binary formats (OLE2 / Compound File Binary) ---
+# calamine reads the legacy BIFF `.xls` worksheet stream (it ships its own CFB
+# reader internally); pinned to 0.37.0, which depends on `zip ^9` (the
+# zip 8.x line carries RUSTSEC-2026-0367/0368/0369, fixed in 9.0.0) so it
+# shares this crate's `zip 9` major, and never retains `quick-xml 0.31.0`
+# (RUSTSEC-2026-0194 / 0195); it brings `quick-xml 0.42` alongside our 0.41.
+# Licence: MIT. Its transitive adds are codepage (MIT, for the legacy 8-bit
+# cell codepage) and log (MIT/Apache-2.0); byteorder and encoding_rs are
+# already here.
+calamine = { version = "=0.37.0", features = ["dates"] }
+# `cfb` reads the OLE2/Compound File Binary container directly: used by the
+# content sniffer to route a `.doc`/`.xls`/other OLE2 file by its stream names,
+# and by the `.doc` extractor to pull the WordDocument + Table streams and the
+# SummaryInformation title. `open()` returns `io::Result` and treats malformed
+# or truncated input as an error (never a panic), which the fuzz-minded sniffer
+# relies on. Licence: MIT. Runtime deps (fnv, uuid) are already in the lock
+# file; web-time is a tiny wasm-time shim. Pinned exact.
+cfb = "=0.15.0"
+serde_yaml = "0.9"                               # YAML multi-doc
+# The one C dependency (bundled SQLite), isolated to this crate.
+rusqlite = { version = "0.32", features = ["bundled"] }
+mail-parser = "0.11.9"
+
+# --- Object-storage source (#s3source). `aws-sdk-s3` was already a workspace
+# dependency and unused; this is its first consumer. Apache-2.0.
+#
+# There is deliberately no `aws-config` here. Taking it would (a) bring the
+# default `default-https-client` feature path back in through cargo's feature
+# unification and with it aws-lc-rs — the C/asm crypto backend this workspace
+# keeps out of the cross-compile matrix — and (b) give this crate a second,
+# differently-configured S3 client with the SDK's own invisible retry layer.
+# Credentials come from the environment and the client is built explicitly in
+# `src/objsource.rs`, the same way `argos-storage` builds its own; the feature
+# selection that keeps aws-lc-rs out is pinned in engine/Cargo.toml.
+aws-sdk-s3 = { workspace = true }
+aws-smithy-http-client = { workspace = true }
+# autoindex is synchronous (std threads + rayon); the AWS SDK is async-only, so
+# one current-thread runtime is created per object-store source and every call
+# is driven with `block_on`. No async leaks past `src/objsource.rs`.
+tokio = { workspace = true }
+
+[dev-dependencies]
+base64 = "0.23.1"

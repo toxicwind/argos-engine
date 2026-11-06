@@ -1,0 +1,87 @@
+//! # argos-cluster
+//!
+//! Embedded Raft consensus for argos cluster metadata.
+//!
+//! This crate implements Raft from scratch — **no external Raft library** is used.
+//! The goals are:
+//! - No heavy dependencies (no etcd, no ZooKeeper, no Consul)
+//! - Suitable for embedding directly into the argos server process
+//! - Cluster-wide metadata only (index schemas, shard assignments, node roster)
+//! - Full correctness: leader election, log replication, log safety, commit rules
+//!
+//! ## Architecture
+//!
+//! ```text
+//! ┌──────────────────────────────────────────────────────┐
+//! │                   ClusterNode                        │
+//! │  ┌─────────────┐  ┌───────────────────────────────┐ │
+//! │  │  RaftNode   │  │      ClusterMetadata          │ │
+//! │  │  (pure SM)  │──│  indices / nodes / shards     │ │
+//! │  └─────────────┘  └───────────────────────────────┘ │
+//! │         │                                            │
+//! │  ┌──────▼────────────────┐                          │
+//! │  │   ClusterTransport    │  (gRPC / in-memory)      │
+//! │  └───────────────────────┘                          │
+//! └──────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Usage
+//!
+//! ```rust,no_run
+//! use argos_cluster::node::{ClusterNode, in_memory::{InMemoryBus, InMemoryTransport}};
+//! use argos_cluster::raft::ClusterCommand;
+//!
+//! #[tokio::main]
+//! async fn main() {
+//!     let bus = InMemoryBus::new();
+//!     let transport = InMemoryTransport::new("node-1".to_string(), bus).await;
+//!     let mut node = ClusterNode::new(
+//!         "node-1".to_string(),
+//!         vec![],
+//!         Box::new(transport),
+//!     );
+//!
+//!     // Propose a new index (once this node is the leader)
+//!     // node.propose(ClusterCommand::CreateIndex { name: "my_index".into(), schema_json: "{}".into() }).unwrap();
+//! }
+//! ```
+
+pub mod auth;
+pub mod coordinator;
+pub mod metadata;
+pub mod node;
+pub mod propose;
+pub mod raft;
+pub mod raft_log;
+pub mod regions;
+pub mod replication;
+pub mod router;
+pub mod runner;
+pub mod search;
+pub mod shard;
+pub mod transport;
+
+// ── Convenience re-exports ────────────────────────────────────────────────────
+
+pub use auth::{ClusterSecret, SecretError};
+pub use coordinator::{
+    IndexResponse, LocalSearcher, MergedSearchResult, SearchCoordinator, SearchTransport,
+};
+pub use metadata::{ClusterMetadata, IndexMetadata, NodeInfo, NodeState};
+pub use node::{ClusterNode, ClusterTransport};
+pub use propose::{ApplyEffect, ClusterHandle, MetadataApplier, ProposeError};
+pub use raft::{ClusterCommand, LogEntry, RaftMessage, RaftNode, RaftState};
+pub use regions::{Region, RegionManager, RegionMove};
+pub use replication::{
+    ReplicationEntry, ReplicationMode, ReplicationOp, ReplicationResult, WalReplicator,
+};
+pub use router::jump_hash;
+pub use router::ShardRouter;
+pub use runner::{ClusterRunner, ClusterRunnerBuilder};
+pub use search::{merge_search_responses, SearchHit, SearchMessage};
+pub use shard::{
+    number_of_replicas_from_settings, primary_shard_plan, replica_index_name, replica_quorum_acks,
+    shard_plan, shard_plan_from_schema_json, MemoryShardDir, MemoryShardRpc, NullShardRpc,
+    ShardAssignment, ShardError, ShardHandler, ShardOp, ShardResult, ShardRpc,
+};
+pub use transport::TcpTransport;

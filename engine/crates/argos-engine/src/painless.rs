@@ -1,0 +1,3994 @@
+//! Minimal Painless-script interpreter for ES script_score / rescore /
+//! runtime-field workloads.
+//!
+//! This is NOT a full Painless implementation. It supports the subset
+//! observed across the ES YAML compat test suite, which is sufficient
+//! for the script-driven scoring/rescore tests:
+//!
+//! * Identifiers + members:
+//!   - `doc['field'].value` and `doc.field.value` → numeric or string
+//!     field value (first if multi-valued)
+//!   - `params.NAME` → reference into the script's params object
+//!   - `_score` → current document score
+//! * Literals:
+//!   - integer / float / string / true / false
+//! * Operators:
+//!   - arithmetic `+ - * / %`
+//!   - comparison `< <= > >= == !=`
+//!   - logical `&& || !`
+//!   - ternary `cond ? a : b`
+//!   - unary `- !`
+//! * Control flow:
+//!   - `if (cond) { ... } else { ... }`
+//!   - explicit `return X;` and implicit return (last expression)
+//!   - statement separators `;`
+//!   - blocks `{ ... }`
+//! * Variable bindings:
+//!   - `double x = ...;`, `int x = ...;`, `def x = ...;`, `String x = ...;`
+//!   - `x` reads, `x = ...` writes
+//! * Functions / methods:
+//!   - `dotProduct(params.q, 'field')` over a numeric vector field
+//!   - `Math.max(a, b)`, `Math.min(a, b)`, `Math.abs(x)`, `Math.log(x)`,
+//!     `Math.sqrt(x)`, `Math.pow(a, b)`
+//! * Local functions and lambdas (needed by e.g. OpenSearch's UBI sample
+//!   dashboards, which filter via a `Supplier`-style boolean helper):
+//!   - top-level declarations `<type> name(<type> arg, ...) { ... }`
+//!   - no-arg-or-more lambda literals `(a, b) -> expr` / `(a, b) -> { ... }`,
+//!     stored as a closure value and invoked either by calling the
+//!     function/variable name directly (`compare(...)`) or via any
+//!     `.method(args)` call on a closure value (`s.get()`, `fn.apply(x)`,
+//!     ...) — the method name is ignored, only positional args matter,
+//!     which covers `Supplier`/`Function`/`BiFunction`/`Predicate` etc.
+//!     without hard-coding each functional interface.
+//!
+//! Anything outside that subset returns an error from `eval()`. Callers
+//! should fall back to a no-op score on script error.
+
+use serde_json::Value;
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::rc::Rc;
+
+#[derive(Debug, Clone)]
+pub enum PainlessValue {
+    Null,
+    Bool(bool),
+    Number(f64),
+    String(String),
+    Array(Vec<PainlessValue>),
+    /// A JSON object — used for `params['_source']` in runtime field
+    /// scripts. `.toString()` renders it in ES's HashMap-like format
+    /// (`{key=value, key=value}`, keys alphabetically sorted).
+    Object(serde_json::Map<String, Value>),
+    /// A local function or lambda value: parameter names + `Arc`-shared body
+    /// statements (cheap to clone — see [`Expr::Lambda`]). Invoked either
+    /// as a bare call (`name(args)`) or via any `.method(args)` call on the
+    /// value — see the module doc comment.
+    Closure(Vec<String>, std::sync::Arc<Vec<Stmt>>),
+}
+
+impl PainlessValue {
+    pub fn as_f64(&self) -> Option<f64> {
+        match self {
+            PainlessValue::Number(n) => Some(*n),
+            PainlessValue::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
+            PainlessValue::String(s) => s.parse().ok(),
+            _ => None,
+        }
+    }
+    pub fn as_bool(&self) -> bool {
+        match self {
+            PainlessValue::Bool(b) => *b,
+            PainlessValue::Number(n) => *n != 0.0,
+            PainlessValue::Null => false,
+            PainlessValue::String(s) => !s.is_empty(),
+            PainlessValue::Array(a) => !a.is_empty(),
+            PainlessValue::Object(o) => !o.is_empty(),
+            // Never meaningfully compared in a valid script — a closure
+            // reference is truthy, matching "an object exists" semantics.
+            PainlessValue::Closure(..) => true,
+        }
+    }
+    pub fn from_json(v: &Value) -> Self {
+        match v {
+            Value::Null => PainlessValue::Null,
+            Value::Bool(b) => PainlessValue::Bool(*b),
+            Value::Number(n) => PainlessValue::Number(n.as_f64().unwrap_or(0.0)),
+            Value::String(s) => PainlessValue::String(s.clone()),
+            Value::Array(arr) => {
+                PainlessValue::Array(arr.iter().map(PainlessValue::from_json).collect())
+            }
+            Value::Object(o) => PainlessValue::Object(o.clone()),
+        }
+    }
+}
+
+/// Per-evaluation context: doc source, params, score.
+pub struct PainlessCtx<'a> {
+    pub doc: &'a Value,
+    pub params: &'a Value,
+    pub score: f32,
+    /// Mutable accumulator for runtime-field `emit()` calls. None for
+    /// non-runtime contexts (script_score, rescore, etc.) where emit()
+    /// is not used.
+    pub emits: std::cell::RefCell<Vec<PainlessValue>>,
+    /// Current expression-evaluation recursion depth. Statement nesting is
+    /// independently bounded by the parser, so it must not consume the exact
+    /// [`MAX_EVAL_DEPTH`] expression budget.
+    eval_depth: std::cell::Cell<usize>,
+    /// Current closure call-nesting depth (`call_closure` re-entering
+    /// `exec_stmt`/`eval_expr`). Bounded independently of `eval_depth`:
+    /// a closure's own statement nesting isn't charged against the
+    /// expression-eval budget at all (only the *call* that invoked it is),
+    /// so self-application recursion (`f(f, n)`) could otherwise re-enter
+    /// `exec_stmt` far past any native stack the eval-depth budget assumes.
+    call_depth: std::cell::Cell<usize>,
+    /// Total closure invocations across the whole script evaluation. Call
+    /// *depth* alone doesn't bound an exponential call *tree* — a script
+    /// like `g(g,n-1) + g(g,n-1) + g(g,n-1) + g(g,n-1)` never exceeds a
+    /// depth of ~n, but its invocation count is 4^n. This is the step
+    /// budget that catches that shape.
+    call_count: std::cell::Cell<usize>,
+    /// Work units consumed by this evaluation — see [`MAX_SCRIPT_OPS`]. Unlike
+    /// every other counter here this one bounds WORK rather than shape, which
+    /// is why a flat 38 KiB script could previously burn a measured 37.35 s on
+    /// one document while tripping nothing.
+    ops: std::cell::Cell<u64>,
+    /// Work-unit count at which the next wall-clock read is due. Sampling the
+    /// clock rather than reading it per op is what keeps the budget off the
+    /// hot path — see [`OPS_PER_CLOCK_CHECK`].
+    next_clock_check: std::cell::Cell<u64>,
+    /// This evaluation's absolute deadline, resolved up front in
+    /// [`PainlessCtx::new`] from the enclosing request deadline (see
+    /// [`MIN_EVAL_SLICE`]).
+    ///
+    /// It has to be resolved before any work is charged, not at the first clock
+    /// check. Deriving it there costs a whole sampling window to *establish*
+    /// the deadline and a second one to be able to fail it, so the slice an
+    /// evaluation actually got was two windows wide instead of one — and a
+    /// window is only bounded in work units, not in time.
+    eval_deadline: std::time::Instant,
+    /// Cached work-unit weight of `doc`, computed on the first whole-document
+    /// read (see [`charge_document_read`]). The document is immutable for the
+    /// life of the context, so this is measured at most once per evaluation.
+    doc_work_units: std::cell::Cell<Option<u64>>,
+}
+
+impl<'a> PainlessCtx<'a> {
+    pub fn new(doc: &'a Value, params: &'a Value, score: f32) -> Self {
+        // One clock read per evaluation, taken before any work is charged.
+        // This is the anchor the time budget is measured from: the slice is
+        // this request's *remaining* time clamped into
+        // [MIN_EVAL_SLICE, MAX_EVAL_SLICE]. The upper clamp bounds an
+        // evaluation even when the request has 30 s left; the lower one keeps
+        // an ordinary script from being cut off just because the request
+        // deadline has already passed, which is the normal state of a
+        // legitimately slow search — the scan only notices at its next
+        // document-boundary poll.
+        let started = std::time::Instant::now();
+        let remaining = SCRIPT_REQUEST_DEADLINE
+            .try_with(|deadline| deadline.saturating_duration_since(started))
+            .unwrap_or(MAX_EVAL_SLICE);
+        Self {
+            doc,
+            params,
+            score,
+            emits: std::cell::RefCell::new(Vec::new()),
+            eval_depth: std::cell::Cell::new(0),
+            call_depth: std::cell::Cell::new(0),
+            call_count: std::cell::Cell::new(0),
+            ops: std::cell::Cell::new(0),
+            next_clock_check: std::cell::Cell::new(OPS_PER_CLOCK_CHECK),
+            eval_deadline: started + remaining.clamp(MIN_EVAL_SLICE, MAX_EVAL_SLICE),
+            doc_work_units: std::cell::Cell::new(None),
+        }
+    }
+    pub fn take_emits(&self) -> Vec<PainlessValue> {
+        std::mem::take(&mut *self.emits.borrow_mut())
+    }
+
+    /// Work units this evaluation has consumed so far. Exposed so the budget
+    /// can be calibrated against real scripts rather than guessed at — the
+    /// 145x margin quoted on [`MAX_SCRIPT_OPS`] is measured with this.
+    pub fn work_units(&self) -> u64 {
+        self.ops.get()
+    }
+
+    /// Charge `units` of work against the budget.
+    ///
+    /// The whole hot path is: one add, one compare against a constant, one
+    /// compare against a cell. The clock is only read once every
+    /// [`OPS_PER_CLOCK_CHECK`] units, in an out-of-line `#[cold]` helper.
+    #[inline(always)]
+    fn charge(&self, units: u64) -> Result<(), String> {
+        let used = self.ops.get().saturating_add(units);
+        self.ops.set(used);
+        if used >= MAX_SCRIPT_OPS {
+            return Err(SCRIPT_OVER_BUDGET_MSG.to_string());
+        }
+        if used >= self.next_clock_check.get() {
+            return self.clock_check(used);
+        }
+        Ok(())
+    }
+
+    /// The sampled wall-clock half of the budget. Out of line and `#[cold]`:
+    /// it runs once per [`OPS_PER_CLOCK_CHECK`] units, so keeping it out of
+    /// the inlined `charge` body is what makes the fast path two compares.
+    #[cold]
+    fn clock_check(&self, used: u64) -> Result<(), String> {
+        self.next_clock_check
+            .set(used.saturating_add(OPS_PER_CLOCK_CHECK));
+        // The deadline was fixed in `new`, so this — the FIRST sampling window
+        // — can already fail. It reads the clock and compares; it does not
+        // spend a window deciding when the evaluation was supposed to end.
+        if std::time::Instant::now() >= self.eval_deadline {
+            return Err(SCRIPT_OVER_TIME_MSG.to_string());
+        }
+        Ok(())
+    }
+}
+
+/// Work units a produced value is worth.
+///
+/// Charging per interpreter *step* alone does not bound work: `s = s + c` is
+/// three steps whether `s` is 1 KiB or 4 MiB. Pricing the value a step
+/// produces is what closes that — the adversarial script's cost is entirely in
+/// the bytes it copies, not in the number of statements it runs.
+///
+/// Scalars answer in a single match with no allocation, which is the case
+/// every ordinary script is in.
+#[inline(always)]
+fn value_work_units(value: &PainlessValue) -> u64 {
+    match value {
+        PainlessValue::Null
+        | PainlessValue::Bool(_)
+        | PainlessValue::Number(_)
+        | PainlessValue::Closure(..) => 1,
+        PainlessValue::String(text) => 1 + text.len() as u64 / BYTES_PER_OP,
+        PainlessValue::Array(_) | PainlessValue::Object(_) => composite_work_units(value),
+    }
+}
+
+/// Work units for an array/object value: one per node it contains plus its
+/// string bytes, which is the cost of having cloned it.
+///
+/// Iterative rather than recursive on purpose — this walks caller-supplied
+/// JSON of unbounded nesting, and the native stack is the one resource the
+/// interpreter's other limits exist to protect.
+fn composite_work_units(value: &PainlessValue) -> u64 {
+    let mut total = 0u64;
+    let mut painless = vec![value];
+    let mut json: Vec<&Value> = Vec::new();
+    while let Some(value) = painless.pop() {
+        total += 1;
+        match value {
+            PainlessValue::String(text) => total += text.len() as u64 / BYTES_PER_OP,
+            PainlessValue::Array(items) => painless.extend(items.iter()),
+            PainlessValue::Object(map) => json.extend(map.values()),
+            _ => {}
+        }
+    }
+    total + json_work_units_each(json)
+}
+
+/// The same measure over raw JSON, so a document can be weighed without first
+/// being converted into `PainlessValue`s.
+fn json_work_units(value: &Value) -> u64 {
+    json_work_units_each(vec![value])
+}
+
+fn json_work_units_each(mut stack: Vec<&Value>) -> u64 {
+    let mut total = 0u64;
+    while let Some(value) = stack.pop() {
+        total += 1;
+        match value {
+            Value::String(text) => total += text.len() as u64 / BYTES_PER_OP,
+            Value::Array(items) => stack.extend(items.iter()),
+            Value::Object(map) => stack.extend(map.values()),
+            _ => {}
+        }
+    }
+    total
+}
+
+/// Charge for a whole-document read.
+///
+/// [`get_doc_value`] clones the entire source document on every call, so
+/// `doc['x'].value` is O(document), not O(1) — a flat script of 2,000 such
+/// accesses against a 20,000-element document does 40 M nodes of copying while
+/// tripping no structural limit. The weight is computed once and cached: the
+/// document does not change during an evaluation.
+fn charge_document_read(ctx: &PainlessCtx) -> Result<(), String> {
+    let weight = match ctx.doc_work_units.get() {
+        Some(weight) => weight,
+        None => {
+            let weight = json_work_units(ctx.doc);
+            ctx.doc_work_units.set(Some(weight));
+            weight
+        }
+    };
+    ctx.charge(weight)
+}
+
+/// Read `params[key]`, charged for its size *before* it is materialised.
+///
+/// `params.big` and `params['big']` are single interpreter steps that run
+/// `PainlessValue::from_json` over a caller-supplied subtree of unbounded size,
+/// so their real cost is O(params) and none of it is visible in the statement
+/// count — the same shape as `s = s + c`, one level further out. Charging
+/// before the conversion (rather than only weighing what came out) is what
+/// bounds how many such materialisations one evaluation may perform, instead of
+/// performing one and asking afterwards.
+///
+/// The weight is not cached the way [`charge_document_read`] caches the
+/// document's: which member is read varies per step, and a `params` object big
+/// enough for the cache to matter is exactly the one that must keep paying.
+fn charged_params_read(ctx: &PainlessCtx, key: &str) -> Result<PainlessValue, String> {
+    let raw = ctx.params.get(key).unwrap_or(&Value::Null);
+    ctx.charge(json_work_units(raw))?;
+    Ok(PainlessValue::from_json(raw))
+}
+
+// ── Tokenisation ─────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq)]
+enum Tok {
+    Number(f64),
+    String(String),
+    Ident(String),
+    Punct(char),
+    PunctMulti(String),
+    Keyword(String),
+}
+
+fn tokenize(src: &str) -> Result<Vec<Tok>, String> {
+    let bytes = src.as_bytes();
+    let mut out: Vec<Tok> = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        let c = bytes[i] as char;
+        // Skip whitespace. ASCII-only for the same reason the identifier scan
+        // below is: `is_whitespace()` is true for Latin-1 NBSP (0xA0), which in
+        // valid UTF-8 is only ever a continuation byte, so accepting it lets
+        // the scanner step into the middle of a character.
+        if c.is_ascii_whitespace() {
+            i += 1;
+            continue;
+        }
+        // Comments
+        if c == '/' && i + 1 < bytes.len() && bytes[i + 1] as char == '/' {
+            while i < bytes.len() && bytes[i] as char != '\n' {
+                i += 1;
+            }
+            continue;
+        }
+        if c == '/' && i + 1 < bytes.len() && bytes[i + 1] as char == '*' {
+            i += 2;
+            while i + 1 < bytes.len() && !(bytes[i] as char == '*' && bytes[i + 1] as char == '/') {
+                i += 1;
+            }
+            i += 2;
+            continue;
+        }
+        // Number literal
+        if c.is_ascii_digit()
+            || (c == '.' && i + 1 < bytes.len() && (bytes[i + 1] as char).is_ascii_digit())
+        {
+            let start = i;
+            while i < bytes.len() {
+                let cc = bytes[i] as char;
+                if cc.is_ascii_digit()
+                    || cc == '.'
+                    || cc == 'e'
+                    || cc == 'E'
+                    || cc == '-'
+                    || cc == '+'
+                {
+                    // Allow signed exponent
+                    if (cc == '-' || cc == '+') && !matches!(bytes[i - 1] as char, 'e' | 'E') {
+                        break;
+                    }
+                    i += 1;
+                } else {
+                    break;
+                }
+            }
+            // Strip trailing 'L'/'F'/'D' type suffix Painless allows.
+            let s_end = i;
+            let s = &src[start..s_end];
+            // Strip suffix from the parsed string for f64 parsing.
+            let mut s_clean = s.to_string();
+            i = s_end;
+            if i < bytes.len() {
+                let t = bytes[i] as char;
+                if matches!(t, 'L' | 'l' | 'F' | 'f' | 'D' | 'd') {
+                    i += 1;
+                }
+            }
+            // strip possibly trailing "L" already in string for safety
+            s_clean = s_clean
+                .trim_end_matches(['L', 'l', 'F', 'f', 'D', 'd'])
+                .to_string();
+            let n: f64 = s_clean
+                .parse()
+                .map_err(|e| format!("bad number {s_clean}: {e}"))?;
+            out.push(Tok::Number(n));
+            continue;
+        }
+        // String literal
+        if c == '"' || c == '\'' {
+            let quote = c;
+            i += 1;
+            let start = i;
+            while i < bytes.len() && bytes[i] as char != quote {
+                if bytes[i] as char == '\\' && i + 1 < bytes.len() {
+                    i += 2;
+                } else {
+                    i += 1;
+                }
+            }
+            if i >= bytes.len() {
+                return Err("unterminated string".into());
+            }
+            let raw = &src[start..i];
+            i += 1;
+            // Basic escape handling.
+            let mut buf = String::with_capacity(raw.len());
+            let mut chars = raw.chars();
+            while let Some(ch) = chars.next() {
+                if ch == '\\' {
+                    if let Some(n) = chars.next() {
+                        match n {
+                            'n' => buf.push('\n'),
+                            't' => buf.push('\t'),
+                            'r' => buf.push('\r'),
+                            '\\' => buf.push('\\'),
+                            '"' => buf.push('"'),
+                            '\'' => buf.push('\''),
+                            other => buf.push(other),
+                        }
+                    }
+                } else {
+                    buf.push(ch);
+                }
+            }
+            out.push(Tok::String(buf));
+            continue;
+        }
+        // Identifier / keyword
+        //
+        // ASCII-only, and that is load-bearing rather than a limitation of the
+        // subset. This tokeniser walks BYTES (`bytes[i] as char` reinterprets
+        // each byte as Latin-1) but slices `&src[start..i]` as a `&str`. Every
+        // continuation byte of a multi-byte character reads as an alphabetic
+        // Latin-1 char, so the old `is_alphabetic()` test let the scan start or
+        // stop inside one — and the slice then panicked on a char boundary.
+        // With `panic = "abort"` in the release profile that is not a 400, it
+        // is the process: `{"script":{"source":"doc[\"title\"].valueʋ..."}}`
+        // took the whole server down. Found by the `painless` fuzz target in
+        // under a second.
+        //
+        // Restricting the scan to ASCII keeps both ends on a character
+        // boundary by construction. A non-ASCII byte now falls through to the
+        // punctuation arms and ends at the `unexpected char` error below,
+        // which is the correct answer for an identifier this subset cannot
+        // evaluate anyway.
+        if c.is_ascii_alphabetic() || c == '_' || c == '$' {
+            let start = i;
+            while i < bytes.len() {
+                let cc = bytes[i] as char;
+                if cc.is_ascii_alphanumeric() || cc == '_' || cc == '$' {
+                    i += 1;
+                } else {
+                    break;
+                }
+            }
+            let s = &src[start..i];
+            match s {
+                "if" | "else" | "return" | "true" | "false" | "null" | "double" | "int"
+                | "long" | "float" | "boolean" | "String" | "def" | "var" | "for" | "while"
+                | "break" | "continue" | "new" | "instanceof" => {
+                    out.push(Tok::Keyword(s.to_string()))
+                }
+                _ => out.push(Tok::Ident(s.to_string())),
+            }
+            continue;
+        }
+        // Multi-char punctuation
+        if i + 1 < bytes.len() {
+            let two: String = format!("{}{}", c, bytes[i + 1] as char);
+            if matches!(
+                two.as_str(),
+                "==" | "!="
+                    | "<="
+                    | ">="
+                    | "&&"
+                    | "||"
+                    | "->"
+                    | "+="
+                    | "-="
+                    | "*="
+                    | "/="
+                    | "%="
+                    | "++"
+                    | "--"
+            ) {
+                out.push(Tok::PunctMulti(two));
+                i += 2;
+                continue;
+            }
+        }
+        // Single-char punctuation
+        if matches!(
+            c,
+            '(' | ')'
+                | '{'
+                | '}'
+                | '['
+                | ']'
+                | ','
+                | ';'
+                | '.'
+                | ':'
+                | '?'
+                | '+'
+                | '-'
+                | '*'
+                | '/'
+                | '%'
+                | '<'
+                | '>'
+                | '='
+                | '!'
+                | '&'
+                | '|'
+        ) {
+            out.push(Tok::Punct(c));
+            i += 1;
+            continue;
+        }
+        return Err(format!("unexpected char '{}' at {}", c, i));
+    }
+    Ok(out)
+}
+
+// ── AST ──────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub enum Expr {
+    Number(f64),
+    String(String),
+    Bool(bool),
+    Null,
+    Ident(String),
+    /// `.field` or `.method(args)` member access.
+    Member(Box<Expr>, String, Option<Vec<Expr>>),
+    /// `obj[key]` index access.
+    Index(Box<Expr>, Box<Expr>),
+    /// `f(args)` call on a top-level identifier.
+    Call(String, Vec<Expr>),
+    Unary(String, Box<Expr>),
+    Binary(String, Box<Expr>, Box<Expr>),
+    Ternary(Box<Expr>, Box<Expr>, Box<Expr>),
+    /// `var x = expr` (declare); `x = expr` (assign).
+    Assign(String, Box<Expr>, bool /* is_decl */),
+    /// `(params) -> expr` / `(params) -> { stmts }` — a closure literal.
+    /// The body is `Arc`-shared (not owned `Vec<Stmt>`) so producing the
+    /// `PainlessValue::Closure` this evaluates to — which happens on every
+    /// evaluation of the literal, e.g. once per call when a closure is
+    /// itself an argument passed to a recursive call — is a cheap refcount
+    /// bump rather than a deep AST clone.
+    ///
+    /// `Arc` rather than `Rc` so `PainlessValue` is `Send`/`Sync` — a shared
+    /// closure body was the only thing keeping it off a thread boundary.
+    ///
+    /// The atomic refcount does not show up above the noise floor. A/B'd with
+    /// `measure_closure_clone_cost` (`stackprobe` feature, release build):
+    /// a 240-closure-invocation script timed against a closure-free script of
+    /// the same statement shape, reported as their **ratio** because wall-clock
+    /// on a shared host swings ±40 % between runs while the ratio does not.
+    /// Three runs each, same binary, alternating source:
+    ///
+    /// | build | closure/arith ratio      |
+    /// |-------|--------------------------|
+    /// | `Arc` | 3.328, 3.334, 3.224      |
+    /// | `Rc`  | 3.367, 3.344, 2.360      |
+    ///
+    /// The `Arc`–`Rc` gap (~1 %) is an order of magnitude smaller than `Rc`'s
+    /// own run-to-run spread, i.e. not resolvable here: a closure call
+    /// allocates a fresh `HashMap` scope, which dominates a refcount either
+    /// way. `MAX_CALL_COUNT` caps closure calls at 10 000 per evaluation, so
+    /// the worst case is bounded regardless.
+    Lambda(Vec<String>, std::sync::Arc<Vec<Stmt>>),
+}
+
+/// Parser-only expression wrapper carrying the exact AST depth in O(1).
+///
+/// Left-associative operator parsers build their ASTs in loops. Without this
+/// metadata, a flat expression can create thousands of nested `Binary` nodes
+/// while the recursive-descent parser itself remains only a few frames deep.
+struct ParsedExpr {
+    expr: Expr,
+    depth: usize,
+}
+
+impl ParsedExpr {
+    fn leaf(expr: Expr) -> Self {
+        Self { expr, depth: 1 }
+    }
+
+    fn parent(expr: Expr, child_depth: usize) -> Result<Self, String> {
+        let depth = child_depth.saturating_add(1);
+        if depth > MAX_EVAL_DEPTH {
+            return Err(EVAL_TOO_DEEP_MSG.to_string());
+        }
+        Ok(Self { expr, depth })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum Stmt {
+    Expr(Expr),
+    Return(Option<Expr>),
+    If(Expr, Vec<Stmt>, Vec<Stmt>),
+    Block(Vec<Stmt>),
+    /// `<type> name(<type> param, ...) { body }` — a local function
+    /// declaration. Parameter/return types are parsed and discarded (the
+    /// interpreter is dynamically typed); only names and the body matter.
+    /// `Arc`-shared body for the same reason as [`Expr::Lambda`].
+    FnDecl(String, Vec<String>, std::sync::Arc<Vec<Stmt>>),
+}
+
+// ── Resource limits ──────────────────────────────────────────────────────────
+
+/// Maximum recursive nesting depth accepted by the recursive-descent parser
+/// (nested parens, unary chains, ternaries, nested blocks). An unauthenticated
+/// caller could otherwise submit a ~3 KB script of nested parens whose parse
+/// recursion overflows the (2 MB) worker-thread stack and aborts the entire
+/// process. ~100 is far below the empirically-observed overflow (~3000) yet
+/// comfortably above any legitimate hand-written or generated script.
+pub(crate) const MAX_PARSE_DEPTH: usize = 100;
+
+/// Maximum recursive AST-evaluation depth. Bounds `eval_expr`/`exec_stmt`
+/// recursion so a deep AST (including flat left-associative operator chains
+/// like `1+1+1+…` which the parser builds with a loop, not recursion, and so
+/// are NOT limited by [`MAX_PARSE_DEPTH`]) cannot overflow the stack at score
+/// time.
+pub(crate) const MAX_EVAL_DEPTH: usize = 500;
+
+/// Maximum accepted script source length in bytes. Matches Elasticsearch's
+/// default `script.max_size_in_bytes` (64 KiB) and bounds the size of any AST
+/// we build (and later drop) from a single request.
+pub(crate) const MAX_SCRIPT_LEN: usize = 64 * 1024;
+
+/// Safety ceiling on any single string value produced during evaluation.
+/// String concatenation (`+`) is the only operation that can grow a value
+/// beyond the size of its parts, so a handful of flat (non-nested, non-deep)
+/// `s = s + s;` statements — none of which trip [`MAX_EVAL_DEPTH`] or
+/// [`MAX_PARSE_DEPTH`], since they're neither deeply nested nor deeply
+/// recursive — doubles a string exponentially per statement. Without this
+/// cap a script well under [`MAX_SCRIPT_LEN`] can exhaust available memory
+/// before any other limit fires.
+const MAX_PAINLESS_STRING_LEN: usize = 1024 * 1024;
+
+/// Sentinel error returned when [`MAX_PARSE_DEPTH`] is exceeded. Callers
+/// (`check_script_limits`) match on it to distinguish "too complex" (a 400)
+/// from ordinary syntax errors (which degrade gracefully at runtime).
+pub(crate) const TOO_DEEP_MSG: &str = "compile error: script exceeds maximum nesting depth";
+
+/// Sentinel returned before constructing an AST that the recursive evaluator
+/// cannot safely evaluate within [`MAX_EVAL_DEPTH`].
+pub(crate) const EVAL_TOO_DEEP_MSG: &str =
+    "script evaluation exceeded maximum depth; split the expression into smaller statements";
+
+/// Maximum closure (local function / lambda) call-nesting depth.
+///
+/// Closure invocation re-enters `exec_stmt`/`eval_expr` from inside
+/// `eval_expr` itself (`call_closure` → `exec_body` → `exec_stmt`), and a
+/// closure body's own statement nesting is bounded by [`MAX_PARSE_DEPTH`]
+/// but NOT charged against [`MAX_EVAL_DEPTH`] at all — only the *call*
+/// expression that invoked the closure is. So self-application recursion
+/// (`def f = (g, n) -> g(g, n - 1); return f(f, 9);`) could otherwise
+/// re-enter `exec_stmt` up to `MAX_EVAL_DEPTH * MAX_PARSE_DEPTH` times
+/// (~50,000) before `eval_depth` ever objects, which is enough native
+/// stack frames to abort the process even in a release build. Kept small
+/// and independent of the expression budget.
+///
+/// **32 is measured, not a guess.** Measured in a release build
+/// by probing the stack address at each call level (`stackprobe` feature,
+/// `measure_stack_per_call_level`), with the recursive call placed *inside*
+/// the closure body's nested blocks so every call level also pays that
+/// body's `exec_stmt` frames:
+///
+/// | nested blocks in body | bytes / call level | total at depth 32 |
+/// |----------------------:|-------------------:|------------------:|
+/// | 1                     |              2,272 |            69 KiB |
+/// | 10                    |              6,160 |           186 KiB |
+/// | 50                    |             23,440 |           710 KiB |
+/// | 90 (parser max)       |             40,720 |          1.20 MiB |
+///
+/// The adversarial worst case consumes a measured 1.20 MiB (1,262,320 bytes).
+/// That figure is intrinsic to this depth ceiling and does not change with the
+/// worker-thread stack size — only what fits *underneath* the evaluator does.
+/// The frames underneath have grown: axum accept/route, the two-layer
+/// authorization middleware (#79), the `_*_by_query` handler, the search entry
+/// and the segment scan all sit below this evaluator on the same stack. The
+/// earlier "~0.8 MiB underneath" note was against the stock 2 MiB tokio worker
+/// stack (2,097,152 − 1,262,320 = 834,832 bytes ≈ 0.80 MiB) and did NOT account
+/// for the authz layer now living in that space. The server therefore pins the
+/// worker stack to 4 MiB explicitly (`RT_THREAD_STACK_SIZE` in `argos-server`'s
+/// `main.rs`), which leaves ~2.80 MiB under this worst case
+/// (4,194,304 − 1,262,320 = 2,931,984 bytes) — comfortably enough for the
+/// middleware and handler frames.
+///
+/// HONEST NOTE ON THE 2.80 MiB: it is arithmetic against the new 4 MiB budget
+/// using the *unchanged* measured 1.20 MiB evaluator cost. The stackprobe
+/// instrumentation measures only this evaluator's per-level cost (unchanged
+/// here — `MAX_CALL_DEPTH` and the per-frame size are untouched); it does not
+/// measure the axum/authz/handler frames underneath, so their exact byte cost
+/// was NOT re-instrumented. The authz layer's contribution is a small fixed
+/// addition to the "underneath" side and is approximate, but it is well within
+/// the enlarged headroom.
+///
+/// Raising this ceiling is still not a free "just raise it" (see #97), even
+/// with the larger stack: the cost per level is `O(MAX_PARSE_DEPTH)` — up to
+/// ~40 KiB per level in the worst case — because a closure body's statement
+/// nesting is not charged against any shared budget, so the budget is consumed
+/// quickly. Lifting this ceiling safely requires charging body nesting against
+/// a single stack budget, not a bigger number here (and not a bigger stack).
+///
+/// Reproduce with:
+/// `cargo test --release -p argos-engine --lib --features stackprobe -- \
+/// --nocapture measure_stack_per_call_level`
+pub(crate) const MAX_CALL_DEPTH: usize = 32;
+
+/// Maximum total closure invocations across one script evaluation.
+///
+/// Call *depth* alone doesn't bound an exponential call *tree*: a script
+/// like `g(g,n-1) + g(g,n-1) + g(g,n-1) + g(g,n-1)` never exceeds a call
+/// depth of ~n (well under [`MAX_CALL_DEPTH`]), but its total invocation
+/// count is 4^n — measured at 262,144 invocations for n=9 in ~0.8s, with
+/// each unit of `n` multiplying the cost by 4. This is the step budget
+/// that bounds the call tree's total size rather than its depth.
+pub(crate) const MAX_CALL_COUNT: usize = 10_000;
+
+/// Sentinel returned when [`MAX_CALL_DEPTH`] is exceeded. Split from
+/// [`TOO_MANY_CALLS_MSG`] so the two very different remedies (recurse less
+/// vs. call less) are distinguishable in an error a user actually sees.
+pub(crate) const CALL_TOO_DEEP_MSG: &str =
+    "script evaluation exceeded maximum closure call depth; reduce the recursion depth";
+
+/// Sentinel returned when [`MAX_CALL_COUNT`] is exceeded.
+pub(crate) const TOO_MANY_CALLS_MSG: &str =
+    "script evaluation exceeded the maximum closure invocation count";
+
+/// Prefix of the (length-carrying) oversize-source error, so
+/// [`is_resource_limit_error`] can recognise it without formatting.
+const SOURCE_TOO_LONG_PREFIX: &str = "script source is ";
+
+// ── Per-evaluation work budget (issue #122) ──────────────────────────────────
+//
+// Every limit above bounds a STRUCTURAL property of a script: how deep it
+// nests, how many closure calls it makes, how many bytes of source it is.
+// None of them bounds WORK, and the two are not the same thing — a script can
+// be flat, shallow, closure-free and comfortably under the 64 KiB source cap
+// while costing tens of seconds of CPU on a SINGLE document.
+//
+// Measured in a release build on the commit this branch is based on, one core,
+// `taskset`-pinned (`tests/painless_cpu_budget.rs` reproduces each row):
+//
+// | script                                             | source   | per document |
+// |----------------------------------------------------|---------:|-------------:|
+// | 3,000 x `params.blob;`, params of 50,000 nodes      | 38.1 KiB |      9.03 s  |
+// | 3,000 x `params.blob;`, params of 200,000 nodes     | 38.1 KiB |     37.35 s  |
+// | 3,000 x `params['_source'];`, doc of 100,000 nodes  | 55.7 KiB |     17.17 s  |
+// | 2,000 x `doc['rank'].value`, doc of 20,000 nodes    | 52.8 KiB |      1.13 s  |
+//
+// All four are O(size)-behind-an-O(1)-expression: `params.x` converts a
+// caller-supplied subtree, `params['_source']` clones the document, and
+// `get_doc_value` clones the whole document before walking into it. None of it
+// is visible in the statement count, which is why a step counter alone would
+// not have caught any of them.
+//
+// The doc-scan cooperative timeout poll cannot bound this: it only decides how
+// often a document *boundary* is checked, so a request `timeout` cannot
+// interrupt a single expensive document at all. The budget below is checked
+// *inside* the evaluator, so one document's evaluation can be abandoned
+// part-way through. With it, the four rows above become 97 ms, 109 ms, 168 ms
+// and 155 ms — each a refusal, and flat in the size of the input, because the
+// trip happens at a fixed work count.
+//
+// (A fifth shape, quadratic string concatenation, motivated the first revision
+// of this budget. It is no longer the headline: the 1 MiB
+// `MAX_PAINLESS_STRING_LEN` cap that arrived with #87 already bounds it, and
+// on this base it costs at most 204 ms. The work budget still prices it — see
+// `quadratic_string_growth_trips_the_work_budget` — but the numbers that
+// justify the ceiling are the ones above.)
+
+/// Bytes of produced value that count as one unit of work.
+///
+/// The counter has to price two different kinds of work in one currency:
+/// interpreter steps (an `eval_expr`/`exec_stmt` entry) and bulk copying
+/// (string concatenation, whole-document clones). On the 59.8 KiB benign
+/// arithmetic script a work unit measured **8.1 ns** (277.9 µs for 34,407
+/// units, best of 40 trials, pinned). 64 bytes of memcpy is a few ns, so this
+/// deliberately prices bytes *above* their raw memcpy cost: the copies that
+/// matter also allocate and free, and under-pricing them is what left the hole
+/// in the first place.
+///
+/// A unit is a unit of *charge*, not a constant amount of time: a step that
+/// clones a 200,000-node `params` member is charged ~200,000 units and takes
+/// far longer per unit than an arithmetic step does. The wall-clock check
+/// below exists because of that spread, not despite it.
+const BYTES_PER_OP: u64 = 64;
+
+/// Maximum work units one evaluation of one script against one document may
+/// consume.
+///
+/// Calibrated against the largest *benign* script the 64 KiB source limit
+/// admits: 4,300 statements of `t = t + N.5;` (59,773 bytes) costs 34,407 work
+/// units, so this ceiling leaves a **145x** margin over the worst legitimate
+/// script that can be submitted.
+/// `tests::the_budget_leaves_the_largest_benign_script_a_wide_margin` pins that
+/// number, so a change to the charging scheme reports how far the margin moved
+/// instead of leaving the ceiling a guess.
+///
+/// In the other direction it is a real bound: the four shapes tabulated above
+/// cost 9.03 s, 37.35 s, 17.17 s and 1.13 s per document without it, and
+/// 97 ms, 109 ms, 168 ms and 155 ms with it.
+///
+/// It is deliberately deterministic (no clock), so the limit is reproducible
+/// in tests and identical on every machine; the wall-clock check below is the
+/// backstop for work this counter prices too cheaply, not the primary bound.
+pub(crate) const MAX_SCRIPT_OPS: u64 = 5_000_000;
+
+/// Work units between wall-clock reads.
+///
+/// Sampling rather than reading the clock per op is what keeps the budget off
+/// the hot path: a clock read is ~20 ns, so once per 1,024 units it is lost in
+/// the noise.
+///
+/// What this bounds is the *granularity* of the time check, and the honest
+/// statement of it is in work units, not in time: an evaluation can overshoot
+/// its deadline by one sampling window plus the single step in flight, and
+/// neither of those is a fixed duration — one charge can be 200,000 units of
+/// document cloning. Measured against a 100 ms slice
+/// (`measure_time_budget_overshoot`), the overshoot is 0.48 ms on a
+/// 10,000-node document, 1.17 ms at 40,000 nodes and 7.11 ms at 160,000: small,
+/// and growing with the cost of one charged step exactly as that argument says
+/// it should.
+///
+/// This is only true because the deadline is fixed in [`PainlessCtx::new`]
+/// before any work is charged. Deriving it inside the first `clock_check`
+/// instead — as the first revision of this budget did — spends one window
+/// establishing the deadline and a second one failing it, so the overshoot is
+/// two windows rather than one. With the accounting hole in `eval_access_chain`
+/// open as well, those two windows were 12.55 s of real time on the `params`
+/// shape, which is how a "500 ms" slice let a script run for twelve seconds.
+const OPS_PER_CLOCK_CHECK: u64 = 1_024;
+
+/// Longest an evaluation of one script against one document may run.
+///
+/// 500 ms is far outside any legitimate per-document script cost — the largest
+/// benign script the source limit admits costs a measured 278 µs, so this is
+/// ~1,800x it — and exists to bound shapes whose cost the work counter prices
+/// too cheaply.
+const MAX_EVAL_SLICE: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// Floor on the slice an evaluation is granted when the enclosing request
+/// deadline is near or already past.
+///
+/// The budget composes with the request deadline by clamping each evaluation's
+/// slice to the request's remaining time — so a single document can no longer
+/// overshoot the request's own deadline by tens of seconds. But the request
+/// deadline is routinely *already past* when a script runs: the doc scan only
+/// checks it every 4,096 documents, so a legitimate slow search evaluates its
+/// scoring script well beyond the deadline before the scan notices. Cutting
+/// those evaluations off instantly would turn every ordinary `timeout` into a
+/// `script_exception` 400. This floor is what keeps the trip meaningful: an
+/// evaluation always gets at least 100 ms, which is ~360x the measured 278 µs
+/// cost of the largest benign script that can be submitted, so only a
+/// genuinely abusive script can hit it.
+const MIN_EVAL_SLICE: std::time::Duration = std::time::Duration::from_millis(100);
+
+/// Sentinel returned when [`MAX_SCRIPT_OPS`] is exceeded.
+pub(crate) const SCRIPT_OVER_BUDGET_MSG: &str =
+    "script evaluation exceeded its per-document work budget; simplify the script";
+
+/// Sentinel returned when a single evaluation outlives its wall-clock slice.
+/// Split from [`SCRIPT_OVER_BUDGET_MSG`] so the two are distinguishable in an
+/// error a user actually sees, like `CALL_TOO_DEEP_MSG` vs `TOO_MANY_CALLS_MSG`.
+pub(crate) const SCRIPT_OVER_TIME_MSG: &str =
+    "script evaluation exceeded its per-document time budget; simplify the script";
+
+/// True when `msg` is one of the interpreter's **resource-limit** sentinels
+/// rather than an ordinary script error.
+///
+/// This distinction is load-bearing. Most script call sites deliberately
+/// swallow errors and fall back to a neutral value, because a script outside
+/// our Painless subset must keep degrading gracefully rather than turn into a
+/// spurious 400 (see `check_script_limits`). A resource-limit trip is the
+/// opposite case: the script was *understood*, we simply refused to finish
+/// running it, so falling back to `0.0` / `[]` publishes a value that looks
+/// like a real answer and is not. Callers use this to fail loudly on limits
+/// while keeping the graceful path for everything else.
+pub fn is_resource_limit_error(msg: &str) -> bool {
+    msg == TOO_DEEP_MSG
+        || msg == EVAL_TOO_DEEP_MSG
+        || msg == CALL_TOO_DEEP_MSG
+        || msg == TOO_MANY_CALLS_MSG
+        || msg == SCRIPT_OVER_BUDGET_MSG
+        || msg == SCRIPT_OVER_TIME_MSG
+        || msg.starts_with(SOURCE_TOO_LONG_PREFIX)
+}
+
+tokio::task_local! {
+    /// First resource-limit fault raised by any script evaluated inside the
+    /// current [`with_script_fault_capture`] scope.
+    ///
+    /// A task-local (not a thread-local): the scoring and aggregation paths
+    /// that evaluate scripts sit behind `f32`/`Value`-returning signatures
+    /// with no error channel of their own — `apply_function_score`,
+    /// `score_query_against_doc`, `doc_matches_query`, `run_terms` — and are
+    /// reached from ~90 call sites, so threading a sink through them is not
+    /// viable. A *thread*-local would mis-attribute a fault to whichever
+    /// request happened to be running on the worker after an `.await`; a
+    /// task-local follows the task across await points and across worker
+    /// threads, so a fault can only ever be read by the request that caused
+    /// it. Faults raised outside any scope are dropped (`try_with` fails),
+    /// which is the correct behavior for unit tests and sync helpers that
+    /// already read the `Result` directly.
+    static SCRIPT_FAULT: std::cell::RefCell<Option<String>> ;
+}
+
+/// Record a resource-limit fault against the enclosing capture scope, if any.
+/// First fault wins — later ones are almost always the same limit tripping on
+/// the next document.
+///
+/// Also used to *re-raise* a fault that an inner scope already consumed (see
+/// `Index::search`): scopes nest, so a sub-search's own capture would otherwise
+/// hide the fault from the request-level capture that wraps it.
+pub(crate) fn record_script_fault(msg: &str) {
+    let _ = SCRIPT_FAULT.try_with(|slot| {
+        let mut slot = slot.borrow_mut();
+        if slot.is_none() {
+            *slot = Some(msg.to_string());
+        }
+    });
+}
+
+tokio::task_local! {
+    /// Absolute deadline of the request that is currently evaluating scripts.
+    ///
+    /// A task-local for the same reason as [`SCRIPT_FAULT`]: the scoring and
+    /// aggregation paths that evaluate scripts have no parameter to thread a
+    /// deadline through, and a *thread*-local would leak one request's
+    /// deadline onto whatever ran on the worker next.
+    ///
+    /// This is what makes the work budget an extension of the existing
+    /// request deadline rather than a second, independent limit — see
+    /// [`MIN_EVAL_SLICE`] for how the two combine.
+    static SCRIPT_REQUEST_DEADLINE: std::time::Instant;
+}
+
+/// The resource-limit fault already recorded against the enclosing capture
+/// scope, if any. `None` outside a scope, and `None` when nothing has tripped.
+pub(crate) fn pending_script_fault() -> Option<String> {
+    SCRIPT_FAULT
+        .try_with(|slot| slot.borrow().clone())
+        .unwrap_or(None)
+}
+
+/// Run `fut` with the enclosing request's deadline visible to every script it
+/// evaluates, so no single document's evaluation can overshoot it.
+pub async fn with_script_deadline<F>(deadline: std::time::Instant, fut: F) -> F::Output
+where
+    F: std::future::Future,
+{
+    SCRIPT_REQUEST_DEADLINE.scope(deadline, fut).await
+}
+
+/// Run `fut` with a fault sink installed, returning its output alongside the
+/// first script resource-limit fault raised anywhere inside it.
+///
+/// This is how a limit trip deep in the scoring path becomes visible to the
+/// caller instead of silently degrading to a wrong score.
+pub async fn with_script_fault_capture<F>(fut: F) -> (F::Output, Option<String>)
+where
+    F: std::future::Future,
+{
+    SCRIPT_FAULT
+        .scope(std::cell::RefCell::new(None), async move {
+            let out = fut.await;
+            let fault = SCRIPT_FAULT.with(|slot| slot.borrow_mut().take());
+            (out, fault)
+        })
+        .await
+}
+
+// ── Parser ───────────────────────────────────────────────────────────────────
+
+struct Parser<'a> {
+    toks: &'a [Tok],
+    pos: usize,
+    /// Current recursive-descent nesting depth (guards against stack overflow
+    /// on adversarial deeply-nested input).
+    depth: usize,
+}
+
+impl<'a> Parser<'a> {
+    fn new(toks: &'a [Tok]) -> Self {
+        Self {
+            toks,
+            pos: 0,
+            depth: 0,
+        }
+    }
+    /// Enter one recursion level, failing (instead of overflowing the stack)
+    /// once [`MAX_PARSE_DEPTH`] is exceeded. Paired with [`Parser::ascend`] on
+    /// the success path; on the error path the whole parse is abandoned so the
+    /// unbalanced counter is irrelevant.
+    fn descend(&mut self) -> Result<(), String> {
+        self.depth += 1;
+        if self.depth > MAX_PARSE_DEPTH {
+            Err(TOO_DEEP_MSG.to_string())
+        } else {
+            Ok(())
+        }
+    }
+    fn ascend(&mut self) {
+        self.depth = self.depth.saturating_sub(1);
+    }
+    fn peek(&self) -> Option<&Tok> {
+        self.toks.get(self.pos)
+    }
+    fn eat(&mut self) -> Option<Tok> {
+        let t = self.toks.get(self.pos).cloned();
+        if t.is_some() {
+            self.pos += 1;
+        }
+        t
+    }
+    fn expect_punct(&mut self, c: char) -> Result<(), String> {
+        match self.eat() {
+            Some(Tok::Punct(p)) if p == c => Ok(()),
+            other => Err(format!("expected '{}' got {:?}", c, other)),
+        }
+    }
+    fn match_punct(&mut self, c: char) -> bool {
+        if let Some(Tok::Punct(p)) = self.peek() {
+            if *p == c {
+                self.pos += 1;
+                return true;
+            }
+        }
+        false
+    }
+    fn match_keyword(&mut self, kw: &str) -> bool {
+        if let Some(Tok::Keyword(s)) = self.peek() {
+            if s == kw {
+                self.pos += 1;
+                return true;
+            }
+        }
+        false
+    }
+    fn parse_program(&mut self) -> Result<Vec<Stmt>, String> {
+        let mut out: Vec<Stmt> = Vec::new();
+        while self.peek().is_some() {
+            out.push(self.parse_stmt()?);
+        }
+        Ok(out)
+    }
+    fn parse_stmt(&mut self) -> Result<Stmt, String> {
+        // Depth-guard statement nesting (blocks / if / for bodies).
+        self.descend()?;
+        let out = self.parse_stmt_inner();
+        self.ascend();
+        out
+    }
+    fn parse_stmt_inner(&mut self) -> Result<Stmt, String> {
+        // `if (...) { ... } else { ... }`
+        if self.match_keyword("if") {
+            self.expect_punct('(')?;
+            let cond = self.parse_expr()?;
+            self.expect_punct(')')?;
+            let then_body = self.parse_block_or_stmt()?;
+            let else_body = if self.match_keyword("else") {
+                self.parse_block_or_stmt()?
+            } else {
+                Vec::new()
+            };
+            return Ok(Stmt::If(cond.expr, then_body, else_body));
+        }
+        if self.match_keyword("return") {
+            // Optional expression then ;
+            let e = if self.match_punct(';') {
+                None
+            } else {
+                let e = self.parse_expr()?;
+                let _ = self.match_punct(';');
+                Some(e.expr)
+            };
+            return Ok(Stmt::Return(e));
+        }
+        if let Some(Tok::Punct('{')) = self.peek() {
+            let block = self.parse_block_or_stmt()?;
+            return Ok(Stmt::Block(block));
+        }
+        // Variable decl: `<type> NAME = expr;`
+        if let Some(Tok::Keyword(kw)) = self.peek().cloned() {
+            if matches!(
+                kw.as_str(),
+                "double" | "int" | "long" | "float" | "boolean" | "String" | "def" | "var"
+            ) {
+                self.pos += 1;
+                let name = match self.eat() {
+                    Some(Tok::Ident(n)) => n,
+                    other => return Err(format!("expected identifier after type got {:?}", other)),
+                };
+                if self.match_punct('(') {
+                    let params = self.parse_fn_params()?;
+                    let body = self.parse_block_or_stmt()?;
+                    return Ok(Stmt::FnDecl(name, params, std::sync::Arc::new(body)));
+                }
+                if !self.match_punct('=') {
+                    return Err(format!("expected '=' after var name '{}'", name));
+                }
+                let val = self.parse_expr()?;
+                let _ = self.match_punct(';');
+                let depth = val.depth;
+                let expr = ParsedExpr::parent(Expr::Assign(name, Box::new(val.expr), true), depth)?;
+                return Ok(Stmt::Expr(expr.expr));
+            }
+        }
+        let e = self.parse_expr()?;
+        let _ = self.match_punct(';');
+        Ok(Stmt::Expr(e.expr))
+    }
+    fn parse_block_or_stmt(&mut self) -> Result<Vec<Stmt>, String> {
+        if self.match_punct('{') {
+            let mut out = Vec::new();
+            while let Some(t) = self.peek() {
+                if matches!(t, Tok::Punct('}')) {
+                    break;
+                }
+                out.push(self.parse_stmt()?);
+            }
+            self.expect_punct('}')?;
+            Ok(out)
+        } else {
+            Ok(vec![self.parse_stmt()?])
+        }
+    }
+    fn parse_expr(&mut self) -> Result<ParsedExpr, String> {
+        self.parse_assign()
+    }
+    fn parse_assign(&mut self) -> Result<ParsedExpr, String> {
+        // Every expression re-entry (parens, index keys, call args, ternary
+        // arms, assignment RHS) funnels through parse_assign, so guarding it
+        // here bounds the whole expression-grammar recursion by nesting depth.
+        self.descend()?;
+        let out = self.parse_assign_inner();
+        self.ascend();
+        out
+    }
+    fn parse_assign_inner(&mut self) -> Result<ParsedExpr, String> {
+        let lhs = self.parse_ternary()?;
+        if self.match_punct('=') {
+            // Disambiguate from `==` already consumed by parse_compare.
+            let rhs = self.parse_assign()?;
+            if let Expr::Ident(name) = lhs.expr {
+                let depth = rhs.depth;
+                return ParsedExpr::parent(Expr::Assign(name, Box::new(rhs.expr), false), depth);
+            }
+            return Err("assignment target must be identifier".into());
+        }
+        Ok(lhs)
+    }
+    fn parse_ternary(&mut self) -> Result<ParsedExpr, String> {
+        let cond = self.parse_or()?;
+        if self.match_punct('?') {
+            let then_e = self.parse_assign()?;
+            self.expect_punct(':')?;
+            let else_e = self.parse_assign()?;
+            let depth = cond.depth.max(then_e.depth).max(else_e.depth);
+            return ParsedExpr::parent(
+                Expr::Ternary(
+                    Box::new(cond.expr),
+                    Box::new(then_e.expr),
+                    Box::new(else_e.expr),
+                ),
+                depth,
+            );
+        }
+        Ok(cond)
+    }
+    fn parse_or(&mut self) -> Result<ParsedExpr, String> {
+        let mut lhs = self.parse_and()?;
+        while let Some(Tok::PunctMulti(op)) = self.peek() {
+            if op == "||" {
+                self.pos += 1;
+                let rhs = self.parse_and()?;
+                let depth = lhs.depth.max(rhs.depth);
+                lhs = ParsedExpr::parent(
+                    Expr::Binary("||".into(), Box::new(lhs.expr), Box::new(rhs.expr)),
+                    depth,
+                )?;
+            } else {
+                break;
+            }
+        }
+        Ok(lhs)
+    }
+    fn parse_and(&mut self) -> Result<ParsedExpr, String> {
+        let mut lhs = self.parse_eq()?;
+        while let Some(Tok::PunctMulti(op)) = self.peek() {
+            if op == "&&" {
+                self.pos += 1;
+                let rhs = self.parse_eq()?;
+                let depth = lhs.depth.max(rhs.depth);
+                lhs = ParsedExpr::parent(
+                    Expr::Binary("&&".into(), Box::new(lhs.expr), Box::new(rhs.expr)),
+                    depth,
+                )?;
+            } else {
+                break;
+            }
+        }
+        Ok(lhs)
+    }
+    fn parse_eq(&mut self) -> Result<ParsedExpr, String> {
+        let mut lhs = self.parse_compare()?;
+        while let Some(t) = self.peek() {
+            let op = match t {
+                Tok::PunctMulti(s) if s == "==" || s == "!=" => s.clone(),
+                _ => break,
+            };
+            self.pos += 1;
+            let rhs = self.parse_compare()?;
+            let depth = lhs.depth.max(rhs.depth);
+            lhs = ParsedExpr::parent(
+                Expr::Binary(op, Box::new(lhs.expr), Box::new(rhs.expr)),
+                depth,
+            )?;
+        }
+        Ok(lhs)
+    }
+    fn parse_compare(&mut self) -> Result<ParsedExpr, String> {
+        let mut lhs = self.parse_add()?;
+        while let Some(t) = self.peek() {
+            let op = match t {
+                Tok::PunctMulti(s) if s == "<=" || s == ">=" => s.clone(),
+                Tok::Punct('<') => "<".to_string(),
+                Tok::Punct('>') => ">".to_string(),
+                _ => break,
+            };
+            self.pos += 1;
+            let rhs = self.parse_add()?;
+            let depth = lhs.depth.max(rhs.depth);
+            lhs = ParsedExpr::parent(
+                Expr::Binary(op, Box::new(lhs.expr), Box::new(rhs.expr)),
+                depth,
+            )?;
+        }
+        Ok(lhs)
+    }
+    fn parse_add(&mut self) -> Result<ParsedExpr, String> {
+        let mut lhs = self.parse_mul()?;
+        while let Some(t) = self.peek() {
+            let op = match t {
+                Tok::Punct('+') => "+".to_string(),
+                Tok::Punct('-') => "-".to_string(),
+                _ => break,
+            };
+            self.pos += 1;
+            let rhs = self.parse_mul()?;
+            let depth = lhs.depth.max(rhs.depth);
+            lhs = ParsedExpr::parent(
+                Expr::Binary(op, Box::new(lhs.expr), Box::new(rhs.expr)),
+                depth,
+            )?;
+        }
+        Ok(lhs)
+    }
+    fn parse_mul(&mut self) -> Result<ParsedExpr, String> {
+        let mut lhs = self.parse_unary()?;
+        while let Some(t) = self.peek() {
+            let op = match t {
+                Tok::Punct('*') => "*".to_string(),
+                Tok::Punct('/') => "/".to_string(),
+                Tok::Punct('%') => "%".to_string(),
+                _ => break,
+            };
+            self.pos += 1;
+            let rhs = self.parse_unary()?;
+            let depth = lhs.depth.max(rhs.depth);
+            lhs = ParsedExpr::parent(
+                Expr::Binary(op, Box::new(lhs.expr), Box::new(rhs.expr)),
+                depth,
+            )?;
+        }
+        Ok(lhs)
+    }
+    fn parse_unary(&mut self) -> Result<ParsedExpr, String> {
+        // Guard unary chains (`----x`, `!!!x`), which recurse through
+        // parse_unary itself and so bypass the parse_assign guard.
+        self.descend()?;
+        let out = self.parse_unary_inner();
+        self.ascend();
+        out
+    }
+    fn parse_unary_inner(&mut self) -> Result<ParsedExpr, String> {
+        if self.match_punct('-') {
+            let e = self.parse_unary()?;
+            let depth = e.depth;
+            return ParsedExpr::parent(Expr::Unary("-".into(), Box::new(e.expr)), depth);
+        }
+        if self.match_punct('!') {
+            let e = self.parse_unary()?;
+            let depth = e.depth;
+            return ParsedExpr::parent(Expr::Unary("!".into(), Box::new(e.expr)), depth);
+        }
+        if self.match_punct('+') {
+            return self.parse_unary();
+        }
+        self.parse_postfix()
+    }
+    fn parse_postfix(&mut self) -> Result<ParsedExpr, String> {
+        let mut e = self.parse_primary()?;
+        loop {
+            if self.match_punct('.') {
+                // member: ident, possibly followed by call
+                let name = match self.eat() {
+                    Some(Tok::Ident(n)) => n,
+                    Some(Tok::Keyword(n)) => n, // allow .value etc. that hit type kw rare
+                    other => return Err(format!("expected member name got {:?}", other)),
+                };
+                if self.match_punct('(') {
+                    let args = self.parse_args(')')?;
+                    let args_depth = args.iter().map(|arg| arg.depth).max().unwrap_or(0);
+                    let depth = e.depth.max(args_depth);
+                    e = ParsedExpr::parent(
+                        Expr::Member(
+                            Box::new(e.expr),
+                            name,
+                            Some(args.into_iter().map(|arg| arg.expr).collect()),
+                        ),
+                        depth,
+                    )?;
+                } else {
+                    let depth = e.depth;
+                    e = ParsedExpr::parent(Expr::Member(Box::new(e.expr), name, None), depth)?;
+                }
+            } else if self.match_punct('[') {
+                let idx = self.parse_expr()?;
+                self.expect_punct(']')?;
+                let depth = e.depth.max(idx.depth);
+                e = ParsedExpr::parent(Expr::Index(Box::new(e.expr), Box::new(idx.expr)), depth)?;
+            } else {
+                break;
+            }
+        }
+        Ok(e)
+    }
+    fn parse_args(&mut self, end: char) -> Result<Vec<ParsedExpr>, String> {
+        let mut out: Vec<ParsedExpr> = Vec::new();
+        if let Some(Tok::Punct(c)) = self.peek() {
+            if *c == end {
+                self.pos += 1;
+                return Ok(out);
+            }
+        }
+        loop {
+            out.push(self.parse_expr()?);
+            if self.match_punct(',') {
+                continue;
+            }
+            break;
+        }
+        match self.eat() {
+            Some(Tok::Punct(c)) if c == end => Ok(out),
+            other => Err(format!("expected '{}' got {:?}", end, other)),
+        }
+    }
+    /// Parameter list for a local function declaration: `(<type> name, ...)`,
+    /// with the opening `(` already consumed. Types are accepted (any
+    /// Ident or Keyword token) and discarded — only names are kept.
+    fn parse_fn_params(&mut self) -> Result<Vec<String>, String> {
+        let mut names = Vec::new();
+        if let Some(Tok::Punct(')')) = self.peek() {
+            self.pos += 1;
+            return Ok(names);
+        }
+        loop {
+            match self.eat() {
+                Some(Tok::Ident(_)) | Some(Tok::Keyword(_)) => {}
+                other => return Err(format!("expected parameter type, got {:?}", other)),
+            }
+            let name = match self.eat() {
+                Some(Tok::Ident(n)) => n,
+                other => return Err(format!("expected parameter name, got {:?}", other)),
+            };
+            names.push(name);
+            if self.match_punct(',') {
+                continue;
+            }
+            break;
+        }
+        self.expect_punct(')')?;
+        Ok(names)
+    }
+    /// Try to parse a lambda literal `(a, b, ...) -> expr` / `-> { stmts }`
+    /// starting at the current position (which must be at `(`). Backtracks
+    /// (restores `self.pos`) and returns `None` on any mismatch, so the
+    /// caller falls back to treating `(` as a parenthesized sub-expression —
+    /// the two forms share the same opening token and are only
+    /// distinguishable by what follows the matching `)`.
+    ///
+    /// The lambda's own body is depth-guarded independently (its statements
+    /// go through the normal `parse_stmt`/descend-ascend path), so the
+    /// resulting literal is a leaf from the enclosing expression's depth
+    /// budget — it does not consume any of the caller's `ParsedExpr` depth.
+    fn try_parse_lambda(&mut self) -> Result<Option<ParsedExpr>, String> {
+        let save = self.pos;
+        self.pos += 1; // consume '('
+        let mut params = Vec::new();
+        if let Some(Tok::Punct(')')) = self.peek() {
+            self.pos += 1;
+        } else {
+            loop {
+                match self.peek().cloned() {
+                    Some(Tok::Ident(n)) => {
+                        self.pos += 1;
+                        params.push(n);
+                    }
+                    _ => {
+                        self.pos = save;
+                        return Ok(None);
+                    }
+                }
+                if let Some(Tok::Punct(',')) = self.peek() {
+                    self.pos += 1;
+                    continue;
+                }
+                break;
+            }
+            if !matches!(self.peek(), Some(Tok::Punct(')'))) {
+                self.pos = save;
+                return Ok(None);
+            }
+            self.pos += 1; // consume ')'
+        }
+        match self.peek() {
+            Some(Tok::PunctMulti(s)) if s == "->" => {
+                self.pos += 1;
+            }
+            _ => {
+                self.pos = save;
+                return Ok(None);
+            }
+        }
+        // Once `->` is consumed, this MUST be a lambda — there is no other
+        // valid parse of `(params) ->` in this grammar. So unlike the
+        // mismatches above, any error from here (including the parse-depth
+        // sentinel) is a genuine error to propagate, not a reason to
+        // backtrack and let the caller misparse `(` as a parenthesized
+        // expression instead — silently swallowing the depth-limit
+        // sentinel here would defeat `check_script_limits`'s up-front 400
+        // for a script whose lambda body is what makes it too deep.
+        let body = self.parse_block_or_stmt()?;
+        Ok(Some(ParsedExpr::leaf(Expr::Lambda(
+            params,
+            std::sync::Arc::new(body),
+        ))))
+    }
+    fn parse_primary(&mut self) -> Result<ParsedExpr, String> {
+        if matches!(self.peek(), Some(Tok::Punct('('))) {
+            if let Some(lambda) = self.try_parse_lambda()? {
+                return Ok(lambda);
+            }
+        }
+        match self.eat() {
+            Some(Tok::Number(n)) => Ok(ParsedExpr::leaf(Expr::Number(n))),
+            Some(Tok::String(s)) => Ok(ParsedExpr::leaf(Expr::String(s))),
+            Some(Tok::Keyword(k)) => match k.as_str() {
+                "true" => Ok(ParsedExpr::leaf(Expr::Bool(true))),
+                "false" => Ok(ParsedExpr::leaf(Expr::Bool(false))),
+                "null" => Ok(ParsedExpr::leaf(Expr::Null)),
+                other => Err(format!("unexpected keyword {} in expression", other)),
+            },
+            Some(Tok::Ident(name)) => {
+                if self.match_punct('(') {
+                    let args = self.parse_args(')')?;
+                    let depth = args.iter().map(|arg| arg.depth).max().unwrap_or(0);
+                    ParsedExpr::parent(
+                        Expr::Call(name, args.into_iter().map(|arg| arg.expr).collect()),
+                        depth,
+                    )
+                } else {
+                    Ok(ParsedExpr::leaf(Expr::Ident(name)))
+                }
+            }
+            Some(Tok::Punct('(')) => {
+                let e = self.parse_expr()?;
+                self.expect_punct(')')?;
+                Ok(e)
+            }
+            other => Err(format!("unexpected token {:?}", other)),
+        }
+    }
+}
+
+// ── Evaluation ───────────────────────────────────────────────────────────────
+
+/// RAII guard that bounds AST-evaluation recursion depth. Incremented on
+/// entry to `eval_expr`/`exec_stmt`, decremented on scope exit (including the
+/// `?` early-return paths), so a pathological AST returns an error instead of
+/// overflowing the worker-thread stack.
+struct EvalDepthGuard<'a>(&'a std::cell::Cell<usize>);
+impl<'a> EvalDepthGuard<'a> {
+    fn enter(cell: &'a std::cell::Cell<usize>) -> Result<Self, String> {
+        let d = cell.get();
+        if d >= MAX_EVAL_DEPTH {
+            return Err(EVAL_TOO_DEEP_MSG.to_string());
+        }
+        cell.set(d + 1);
+        Ok(EvalDepthGuard(cell))
+    }
+}
+impl Drop for EvalDepthGuard<'_> {
+    fn drop(&mut self) {
+        self.0.set(self.0.get().saturating_sub(1));
+    }
+}
+
+/// RAII guard bounding closure call nesting AND total invocation count,
+/// independent of [`EvalDepthGuard`] — see [`MAX_CALL_DEPTH`] and
+/// [`MAX_CALL_COUNT`] for why expression-eval depth alone doesn't cover
+/// either the call-tree depth or its total size.
+struct CallGuard<'a>(&'a std::cell::Cell<usize>);
+impl<'a> CallGuard<'a> {
+    fn enter(ctx: &'a PainlessCtx) -> Result<Self, String> {
+        let depth = ctx.call_depth.get();
+        if depth >= MAX_CALL_DEPTH {
+            return Err(CALL_TOO_DEEP_MSG.to_string());
+        }
+        let count = ctx.call_count.get();
+        if count >= MAX_CALL_COUNT {
+            return Err(TOO_MANY_CALLS_MSG.to_string());
+        }
+        ctx.call_depth.set(depth + 1);
+        ctx.call_count.set(count + 1);
+        Ok(CallGuard(&ctx.call_depth))
+    }
+}
+impl Drop for CallGuard<'_> {
+    fn drop(&mut self) {
+        self.0.set(self.0.get().saturating_sub(1));
+    }
+}
+
+// ── Compiled-script cache ────────────────────────────────────────────────────
+//
+// A script is evaluated once per *document*. Tokenizing and parsing it per
+// document made the per-doc cost scale with the script's SIZE rather than
+// with its complexity: a legal 64 KiB script (see [`MAX_SCRIPT_LEN`]) cost
+// ~2 ms/doc, essentially all of it re-parsing an AST identical to the one
+// built for the previous document. That is also what made the doc-scan's
+// cooperative timeout ineffective — `scan_stored_section_into` polls its
+// deadline every N docs on the assumption that per-doc work is a few
+// microseconds, so a 2 ms/doc script stretched the uninterruptible quantum
+// from milliseconds to seconds and a `timeout` could not cut the scan short.
+//
+// Scripts are pure source text, so the AST is a pure function of the source
+// and can simply be memoised. The cache MUST be bounded: the key is
+// attacker-supplied source, so an unbounded map is itself a memory-exhaustion
+// vector — a caller need only issue queries with unique scripts.
+
+/// Maximum number of distinct compiled scripts retained at once.
+const MAX_SCRIPT_CACHE_ENTRIES: usize = 128;
+
+/// Maximum total *source* bytes retained across cached entries. Bounds the
+/// cache independently of the entry count, since [`MAX_SCRIPT_LEN`] allows a
+/// single 64 KiB script and 128 of those would be 8 MiB of source (and a
+/// considerably larger multiple of that in AST nodes).
+const MAX_SCRIPT_CACHE_SRC_BYTES: usize = 512 * 1024;
+
+/// A parse result shared between evaluations. Parse *failures* are cached
+/// too — a syntactically invalid script is also evaluated once per document,
+/// so leaving errors uncached would leave the same per-doc parse cost (and
+/// the same unbounded quantum) reachable through a malformed script.
+///
+/// `Rc`, not `Arc`, because [`Stmt::FnDecl`]/[`Expr::Lambda`] bodies are
+/// themselves `Rc`-shared — deliberately non-atomic, since a closure literal
+/// is cloned on every invocation. The cache is therefore per-thread (see
+/// [`SCRIPT_CACHE`]) rather than a shared static.
+type CompiledScript = Rc<Result<Vec<Stmt>, String>>;
+
+#[derive(Default)]
+struct ScriptCache {
+    entries: HashMap<String, CompiledScript>,
+    /// Sum of `entries`' key lengths; maintained incrementally.
+    src_bytes: usize,
+}
+
+impl ScriptCache {
+    fn insert(&mut self, src: &str, compiled: CompiledScript) {
+        // Never cacheable on its own — would evict everything and still not fit.
+        if src.len() > MAX_SCRIPT_CACHE_SRC_BYTES || self.entries.contains_key(src) {
+            return;
+        }
+        // Evict (in arbitrary hash order — the workload is "one script for a
+        // whole query", so recency bookkeeping buys nothing worth its cost)
+        // until the newcomer fits under BOTH bounds.
+        while self.entries.len() >= MAX_SCRIPT_CACHE_ENTRIES
+            || self.src_bytes.saturating_add(src.len()) > MAX_SCRIPT_CACHE_SRC_BYTES
+        {
+            let Some(victim) = self.entries.keys().next().cloned() else {
+                // Empty and still over budget is impossible given the guard
+                // above, but never spin.
+                return;
+            };
+            self.entries.remove(&victim);
+            self.src_bytes = self.src_bytes.saturating_sub(victim.len());
+        }
+        self.src_bytes = self.src_bytes.saturating_add(src.len());
+        self.entries.insert(src.to_string(), compiled);
+    }
+}
+
+thread_local! {
+    /// One cache per thread. A compiled AST contains `Rc`s and so cannot
+    /// cross threads; a `Mutex<Arc<...>>` would not help, since the `Rc`s
+    /// *inside* the AST are the non-`Sync` part.
+    ///
+    /// The bound is therefore per-thread, and the total is bounded by
+    /// (search worker threads) × [`MAX_SCRIPT_CACHE_SRC_BYTES`] — still a
+    /// fixed ceiling, because the worker pool is sized from the core count,
+    /// not from the request rate. Per-thread caching also removes the lock
+    /// from a path taken once per document, and each worker scanning the
+    /// same segment converges on the same one entry.
+    static SCRIPT_CACHE: RefCell<ScriptCache> = RefCell::new(ScriptCache::default());
+}
+
+fn compile_script(src: &str) -> Result<Vec<Stmt>, String> {
+    let toks = tokenize(src)?;
+    let mut p = Parser::new(&toks);
+    p.parse_program()
+}
+
+/// Tokenize + parse `src`, reusing a previously compiled AST when possible.
+fn compile_script_cached(src: &str) -> CompiledScript {
+    SCRIPT_CACHE.with(|cache| {
+        // Borrow, look up, release — the insert below needs a fresh mutable
+        // borrow, and `compile_script` must not run while either is held.
+        let hit = cache.borrow().entries.get(src).map(Rc::clone);
+        if let Some(hit) = hit {
+            return hit;
+        }
+        let compiled: CompiledScript = Rc::new(compile_script(src));
+        cache.borrow_mut().insert(src, Rc::clone(&compiled));
+        compiled
+    })
+}
+
+/// Validate a script against the parser/length resource limits WITHOUT running
+/// it, so the request layer can reject an abusive script with a 400 up front.
+///
+/// Returns `Err` **only** for limit violations (source too long, or nesting
+/// depth beyond [`MAX_PARSE_DEPTH`] or [`MAX_EVAL_DEPTH`]). Ordinary syntax errors — including
+/// constructs outside our Painless subset — return `Ok(())` so they keep
+/// degrading gracefully at runtime (unchanged behavior), rather than becoming
+/// spurious 400s that would break otherwise-passing requests.
+pub fn check_script_limits(src: &str) -> Result<(), String> {
+    if src.len() > MAX_SCRIPT_LEN {
+        return Err(format!(
+            "compile error: script source is {} bytes, exceeds the {}-byte limit",
+            src.len(),
+            MAX_SCRIPT_LEN
+        ));
+    }
+    // Anything other than a depth violation — including tokenizer errors and
+    // constructs outside our subset — is a plain syntax problem, so let the
+    // runtime path handle it (don't 400). Compiled through the cache so that
+    // repeated admission checks of the same script are free; whether the
+    // evaluating thread reuses this entry depends on which one it is.
+    match &*compile_script_cached(src) {
+        Err(e) if e == TOO_DEEP_MSG || e == EVAL_TOO_DEEP_MSG => Err(e.clone()),
+        _ => Ok(()),
+    }
+}
+
+/// Evaluate a Painless script.
+///
+/// Every resource-limit failure is *also* recorded against the enclosing
+/// [`with_script_fault_capture`] scope on the way out, so the many call sites
+/// that legitimately swallow the `Err` (to keep out-of-subset scripts
+/// degrading gracefully) cannot turn a refused evaluation into a plausible
+/// wrong value that nobody ever notices.
+pub fn eval_painless(src: &str, ctx: &PainlessCtx) -> Result<PainlessValue, String> {
+    // A resource limit is a per-*evaluation* budget, and a request evaluates
+    // scripts once per document (per clause, per aggregation bucket, ...). So
+    // without this, "bounded" would mean bounded × the number of documents:
+    // the issue's repro is refused after ~14 ms on each of them, and a
+    // `bool` query may carry any number of distinct `script` clauses. Once one
+    // evaluation in this request has tripped a limit the response is already a
+    // 400 — every later evaluation is work with nowhere to go, so it is
+    // refused immediately with the same error. That makes ONE budget the bound
+    // for the whole request.
+    if let Some(fault) = pending_script_fault() {
+        return Err(fault);
+    }
+    let out = eval_painless_inner(src, ctx);
+    if let Err(msg) = &out {
+        if is_resource_limit_error(msg) {
+            record_script_fault(msg);
+        }
+    }
+    out
+}
+
+fn eval_painless_inner(src: &str, ctx: &PainlessCtx) -> Result<PainlessValue, String> {
+    if src.len() > MAX_SCRIPT_LEN {
+        return Err(format!(
+            "{SOURCE_TOO_LONG_PREFIX}{} bytes, exceeds the {}-byte limit",
+            src.len(),
+            MAX_SCRIPT_LEN
+        ));
+    }
+    // Compiled once per distinct source, not once per document. The AST is
+    // shared (and immutable), so execution still gets its own `env` and its
+    // own `ctx` counters — the closure guards below are per-evaluation.
+    let compiled = compile_script_cached(src);
+    let stmts = match &*compiled {
+        Ok(stmts) => stmts,
+        Err(e) => return Err(e.clone()),
+    };
+    let mut env: HashMap<String, PainlessValue> = HashMap::new();
+    exec_body(stmts, ctx, &mut env)
+}
+
+/// Run a statement list with implicit-last-value return semantics: an
+/// explicit `return X;` short-circuits with `X`; otherwise the value of the
+/// last executed statement is returned. Shared by the top-level script body
+/// and by closure (local function / lambda) invocation.
+fn exec_body(
+    stmts: &[Stmt],
+    ctx: &PainlessCtx,
+    env: &mut HashMap<String, PainlessValue>,
+) -> Result<PainlessValue, String> {
+    let mut last: PainlessValue = PainlessValue::Null;
+    for stmt in stmts {
+        match exec_stmt(stmt, ctx, env)? {
+            ExecOutcome::Return(v) => return Ok(v),
+            ExecOutcome::Value(v) => last = v,
+        }
+    }
+    Ok(last)
+}
+
+#[cfg(feature = "stackprobe")]
+thread_local! {
+    /// (max_depth_seen, stack addr at call depth 1, min stack addr seen)
+    pub static STACK_PROBE: std::cell::Cell<(usize, usize, usize)> =
+        const { std::cell::Cell::new((0, 0, usize::MAX)) };
+}
+
+/// Invoke a closure (local function or lambda) with the given positional
+/// arguments, in a fresh scope seeded only with the bound parameters — no
+/// access to the caller's locals, matching the target scripts' needs
+/// (functional-interface bodies only ever reference `doc`/`params`/`_score`,
+/// which come from `ctx`, not the enclosing `env`).
+fn call_closure(
+    params: &[String],
+    body: &[Stmt],
+    args: &[PainlessValue],
+    ctx: &PainlessCtx,
+) -> Result<PainlessValue, String> {
+    let _guard = CallGuard::enter(ctx)?;
+    #[cfg(feature = "stackprobe")]
+    {
+        let probe = 0u8;
+        let addr = &probe as *const u8 as usize;
+        STACK_PROBE.with(|p| {
+            let (d, top, min) = p.get();
+            let depth = ctx.call_depth.get();
+            let top = if depth == 1 { addr } else { top };
+            p.set((d.max(depth), top, min.min(addr)));
+        });
+    }
+    if args.len() != params.len() {
+        return Err(format!(
+            "wrong number of arguments: expected {}, got {}",
+            params.len(),
+            args.len()
+        ));
+    }
+    let mut local_env: HashMap<String, PainlessValue> = HashMap::new();
+    for (p, a) in params.iter().zip(args.iter()) {
+        local_env.insert(p.clone(), a.clone());
+    }
+    exec_body(body, ctx, &mut local_env)
+}
+
+enum ExecOutcome {
+    Return(PainlessValue),
+    Value(PainlessValue),
+}
+
+fn exec_stmt(
+    s: &Stmt,
+    ctx: &PainlessCtx,
+    env: &mut HashMap<String, PainlessValue>,
+) -> Result<ExecOutcome, String> {
+    ctx.charge(1)?;
+    match s {
+        Stmt::Return(opt) => {
+            let v = match opt {
+                Some(e) => eval_expr(e, ctx, env)?,
+                None => PainlessValue::Null,
+            };
+            Ok(ExecOutcome::Return(v))
+        }
+        Stmt::Expr(e) => Ok(ExecOutcome::Value(eval_expr(e, ctx, env)?)),
+        Stmt::If(cond, then_b, else_b) => {
+            let cv = eval_expr(cond, ctx, env)?;
+            let body = if cv.as_bool() { then_b } else { else_b };
+            for stmt in body {
+                match exec_stmt(stmt, ctx, env)? {
+                    o @ ExecOutcome::Return(_) => return Ok(o),
+                    ExecOutcome::Value(_) => {}
+                }
+            }
+            Ok(ExecOutcome::Value(PainlessValue::Null))
+        }
+        Stmt::Block(stmts) => {
+            for st in stmts {
+                match exec_stmt(st, ctx, env)? {
+                    o @ ExecOutcome::Return(_) => return Ok(o),
+                    ExecOutcome::Value(_) => {}
+                }
+            }
+            Ok(ExecOutcome::Value(PainlessValue::Null))
+        }
+        Stmt::FnDecl(name, params, body) => {
+            env.insert(
+                name.clone(),
+                PainlessValue::Closure(params.clone(), body.clone()),
+            );
+            Ok(ExecOutcome::Value(PainlessValue::Null))
+        }
+    }
+}
+
+fn eval_expr(
+    e: &Expr,
+    ctx: &PainlessCtx,
+    env: &mut HashMap<String, PainlessValue>,
+) -> Result<PainlessValue, String> {
+    let _guard = EvalDepthGuard::enter(&ctx.eval_depth)?;
+    // One work unit per interpreter step. Steps alone do not bound work (see
+    // `MAX_SCRIPT_OPS`), so the value-producing arms below additionally charge
+    // for what they produce.
+    ctx.charge(1)?;
+    match e {
+        Expr::Number(n) => Ok(PainlessValue::Number(*n)),
+        Expr::String(s) => Ok(PainlessValue::String(s.clone())),
+        Expr::Bool(b) => Ok(PainlessValue::Bool(*b)),
+        Expr::Null => Ok(PainlessValue::Null),
+        Expr::Ident(name) => {
+            if let Some(v) = env.get(name) {
+                // Reading a local *copies* it. `def s = <4 MiB>; s; s; s;` is
+                // three cheap-looking steps and 12 MiB of copying.
+                let v = v.clone();
+                ctx.charge(value_work_units(&v))?;
+                return Ok(v);
+            }
+            match name.as_str() {
+                "_score" => Ok(PainlessValue::Number(ctx.score as f64)),
+                "doc" => Ok(PainlessValue::Null), // marker; resolved via Member/Index
+                "params" => Ok(PainlessValue::Null), // marker; resolved via Member
+                _ => Err(format!("unknown identifier '{}'", name)),
+            }
+        }
+        Expr::Assign(name, val, _is_decl) => {
+            let v = eval_expr(val, ctx, env)?;
+            // The binding keeps one copy and the expression yields another.
+            ctx.charge(value_work_units(&v))?;
+            env.insert(name.clone(), v.clone());
+            Ok(v)
+        }
+        Expr::Lambda(params, body) => Ok(PainlessValue::Closure(params.clone(), body.clone())),
+        Expr::Unary(op, x) => {
+            let v = eval_expr(x, ctx, env)?;
+            match op.as_str() {
+                "-" => v
+                    .as_f64()
+                    .map(|n| PainlessValue::Number(-n))
+                    .ok_or_else(|| "cannot apply unary '-' to a non-numeric value".to_string()),
+                "!" => Ok(PainlessValue::Bool(!v.as_bool())),
+                _ => Err(format!("bad unary {op}")),
+            }
+        }
+        Expr::Binary(op, a, b) => eval_binary_chain(op, a, b, ctx, env),
+        Expr::Ternary(c, t, f) => {
+            let cv = eval_expr(c, ctx, env)?;
+            if cv.as_bool() {
+                eval_expr(t, ctx, env)
+            } else {
+                eval_expr(f, ctx, env)
+            }
+        }
+        Expr::Index(_, _) | Expr::Member(_, _, _) => eval_access_chain(e, ctx, env),
+        Expr::Call(name, args) => {
+            let argvs: Vec<PainlessValue> = args
+                .iter()
+                .map(|a| eval_expr(a, ctx, env))
+                .collect::<Result<_, _>>()?;
+            // A local function (or a variable bound to a lambda) shadows
+            // the builtin call table.
+            if let Some(PainlessValue::Closure(params, body)) = env.get(name) {
+                return call_closure(params, body, &argvs, ctx);
+            }
+            global_call(name, &argvs, ctx)
+        }
+    }
+}
+
+/// Evaluate the parser's left-associative binary spine without mirroring it on
+/// the native stack. Right-hand operands still use `eval_expr`; grammar
+/// recursion bounds those subtrees, while this loop handles the only
+/// unbounded binary shape the parser can construct.
+fn eval_binary_chain(
+    root_op: &str,
+    root_left: &Expr,
+    root_right: &Expr,
+    ctx: &PainlessCtx,
+    env: &mut HashMap<String, PainlessValue>,
+) -> Result<PainlessValue, String> {
+    let mut pending = vec![(root_op, root_right)];
+    let mut left = root_left;
+    while let Expr::Binary(op, next_left, right) = left {
+        pending.push((op.as_str(), right.as_ref()));
+        if pending.len() >= MAX_EVAL_DEPTH {
+            return Err(EVAL_TOO_DEEP_MSG.to_string());
+        }
+        left = next_left;
+    }
+
+    let mut value = eval_expr(left, ctx, env)?;
+    for (op, right) in pending.into_iter().rev() {
+        if op == "&&" && !value.as_bool() {
+            value = PainlessValue::Bool(false);
+            continue;
+        }
+        if op == "||" && value.as_bool() {
+            value = PainlessValue::Bool(true);
+            continue;
+        }
+        let right = eval_expr(right, ctx, env)?;
+        value = apply_binary(op, value, right)?;
+        // `+` on strings builds a whole new string from both operands, so a
+        // chain of concatenations costs bytes copied rather than steps taken —
+        // and none of that is visible in the statement count. Charging the
+        // result is what prices it.
+        ctx.charge(value_work_units(&value))?;
+    }
+    Ok(value)
+}
+
+/// Evaluate a left-nested member/index chain without mirroring its postfix
+/// depth on the native stack.
+///
+/// The parser has already enforced the exact [`MAX_EVAL_DEPTH`] contract.
+/// This loop preserves the original evaluator's ordering: general indices
+/// evaluate base before key, `doc`/`params` special indices evaluate their key
+/// directly, and method arguments are evaluated only for the same dispatches
+/// that consumed them before this reliability fix.
+fn eval_access_chain(
+    root: &Expr,
+    ctx: &PainlessCtx,
+    env: &mut HashMap<String, PainlessValue>,
+) -> Result<PainlessValue, String> {
+    enum Step<'a> {
+        Index(&'a Expr),
+        Member(&'a str, &'a Option<Vec<Expr>>),
+    }
+
+    let mut steps = Vec::new();
+    let mut base = root;
+    loop {
+        match base {
+            Expr::Index(next_base, index) => {
+                steps.push(Step::Index(index));
+                base = next_base;
+            }
+            Expr::Member(next_base, member, args) => {
+                steps.push(Step::Member(member, args));
+                base = next_base;
+            }
+            _ => break,
+        }
+    }
+    steps.reverse();
+
+    let root_ident = match base {
+        Expr::Ident(name) => Some(name.as_str()),
+        _ => None,
+    };
+    let mut value = None;
+    for (position, step) in steps.into_iter().enumerate() {
+        // Roots the interpreter resolves itself, without a preceding value.
+        // These produce a value like any other step, so they must reach the
+        // charge below — an earlier revision of this budget `continue`d
+        // straight past it, which left `params.big` and `params['_source']`
+        // costing two work units for an arbitrarily large materialisation and
+        // reopened the exact hole the budget exists to close.
+        let resolved_root = if position == 0 {
+            match (root_ident, &step) {
+                (Some("doc"), Step::Index(index)) => {
+                    let key = access_key(eval_expr(index, ctx, env)?)?;
+                    Some(PainlessValue::String(format!("__docref__:{key}")))
+                }
+                (Some("params"), Step::Index(index)) => {
+                    let key = access_key(eval_expr(index, ctx, env)?)?;
+                    Some(if key == "_source" {
+                        // A whole-document clone behind an O(1)-looking
+                        // expression. Weighed before it is built, so the
+                        // budget bounds how many times it can be built rather
+                        // than paying for one first and asking afterwards.
+                        charge_document_read(ctx)?;
+                        let mut source = ctx.doc.clone();
+                        argos_query::executor::strip_internal_passage_metadata(&mut source);
+                        PainlessValue::from_json(&source)
+                    } else {
+                        charged_params_read(ctx, &key)?
+                    })
+                }
+                (Some("doc"), Step::Member(member, args)) if args.is_none() => {
+                    Some(PainlessValue::String(format!("__docref__:{member}")))
+                }
+                (Some("params"), Step::Member(member, args)) if args.is_none() => {
+                    Some(charged_params_read(ctx, member)?)
+                }
+                (Some("Math"), Step::Member(member, args)) => {
+                    let argvs = eval_args(args, ctx, env)?;
+                    Some(math_call(member, &argvs)?)
+                }
+                _ => None,
+            }
+        } else {
+            None
+        };
+
+        let produced = match resolved_root {
+            Some(produced) => produced,
+            None => {
+                let current = match value.take() {
+                    Some(value) => value,
+                    None => eval_expr(base, ctx, env)?,
+                };
+                match step {
+                    Step::Index(index) => {
+                        let key = eval_expr(index, ctx, env)?;
+                        match (current, key) {
+                            (PainlessValue::Array(values), PainlessValue::Number(index)) => values
+                                .get(index as usize)
+                                .cloned()
+                                .unwrap_or(PainlessValue::Null),
+                            _ => PainlessValue::Null,
+                        }
+                    }
+                    Step::Member(member, args) => {
+                        eval_member_value(current, member, args, ctx, env)?
+                    }
+                }
+            }
+        };
+        // Every step here can materialise an arbitrarily large value:
+        // `params['_source']` clones the whole document, `.toString()` renders
+        // it, a member read clones a subtree. Charge for what came out. This
+        // charge covers EVERY step, root-resolving fast paths included.
+        ctx.charge(value_work_units(&produced))?;
+        value = Some(produced);
+    }
+    value.ok_or_else(|| "internal error: empty access chain".to_string())
+}
+
+fn access_key(value: PainlessValue) -> Result<String, String> {
+    match value {
+        PainlessValue::String(value) => Ok(value),
+        PainlessValue::Number(value) => Ok(format_num(value)),
+        other => Err(format!("non-string index: {other:?}")),
+    }
+}
+
+fn eval_args(
+    args: &Option<Vec<Expr>>,
+    ctx: &PainlessCtx,
+    env: &mut HashMap<String, PainlessValue>,
+) -> Result<Vec<PainlessValue>, String> {
+    match args {
+        Some(args) => args.iter().map(|arg| eval_expr(arg, ctx, env)).collect(),
+        None => Ok(Vec::new()),
+    }
+}
+
+fn eval_member_value(
+    value: PainlessValue,
+    member: &str,
+    args: &Option<Vec<Expr>>,
+    ctx: &PainlessCtx,
+    env: &mut HashMap<String, PainlessValue>,
+) -> Result<PainlessValue, String> {
+    // Functional-interface call on a closure value — `s.get()`,
+    // `fn.apply(x)`, `pred.test(x)`, ... The interface method name is
+    // irrelevant to a dynamically-typed interpreter; only the positional
+    // args matter, so any `.method(args)` call on a closure invokes it. A
+    // member access with no call parens (`s.get` without `()`) doesn't
+    // invoke anything real Painless functional interfaces expose, so it
+    // falls through to the error below same as today.
+    if let PainlessValue::Closure(params, body) = &value {
+        if let Some(args) = args {
+            let argvs: Vec<PainlessValue> = args
+                .iter()
+                .map(|a| eval_expr(a, ctx, env))
+                .collect::<Result<_, _>>()?;
+            return call_closure(params, body, &argvs, ctx);
+        }
+    }
+    if let PainlessValue::String(text) = &value {
+        if let Some(field) = text.strip_prefix("__docref__:") {
+            return resolve_doc_member(ctx, field, member, args, env);
+        }
+        match member {
+            "length" => return Ok(PainlessValue::Number(text.chars().count() as f64)),
+            "toString" => return Ok(PainlessValue::String(text.clone())),
+            "toLowerCase" => return Ok(PainlessValue::String(text.to_lowercase())),
+            "toUpperCase" => return Ok(PainlessValue::String(text.to_uppercase())),
+            "getHour" | "getMinute" | "getSecond" | "getDayOfMonth" | "getMonthValue"
+            | "getYear" | "getDayOfWeek" | "getDayOfWeekEnum" => {
+                if let Some(milliseconds) = date_value_millis(text) {
+                    return date_component(milliseconds, member);
+                }
+            }
+            // `DayOfWeek.getDisplayName(TextStyle.FULL, Locale.ROOT)` —
+            // this interpreter has no enum/locale value types, so
+            // `getDayOfWeekEnum()` already returns the display-ready name
+            // (see date_component); the style/locale args are accepted and
+            // ignored, returning that name unchanged.
+            "getDisplayName" => return Ok(PainlessValue::String(text.clone())),
+            _ => {}
+        }
+    }
+    if let PainlessValue::Object(map) = &value {
+        match member {
+            "toString" => return Ok(PainlessValue::String(render_es_map(map))),
+            "size" => return Ok(PainlessValue::Number(map.len() as f64)),
+            "isEmpty" => return Ok(PainlessValue::Bool(map.is_empty())),
+            _ if args.is_none() => {
+                if let Some(value) = map.get(member) {
+                    return Ok(PainlessValue::from_json(value));
+                }
+            }
+            _ => {}
+        }
+    }
+    if let PainlessValue::Array(values) = &value {
+        match member {
+            "size" | "length" => return Ok(PainlessValue::Number(values.len() as f64)),
+            "isEmpty" => return Ok(PainlessValue::Bool(values.is_empty())),
+            _ => {}
+        }
+    }
+    Err(format!("unsupported member access .{member}"))
+}
+
+fn apply_binary(
+    op: &str,
+    left: PainlessValue,
+    right: PainlessValue,
+) -> Result<PainlessValue, String> {
+    if op == "&&" {
+        return Ok(PainlessValue::Bool(left.as_bool() && right.as_bool()));
+    }
+    if op == "||" {
+        return Ok(PainlessValue::Bool(left.as_bool() || right.as_bool()));
+    }
+
+    // String concatenation for `+`.
+    if op == "+"
+        && (matches!(left, PainlessValue::String(_)) || matches!(right, PainlessValue::String(_)))
+    {
+        let render = |value: &PainlessValue| match value {
+            PainlessValue::String(s) => s.clone(),
+            PainlessValue::Number(n) => format_num(*n),
+            PainlessValue::Bool(b) => b.to_string(),
+            _ => "null".to_string(),
+        };
+        let left_r = render(&left);
+        let right_r = render(&right);
+        if left_r.len().saturating_add(right_r.len()) > MAX_PAINLESS_STRING_LEN {
+            return Err(format!(
+                "string concatenation result exceeds the {MAX_PAINLESS_STRING_LEN}-byte limit"
+            ));
+        }
+        return Ok(PainlessValue::String(format!("{left_r}{right_r}")));
+    }
+
+    // ES Painless compares Strings as strings. Equality is false across
+    // unlike types; relational comparisons between two strings use lexical
+    // ordering in this intentionally graceful subset.
+    let left_is_string = matches!(left, PainlessValue::String(_));
+    let right_is_string = matches!(right, PainlessValue::String(_));
+    if left_is_string || right_is_string {
+        match op {
+            "==" | "!=" => {
+                let equal = match (&left, &right) {
+                    (PainlessValue::String(x), PainlessValue::String(y)) => x == y,
+                    _ => false,
+                };
+                return Ok(PainlessValue::Bool(if op == "==" { equal } else { !equal }));
+            }
+            "<" | "<=" | ">" | ">=" if left_is_string && right_is_string => {
+                if let (PainlessValue::String(x), PainlessValue::String(y)) = (&left, &right) {
+                    let ordering = x.cmp(y);
+                    let result = match op {
+                        "<" => ordering == std::cmp::Ordering::Less,
+                        "<=" => ordering != std::cmp::Ordering::Greater,
+                        ">" => ordering == std::cmp::Ordering::Greater,
+                        _ => ordering != std::cmp::Ordering::Less,
+                    };
+                    return Ok(PainlessValue::Bool(result));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // Null-aware equality. `params` is a `Map<String, Object>` in real
+    // Painless, so a key that wasn't supplied reads as `null` and
+    // `params.y == null` is an ordinary reference comparison that yields a
+    // boolean — the numeric coercion below would otherwise reject the null
+    // operand and turn every params-guarded script into an error.
+    //
+    // Only `==`/`!=` are null-aware. Real Painless's *relational* operators
+    // and arithmetic unbox their operands and throw on a null, and so do
+    // ours (below) — which is what keeps a typo'd field name from matching
+    // every document.
+    if matches!(op, "==" | "!=")
+        && (matches!(left, PainlessValue::Null) || matches!(right, PainlessValue::Null))
+    {
+        let equal = matches!((&left, &right), (PainlessValue::Null, PainlessValue::Null));
+        return Ok(PainlessValue::Bool(if op == "==" { equal } else { !equal }));
+    }
+
+    // A value that can't coerce to a number (most commonly `Null` — a
+    // missing `params` field) errors rather than silently acting as
+    // 0: real Painless throws unboxing a null into a primitive, and a
+    // script that quietly matched-as-zero on every doc with a typo'd field
+    // name would be far worse than one that errors and excludes the doc.
+    let left = left
+        .as_f64()
+        .ok_or_else(|| format!("cannot apply '{op}' to a non-numeric value"))?;
+    let right = right
+        .as_f64()
+        .ok_or_else(|| format!("cannot apply '{op}' to a non-numeric value"))?;
+    let value = match op {
+        "+" => left + right,
+        "-" => left - right,
+        "*" => left * right,
+        "/" => {
+            if right == 0.0 {
+                f64::NAN
+            } else {
+                left / right
+            }
+        }
+        "%" => {
+            if right == 0.0 {
+                f64::NAN
+            } else {
+                left % right
+            }
+        }
+        "<" => return Ok(PainlessValue::Bool(left < right)),
+        "<=" => return Ok(PainlessValue::Bool(left <= right)),
+        ">" => return Ok(PainlessValue::Bool(left > right)),
+        ">=" => return Ok(PainlessValue::Bool(left >= right)),
+        "==" => return Ok(PainlessValue::Bool(left == right)),
+        "!=" => return Ok(PainlessValue::Bool(left != right)),
+        _ => return Err(format!("bad binary {op}")),
+    };
+    Ok(PainlessValue::Number(value))
+}
+
+fn format_num(n: f64) -> String {
+    if (n - n.trunc()).abs() < f64::EPSILON && n.abs() < 1e16 {
+        format!("{}", n as i64)
+    } else {
+        format!("{}", n)
+    }
+}
+
+/// Render a serde_json::Map as ES's HashMap.toString format
+/// (`{key=value, key=value, ...}`). Keys are emitted in INSERTION
+/// order — matches Java LinkedHashMap.toString and ES's runtime
+/// field rendering of `params['_source']`.
+fn render_es_map(map: &serde_json::Map<String, Value>) -> String {
+    fn render_val(v: &Value) -> String {
+        match v {
+            Value::Null => "null".to_string(),
+            Value::Bool(b) => b.to_string(),
+            Value::Number(n) => format_num(n.as_f64().unwrap_or(0.0)),
+            Value::String(s) => s.clone(),
+            Value::Array(arr) => {
+                let parts: Vec<String> = arr.iter().map(render_val).collect();
+                format!("[{}]", parts.join(", "))
+            }
+            Value::Object(o) => render_es_map(o),
+        }
+    }
+    let mut parts: Vec<String> = Vec::with_capacity(map.len());
+    for (k, v) in map {
+        parts.push(format!("{}={}", k, render_val(v)));
+    }
+    format!("{{{}}}", parts.join(", "))
+}
+
+fn resolve_doc_member(
+    ctx: &PainlessCtx,
+    field: &str,
+    member: &str,
+    args: &Option<Vec<Expr>>,
+    _env: &mut HashMap<String, PainlessValue>,
+) -> Result<PainlessValue, String> {
+    let raw = charged_doc_value(ctx, field)?;
+    match member {
+        "value" => {
+            // Return first scalar. A field that's genuinely missing (or a
+            // multi-valued field with zero actual values) ERRORS — this is
+            // literally what Elasticsearch does: since 7.0, an empty
+            // `ScriptDocValues` throws
+            //   "A document doesn't have a value for a field! Use
+            //    doc[<field>].size()==0 to check if a document is missing a
+            //    field!"
+            // (6.x returned a type default with a deprecation warning; 7.0
+            // removed that). Returning `null` here instead would be neither
+            // ES's behaviour nor safe: callers (script query filter,
+            // script_score, ...) treat an error as "doesn't match" /
+            // "no-op score", so erroring is what keeps `doc['typo'].value > -1`
+            // from matching every document.
+            //
+            // Guarding a field that isn't on every document therefore uses
+            // ES's own documented idiom — `doc['x'].size() == 0 ? <default>
+            // : doc['x'].value` — which works because `.size()` (below) is
+            // defined on a missing field and the ternary only evaluates the
+            // branch it takes. `params.<key> == null` still works too, since
+            // `params` really is a nullable map (see `apply_binary`).
+            let missing = || {
+                format!(
+                    "A document doesn't have a value for a field! \
+                     Use doc[{field}].size()==0 to check if a document is missing a field!"
+                )
+            };
+            match raw {
+                Value::Array(arr) => arr
+                    .first()
+                    .map(PainlessValue::from_json)
+                    .ok_or_else(missing),
+                Value::Number(n) => Ok(PainlessValue::Number(n.as_f64().unwrap_or(0.0))),
+                Value::String(s) => Ok(PainlessValue::String(s)),
+                Value::Bool(b) => Ok(PainlessValue::Bool(b)),
+                _ => Err(missing()),
+            }
+        }
+        // `.size()` / `.length` / `.empty` are defined on a MISSING field —
+        // they are how a script asks whether the field is there at all, so
+        // they must never error. This is the other half of the fail-closed
+        // contract on `.value` above.
+        "size" | "length" => {
+            if args.is_some() {
+                // doc[...].size() with explicit call
+            }
+            let len = match raw {
+                Value::Array(arr) => arr.len(),
+                Value::Null => 0,
+                _ => 1,
+            };
+            Ok(PainlessValue::Number(len as f64))
+        }
+        "empty" => {
+            let len = match raw {
+                Value::Array(arr) => arr.len(),
+                Value::Null => 0,
+                _ => 1,
+            };
+            Ok(PainlessValue::Bool(len == 0))
+        }
+        _ => Err(format!("unsupported doc member .{}", member)),
+    }
+}
+
+/// Parse an ISO-8601-ish date string into epoch milliseconds (UTC),
+/// reusing the same parser aggregations use for date fields so a date's
+/// script-accessor components (getHour, getDayOfWeek, ...) agree with
+/// how the same value is bucketed elsewhere.
+fn date_value_millis(s: &str) -> Option<i64> {
+    crate::aggs::parse_date_ms(&Value::String(s.to_string()))
+}
+
+/// Extract one Java `ZonedDateTime`-style component (UTC) from an epoch-ms
+/// value, for the `doc['a_date_field'].value.getXxx()` accessor family.
+fn date_component(ms: i64, member: &str) -> Result<PainlessValue, String> {
+    use chrono::{Datelike, Timelike};
+    let dt = chrono::DateTime::<chrono::Utc>::from_timestamp_millis(ms)
+        .ok_or_else(|| format!("invalid date value for .{}", member))?;
+    // `getDayOfWeekEnum()` returns Java's `DayOfWeek` enum, not a number —
+    // handled separately since this interpreter has no enum value type.
+    // Callers pair it with `.getDisplayName(TextStyle.FULL, Locale.ROOT)`
+    // (e.g. OpenSearch Dashboards' own UBI sample index-pattern scripted
+    // fields); rather than modeling `TextStyle`/`Locale` as real values,
+    // this returns the full English name directly and `getDisplayName`
+    // (a passthrough on any string, see eval_member_value) returns it
+    // unchanged, matching that one real call shape without pretending to
+    // support arbitrary locales/styles.
+    if member == "getDayOfWeekEnum" {
+        // Title-cased to match `getDisplayName(TextStyle.FULL, Locale.ROOT)`
+        // directly, the one real call shape this exists for — not Java's
+        // own `DayOfWeek.toString()`, which is upper-cased.
+        let name = match dt.weekday() {
+            chrono::Weekday::Mon => "Monday",
+            chrono::Weekday::Tue => "Tuesday",
+            chrono::Weekday::Wed => "Wednesday",
+            chrono::Weekday::Thu => "Thursday",
+            chrono::Weekday::Fri => "Friday",
+            chrono::Weekday::Sat => "Saturday",
+            chrono::Weekday::Sun => "Sunday",
+        };
+        return Ok(PainlessValue::String(name.to_string()));
+    }
+    let n = match member {
+        "getHour" => dt.hour(),
+        "getMinute" => dt.minute(),
+        "getSecond" => dt.second(),
+        "getDayOfMonth" => dt.day(),
+        "getMonthValue" => dt.month(),
+        "getYear" => dt.year() as u32,
+        // Java DayOfWeek: MONDAY=1 .. SUNDAY=7 (chrono's weekday() already
+        // uses the same Monday-first ordinal via num_days_from_monday).
+        "getDayOfWeek" => dt.weekday().num_days_from_monday() + 1,
+        _ => return Err(format!("unsupported date member .{}", member)),
+    };
+    Ok(PainlessValue::Number(n as f64))
+}
+
+/// [`get_doc_value`] behind the work budget.
+///
+/// Every caller of `get_doc_value` pays a full `doc.clone()` — the function
+/// starts by cloning the whole document and then walks *into* the clone — so
+/// the cost of `doc['rank'].value` is the size of the document, not of the
+/// field. That is O(document) work behind an O(1)-looking expression, and
+/// nothing else in the interpreter charges for it.
+fn charged_doc_value(ctx: &PainlessCtx, field: &str) -> Result<Value, String> {
+    charge_document_read(ctx)?;
+    Ok(get_doc_value(ctx.doc, field))
+}
+
+fn get_doc_value(doc: &Value, field: &str) -> Value {
+    if field.starts_with(argos_query::executor::PASSAGE_METADATA_PREFIX) {
+        return Value::Null;
+    }
+    let parts: Vec<&str> = field.split('.').collect();
+    let mut cur = doc.clone();
+    for part in &parts {
+        match cur {
+            Value::Object(obj) => {
+                cur = obj.get(*part).cloned().unwrap_or(Value::Null);
+            }
+            Value::Array(arr) => {
+                // Re-walk each element and collect.
+                let collected: Vec<Value> = arr
+                    .iter()
+                    .map(|e| {
+                        let mut sub = e.clone();
+                        for p in parts.iter() {
+                            if let Value::Object(obj) = &sub {
+                                sub = obj.get(*p).cloned().unwrap_or(Value::Null);
+                            } else {
+                                sub = Value::Null;
+                                break;
+                            }
+                        }
+                        sub
+                    })
+                    .collect();
+                return Value::Array(collected);
+            }
+            _ => return Value::Null,
+        }
+    }
+    cur
+}
+
+fn math_call(name: &str, args: &[PainlessValue]) -> Result<PainlessValue, String> {
+    let nums: Vec<f64> = args.iter().map(|v| v.as_f64().unwrap_or(0.0)).collect();
+    let r = match (name, nums.len()) {
+        ("max", 2) => nums[0].max(nums[1]),
+        ("min", 2) => nums[0].min(nums[1]),
+        ("abs", 1) => nums[0].abs(),
+        ("log", 1) => nums[0].ln(),
+        ("log10", 1) => nums[0].log10(),
+        ("sqrt", 1) => nums[0].sqrt(),
+        ("pow", 2) => nums[0].powf(nums[1]),
+        ("exp", 1) => nums[0].exp(),
+        ("floor", 1) => nums[0].floor(),
+        ("ceil", 1) => nums[0].ceil(),
+        ("round", 1) => nums[0].round(),
+        ("PI", 0) => std::f64::consts::PI,
+        ("E", 0) => std::f64::consts::E,
+        _ => return Err(format!("unsupported Math.{} arity {}", name, nums.len())),
+    };
+    Ok(PainlessValue::Number(r))
+}
+
+fn global_call(
+    name: &str,
+    args: &[PainlessValue],
+    ctx: &PainlessCtx,
+) -> Result<PainlessValue, String> {
+    match name {
+        "emit" => {
+            // Runtime-field emit — records each call's value into the
+            // ctx accumulator. Script source then returns Null
+            // (irrelevant).
+            for a in args {
+                ctx.emits.borrow_mut().push(a.clone());
+            }
+            Ok(PainlessValue::Null)
+        }
+        "dotProduct" => {
+            // dotProduct(query_vec, 'field') OR dotProduct(query_vec, [doc_vec])
+            if args.len() != 2 {
+                return Err(format!("dotProduct expects 2 args, got {}", args.len()));
+            }
+            let query: Vec<f64> = match &args[0] {
+                PainlessValue::Array(arr) => {
+                    arr.iter().map(|v| v.as_f64().unwrap_or(0.0)).collect()
+                }
+                _ => return Err("dotProduct arg 0 must be array".into()),
+            };
+            let doc_vec: Vec<f64> = match &args[1] {
+                PainlessValue::String(s) => {
+                    // Field reference (literal name).
+                    let raw = charged_doc_value(ctx, s)?;
+                    match raw {
+                        Value::Array(arr) => arr.iter().filter_map(|v| v.as_f64()).collect(),
+                        _ => Vec::new(),
+                    }
+                }
+                PainlessValue::Array(arr) => {
+                    arr.iter().map(|v| v.as_f64().unwrap_or(0.0)).collect()
+                }
+                _ => return Err("dotProduct arg 1 must be field name or array".into()),
+            };
+            if query.len() != doc_vec.len() {
+                return Err(format!(
+                    "dim mismatch: {} vs {}",
+                    query.len(),
+                    doc_vec.len()
+                ));
+            }
+            let dot: f64 = query.iter().zip(doc_vec.iter()).map(|(a, b)| a * b).sum();
+            Ok(PainlessValue::Number(dot))
+        }
+        "cosineSimilarity" => {
+            if args.len() != 2 {
+                return Err("cosineSimilarity expects 2 args".into());
+            }
+            let q: Vec<f64> = match &args[0] {
+                PainlessValue::Array(arr) => {
+                    arr.iter().map(|v| v.as_f64().unwrap_or(0.0)).collect()
+                }
+                _ => return Err("cosineSimilarity arg 0 must be array".into()),
+            };
+            let d: Vec<f64> = match &args[1] {
+                PainlessValue::String(s) => {
+                    let raw = charged_doc_value(ctx, s)?;
+                    match raw {
+                        Value::Array(arr) => arr.iter().filter_map(|v| v.as_f64()).collect(),
+                        _ => Vec::new(),
+                    }
+                }
+                PainlessValue::Array(arr) => {
+                    arr.iter().map(|v| v.as_f64().unwrap_or(0.0)).collect()
+                }
+                _ => return Err("cosineSimilarity arg 1 must be field name".into()),
+            };
+            if q.len() != d.len() {
+                return Err("dim mismatch".into());
+            }
+            let dot: f64 = q.iter().zip(&d).map(|(a, b)| a * b).sum();
+            let nq: f64 = q.iter().map(|v| v * v).sum::<f64>().sqrt();
+            let nd: f64 = d.iter().map(|v| v * v).sum::<f64>().sqrt();
+            let denom = nq * nd;
+            Ok(PainlessValue::Number(if denom > 0.0 {
+                dot / denom
+            } else {
+                0.0
+            }))
+        }
+        "l1norm" | "l1Norm" => {
+            if args.len() != 2 {
+                return Err("l1norm expects 2 args".into());
+            }
+            let q: Vec<f64> = match &args[0] {
+                PainlessValue::Array(arr) => {
+                    arr.iter().map(|v| v.as_f64().unwrap_or(0.0)).collect()
+                }
+                _ => return Err("l1norm arg 0 must be array".into()),
+            };
+            let d: Vec<f64> = match &args[1] {
+                PainlessValue::String(s) => {
+                    let raw = charged_doc_value(ctx, s)?;
+                    match raw {
+                        Value::Array(arr) => arr.iter().filter_map(|v| v.as_f64()).collect(),
+                        _ => Vec::new(),
+                    }
+                }
+                _ => return Err("l1norm arg 1 must be field name".into()),
+            };
+            let s: f64 = q.iter().zip(&d).map(|(a, b)| (a - b).abs()).sum();
+            Ok(PainlessValue::Number(s))
+        }
+        "l2norm" | "l2Norm" => {
+            if args.len() != 2 {
+                return Err("l2norm expects 2 args".into());
+            }
+            let q: Vec<f64> = match &args[0] {
+                PainlessValue::Array(arr) => {
+                    arr.iter().map(|v| v.as_f64().unwrap_or(0.0)).collect()
+                }
+                _ => return Err("l2norm arg 0 must be array".into()),
+            };
+            let d: Vec<f64> = match &args[1] {
+                PainlessValue::String(s) => {
+                    let raw = charged_doc_value(ctx, s)?;
+                    match raw {
+                        Value::Array(arr) => arr.iter().filter_map(|v| v.as_f64()).collect(),
+                        _ => Vec::new(),
+                    }
+                }
+                _ => return Err("l2norm arg 1 must be field name".into()),
+            };
+            let s: f64 = q
+                .iter()
+                .zip(&d)
+                .map(|(a, b)| (a - b).powi(2))
+                .sum::<f64>()
+                .sqrt();
+            Ok(PainlessValue::Number(s))
+        }
+        "sigmoid" => {
+            if args.len() != 1 {
+                return Err("sigmoid expects 1 arg".into());
+            }
+            let x = args[0].as_f64().unwrap_or(0.0);
+            Ok(PainlessValue::Number(1.0 / (1.0 + (-x).exp())))
+        }
+        _ => Err(format!("unsupported function {}", name)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn ctx<'a>(doc: &'a Value, params: &'a Value, score: f32) -> PainlessCtx<'a> {
+        PainlessCtx::new(doc, params, score)
+    }
+
+    #[test]
+    fn doc_value_times_param() {
+        let doc = json!({"num_likes": 150});
+        let params = json!({"multiplier": 10});
+        let v = eval_painless(
+            "doc['num_likes'].value * params.multiplier",
+            &ctx(&doc, &params, 0.0),
+        )
+        .unwrap();
+        assert!((v.as_f64().unwrap() - 1500.0).abs() < 1e-9);
+    }
+
+    // ── Day-of-week display name ────────────────────────────────────────────
+    // Regression coverage for a real gap found live: OpenSearch Dashboards'
+    // own UBI sample index pattern defines a scripted field using
+    // `doc['timestamp'].value.getDayOfWeekEnum().getDisplayName(TextStyle.FULL,
+    // Locale.ROOT)` — only the numeric `getDayOfWeek()` accessor was
+    // supported, so this whole scripted field silently failed to evaluate
+    // (dropped from `fields`, not even a visible error) and its dashboard
+    // panel rendered empty.
+
+    #[test]
+    fn day_of_week_enum_display_name_returns_full_english_name() {
+        let doc = json!({"timestamp": "2024-12-09T00:00:00.000Z"}); // a Monday
+        let params = json!({});
+        let v = eval_painless(
+            "doc['timestamp'].value.getDayOfWeekEnum().getDisplayName(TextStyle.FULL, Locale.ROOT)",
+            &ctx(&doc, &params, 0.0),
+        )
+        .unwrap();
+        match v {
+            PainlessValue::String(s) => assert_eq!(s, "Monday"),
+            other => panic!("expected a string, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn day_of_week_enum_display_name_covers_the_week() {
+        let params = json!({});
+        let expected = [
+            ("2024-12-09T00:00:00.000Z", "Monday"),
+            ("2024-12-10T00:00:00.000Z", "Tuesday"),
+            ("2024-12-11T00:00:00.000Z", "Wednesday"),
+            ("2024-12-12T00:00:00.000Z", "Thursday"),
+            ("2024-12-13T00:00:00.000Z", "Friday"),
+            ("2024-12-14T00:00:00.000Z", "Saturday"),
+            ("2024-12-15T00:00:00.000Z", "Sunday"),
+        ];
+        for (ts, day_name) in expected {
+            let doc = json!({"timestamp": ts});
+            let v = eval_painless(
+                "doc['timestamp'].value.getDayOfWeekEnum().getDisplayName(TextStyle.FULL, Locale.ROOT)",
+                &ctx(&doc, &params, 0.0),
+            )
+            .unwrap();
+            match v {
+                PainlessValue::String(s) => assert_eq!(s, day_name, "for {ts}"),
+                other => panic!("expected a string for {ts}, got {:?}", other),
+            }
+        }
+    }
+
+    #[test]
+    fn passage_metadata_is_hidden_from_doc_and_source_scripts() {
+        let doc = json!({
+            "content": "visible",
+            "__argos_passage_meta__embedding": {"field": "content", "chunks": [[0, 7]]}
+        });
+        let params = json!({});
+        let size = eval_painless(
+            "doc['__argos_passage_meta__embedding'].size()",
+            &ctx(&doc, &params, 0.0),
+        )
+        .unwrap();
+        assert_eq!(size.as_f64(), Some(0.0));
+        let rendered =
+            eval_painless("params['_source'].toString()", &ctx(&doc, &params, 0.0)).unwrap();
+        let PainlessValue::String(rendered) = rendered else {
+            panic!("expected rendered source string");
+        };
+        assert!(rendered.contains("content=visible"));
+        assert!(!rendered.contains("__argos_passage_meta__"));
+    }
+
+    #[test]
+    fn score_plus_field() {
+        let doc = json!({"x": 5});
+        let params = json!({});
+        let v = eval_painless("_score + doc['x'].value", &ctx(&doc, &params, 2.5)).unwrap();
+        assert!((v.as_f64().unwrap() - 7.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn ternary_dot_product() {
+        let doc = json!({"vec": [1.0, 2.0, 3.0]});
+        let params = json!({"q": [1.0, 0.0, -1.0]});
+        let src =
+            "double s = dotProduct(params.q, 'vec'); return s < 0 ? 1.0 / (1.0 - s) : s + 1.0;";
+        let v = eval_painless(src, &ctx(&doc, &params, 0.0)).unwrap();
+        // dot = 1*1 + 2*0 + 3*-1 = -2 → 1/(1-(-2)) = 1/3
+        assert!((v.as_f64().unwrap() - (1.0 / 3.0)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn if_return() {
+        let doc = json!({"x": 10});
+        let params = json!({});
+        let v = eval_painless(
+            "if (doc['x'].value > 5) { return 100; } return 0;",
+            &ctx(&doc, &params, 0.0),
+        )
+        .unwrap();
+        assert!((v.as_f64().unwrap() - 100.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn math_max() {
+        let doc = json!({});
+        let params = json!({});
+        let v = eval_painless("Math.max(1.5, 2.5)", &ctx(&doc, &params, 0.0)).unwrap();
+        assert!((v.as_f64().unwrap() - 2.5).abs() < 1e-9);
+    }
+
+    // ── Local functions and lambdas ───────────────────────────────────────────
+    // Needed by e.g. OpenSearch's UBI sample dashboards, which filter via a
+    // Supplier-style boolean helper (either a top-level local function or a
+    // lambda literal bound to a variable).
+
+    #[test]
+    fn local_function_declaration_and_call() {
+        let doc = json!({});
+        let params = json!({});
+        let src = "boolean isEven(int n) { return n % 2 == 0; } return isEven(4);";
+        let v = eval_painless(src, &ctx(&doc, &params, 0.0)).unwrap();
+        assert!(v.as_bool());
+    }
+
+    #[test]
+    fn local_function_false_branch() {
+        let doc = json!({});
+        let params = json!({});
+        let src = "boolean isEven(int n) { return n % 2 == 0; } return isEven(3);";
+        let v = eval_painless(src, &ctx(&doc, &params, 0.0)).unwrap();
+        assert!(!v.as_bool());
+    }
+
+    #[test]
+    fn lambda_literal_bare_call() {
+        let doc = json!({});
+        let params = json!({});
+        let v = eval_painless(
+            "def add = (a, b) -> a + b; return add(2, 3);",
+            &ctx(&doc, &params, 0.0),
+        )
+        .unwrap();
+        assert!((v.as_f64().unwrap() - 5.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn lambda_block_body() {
+        let doc = json!({});
+        let params = json!({});
+        let src = "def f = (x) -> { double y = x * 2; return y + 1; }; return f(10);";
+        let v = eval_painless(src, &ctx(&doc, &params, 0.0)).unwrap();
+        assert!((v.as_f64().unwrap() - 21.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn lambda_invoked_via_functional_interface_method() {
+        // Any `.method(args)` call on a closure value invokes it regardless
+        // of the method name — covers Supplier::get, Function::apply,
+        // Predicate::test, etc. without hard-coding each interface.
+        let doc = json!({});
+        let params = json!({});
+        let v = eval_painless(
+            "def s = () -> true; return s.get();",
+            &ctx(&doc, &params, 0.0),
+        )
+        .unwrap();
+        assert!(v.as_bool());
+
+        let v2 = eval_painless(
+            "def doubler = (x) -> x * 2; return doubler.apply(21);",
+            &ctx(&doc, &params, 0.0),
+        )
+        .unwrap();
+        assert!((v2.as_f64().unwrap() - 42.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn lambda_no_access_to_enclosing_locals() {
+        // Closures are invoked in a fresh scope seeded only with the bound
+        // parameters — they can't see the caller's other local variables.
+        let doc = json!({});
+        let params = json!({});
+        let src = "int secret = 99; def f = () -> secret; return f();";
+        let r = eval_painless(src, &ctx(&doc, &params, 0.0));
+        assert!(r.is_err(), "expected an error, got {:?}", r);
+    }
+
+    #[test]
+    fn closure_as_top_level_result_is_not_a_valid_value() {
+        // Returning a bare function value from a script (rather than
+        // invoking it) has no scalar/JSON representation.
+        let doc = json!({});
+        let params = json!({});
+        let v = eval_painless("def f = () -> 1; return f;", &ctx(&doc, &params, 0.0)).unwrap();
+        assert!(matches!(v, PainlessValue::Closure(..)));
+    }
+
+    #[test]
+    fn wrong_arity_call_errors_instead_of_defaulting_to_null() {
+        let doc = json!({});
+        let params = json!({});
+        let r = eval_painless(
+            "def f = (a, b) -> a + b; return f(1);",
+            &ctx(&doc, &params, 0.0),
+        );
+        assert!(r.is_err(), "expected an arity error, got {:?}", r);
+    }
+
+    // ── Closure call-depth / call-count guards ─────────────────────────────────
+    // Regression tests for a real crash: `EvalDepthGuard` only bounds
+    // expression-eval recursion, not closure *call* nesting or the total
+    // size of an exponential call tree. Both of these MUST return an `Err`
+    // — if the guard regresses, the test process itself stack-overflows (or
+    // takes minutes) and aborts/hangs, a hard failure either way.
+
+    #[cfg(feature = "stackprobe")]
+    #[test]
+    fn measure_closure_clone_cost() {
+        // Rc-vs-Arc A/B on a loaded machine: wall-clock alone swings ±70%, so
+        // report the closure-heavy time NORMALISED by a closure-free script of
+        // similar shape measured in the same process. Only the closure script
+        // pays the shared-body refcount, so the ratio isolates atomic-vs-
+        // non-atomic while machine load cancels out.
+        let doc = json!({});
+        let params = json!({});
+        // Many closure invocations at depth 1 — recursion can't be used for
+        // this, `MAX_CALL_DEPTH` caps it at 32 calls. A flat `f(1)+f(1)+…`
+        // chain gets ~240 calls per evaluation (bounded by MAX_EVAL_DEPTH),
+        // each paying an `env.get(..).clone()` of the closure value plus its
+        // drop, which is exactly the refcount traffic in question.
+        let calls = 240;
+        let closure_src = format!(
+            "def f = (x) -> x + 1; return f(1){};",
+            "+f(1)".repeat(calls)
+        );
+        // Same statement/expression shape, no closures at all.
+        let arith_src = format!("return 1{};", "+1".repeat(calls));
+
+        let run = |src: &str, iters: u32| {
+            for _ in 0..40 {
+                let _ = eval_painless(src, &ctx(&doc, &params, 0.0));
+            }
+            let mut best = std::time::Duration::MAX;
+            for _ in 0..5 {
+                let t = std::time::Instant::now();
+                for _ in 0..iters {
+                    let _ = eval_painless(src, &ctx(&doc, &params, 0.0));
+                }
+                best = best.min(t.elapsed() / iters);
+            }
+            best
+        };
+
+        let closure = run(&closure_src, 2000);
+        let arith = run(&arith_src, 2000);
+        let per_call = (closure.as_secs_f64() - arith.as_secs_f64()) / calls as f64;
+        println!(
+            "closure {:?}/eval | arith {:?}/eval | ratio {:.3} | delta {:.2}ns/call",
+            closure,
+            arith,
+            closure.as_secs_f64() / arith.as_secs_f64(),
+            per_call * 1e9,
+        );
+        assert!(
+            eval_painless(&closure_src, &ctx(&doc, &params, 0.0)).is_ok(),
+            "the closure benchmark must actually run all its calls"
+        );
+    }
+
+    #[cfg(feature = "stackprobe")]
+    #[test]
+    fn measure_stack_per_call_level() {
+        for nest in [1usize, 10, 50, 90, 95] {
+            let h = std::thread::Builder::new()
+                .stack_size(2 * 1024 * 1024)
+                .spawn(move || {
+                    let doc = json!({});
+                    let params = json!({});
+                    // The recursive call sits INSIDE the nested blocks, so
+                    // every call level pays `nest` extra exec_stmt frames.
+                    let src = format!(
+                        "def f = (g, n) -> {{ {} return g(g, n); {} return 0; }}; return f(f, 1);",
+                        "if(true){".repeat(nest),
+                        "}".repeat(nest),
+                    );
+                    let r = eval_painless(&src, &ctx(&doc, &params, 0.0));
+                    let (depth, top, min) = STACK_PROBE.with(|p| p.get());
+                    println!(
+                        "nest={nest:3} max_depth={depth} total_stack={} bytes_per_level={} err={:?}",
+                        top - min,
+                        (top - min) / (depth.max(2) - 1),
+                        r.as_ref().err()
+                    );
+                })
+                .unwrap();
+            h.join().unwrap();
+        }
+    }
+
+    // ── #97: resource limits must be loud, not absorbed ──────────────────────
+
+    #[test]
+    fn resource_limits_are_distinguishable_from_ordinary_script_errors() {
+        let doc = json!({});
+        let params = json!({});
+        // Every limit the interpreter can trip must classify as one.
+        for src in [
+            format!("{}1.0{}", "(".repeat(5000), ")".repeat(5000)), // parse depth
+            format!("1{}", "+1".repeat(MAX_EVAL_DEPTH)),            // eval depth
+            "def f = (g, n) -> g(g, n); return f(f, 1);".to_string(), // call depth
+            "def f = (g,n) -> n <= 0 ? 1 : g(g,n-1) + g(g,n-1) + g(g,n-1) + g(g,n-1); \
+             return f(f, 9);"
+                .to_string(), // call count
+            format!("\"{}\"", "x".repeat(MAX_SCRIPT_LEN)),          // source size
+        ] {
+            let err = eval_painless(&src, &ctx(&doc, &params, 0.0)).unwrap_err();
+            assert!(
+                is_resource_limit_error(&err),
+                "limit trip not classified as a resource limit: {err:?}"
+            );
+        }
+        // Ordinary script errors must NOT classify — the call sites that
+        // swallow them keep degrading gracefully, which is the behavior the
+        // ES-compat surface depends on.
+        for src in [
+            "someUnsupportedThing(1,2,3)",
+            "unknown_identifier_here",
+            "1 +",
+            "((",
+        ] {
+            if let Err(err) = eval_painless(src, &ctx(&doc, &params, 0.0)) {
+                assert!(
+                    !is_resource_limit_error(&err),
+                    "ordinary script error misclassified as a resource limit: {err:?}"
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn fault_capture_sees_a_limit_a_caller_swallowed() {
+        let doc = json!({});
+        let params = json!({});
+        let src = "def f = (g, n) -> g(g, n); return f(f, 1);";
+        // Exactly what `apply_function_score` does: map any error to a
+        // plausible score and move on. The fault must still surface.
+        let (score, fault) = with_script_fault_capture(async {
+            let c = ctx(&doc, &params, 0.0);
+            eval_painless(src, &c)
+                .ok()
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0)
+        })
+        .await;
+        assert_eq!(score, 0.0, "the swallowing caller still degrades");
+        assert_eq!(fault.as_deref(), Some(CALL_TOO_DEEP_MSG));
+    }
+
+    #[tokio::test]
+    async fn fault_capture_stays_quiet_for_ordinary_errors_and_successes() {
+        let doc = json!({"x": 3});
+        let params = json!({});
+        let (_, fault) = with_script_fault_capture(async {
+            let c = ctx(&doc, &params, 0.0);
+            let _ = eval_painless("doc['x'].value * 2", &c);
+            let _ = eval_painless("someUnsupportedThing(1)", &c);
+        })
+        .await;
+        assert_eq!(fault, None);
+    }
+
+    #[tokio::test]
+    async fn fault_capture_scopes_do_not_leak_into_each_other() {
+        let doc = json!({});
+        let params = json!({});
+        let (_, first) = with_script_fault_capture(async {
+            let c = ctx(&doc, &params, 0.0);
+            let _ = eval_painless("def f = (g, n) -> g(g, n); return f(f, 1);", &c);
+        })
+        .await;
+        assert!(first.is_some());
+        let (_, second) = with_script_fault_capture(async {
+            let c = ctx(&doc, &params, 0.0);
+            let _ = eval_painless("1 + 1", &c);
+        })
+        .await;
+        assert_eq!(second, None, "a fault leaked out of its own scope");
+    }
+
+    #[test]
+    fn self_application_with_nested_statement_body_does_not_abort() {
+        // Mirrors the exact shape that stack-overflowed in release: a
+        // closure passed as its own argument (`f(f, n)`), with a body
+        // containing enough nested `if` blocks that MAX_PARSE_DEPTH's
+        // per-call statement-nesting cost, multiplied across many calls
+        // via MAX_EVAL_DEPTH, would otherwise blow the native stack before
+        // any depth guard fired.
+        let doc = json!({});
+        let params = json!({});
+        let nested_ifs = "if(true){".repeat(10) + "1" + &"}".repeat(10);
+        let src = format!(
+            "def f = (g, n) -> {{ if(true) {{ {nested_ifs} return g(g, n); }} return 0; }}; return f(f, 1);"
+        );
+        let r = eval_painless(&src, &ctx(&doc, &params, 0.0));
+        assert!(
+            r.is_err(),
+            "expected the call-depth guard to trip, got {:?}",
+            r
+        );
+    }
+
+    #[test]
+    fn exponential_call_tree_is_bounded_not_a_hang() {
+        // Call depth here never exceeds ~9 (n counts down to 0), so
+        // MAX_CALL_DEPTH alone would never fire — it's the total
+        // invocation count (4^n) that must be bounded.
+        let doc = json!({});
+        let params = json!({});
+        let src =
+            "def f = (g, n) -> n <= 0 ? 1 : g(g,n-1) + g(g,n-1) + g(g,n-1) + g(g,n-1); return f(f, 9);";
+        let r = eval_painless(src, &ctx(&doc, &params, 0.0));
+        assert!(
+            r.is_err(),
+            "expected the call-count guard to trip, got {:?}",
+            r
+        );
+    }
+
+    // ── Resource-limit / stack-overflow guards ───────────────────────────────
+    // Regression tests for the unauthenticated remote crash: a deeply nested
+    // script used to overflow the parser's (or evaluator's) recursion and abort
+    // the whole process. These MUST return an `Err` — if the guard regresses,
+    // the test process itself stack-overflows and aborts (a hard failure), so
+    // the test can never silently pass.
+
+    #[test]
+    fn deeply_nested_parens_do_not_overflow_parser() {
+        let doc = json!({});
+        let params = json!({});
+        // ~5000 nested parens — well beyond the ~3000 that overflowed the
+        // real server before the guard.
+        let src = format!("{}1.0{}", "(".repeat(5000), ")".repeat(5000));
+        let r = eval_painless(&src, &ctx(&doc, &params, 0.0));
+        assert!(r.is_err(), "expected depth-limit error, got {:?}", r);
+        assert_eq!(r.unwrap_err(), TOO_DEEP_MSG);
+    }
+
+    #[test]
+    fn deeply_nested_unary_do_not_overflow_parser() {
+        let doc = json!({});
+        let params = json!({});
+        // Unary chains recurse through parse_unary directly. Use `!` (logical
+        // NOT): unlike `-`, consecutive `!` are NOT collapsed into a multi-char
+        // token by the lexer, so this genuinely drives deep unary recursion.
+        let src = format!("{}true", "!".repeat(5000));
+        let r = eval_painless(&src, &ctx(&doc, &params, 0.0));
+        assert!(r.is_err(), "expected depth-limit error, got {:?}", r);
+        assert_eq!(r.unwrap_err(), TOO_DEEP_MSG);
+    }
+
+    #[test]
+    fn long_flat_binary_chain_does_not_overflow_evaluator() {
+        let doc = json!({});
+        let params = json!({});
+        // A flat `1+1+1+…` chain is parsed with a LOOP (not deep recursion),
+        // so it used to build a 5,001-deep left-leaning AST and abort the
+        // process on the evaluator's native stack. It must now fail while
+        // parsing, before that evaluator is entered.
+        let src = format!("1{}", "+1".repeat(5000));
+        let error = eval_painless(&src, &ctx(&doc, &params, 0.0)).unwrap_err();
+        assert_eq!(error, EVAL_TOO_DEEP_MSG);
+    }
+
+    #[test]
+    fn flat_binary_chain_accepts_exact_eval_depth_boundary() {
+        let doc = json!({});
+        let params = json!({});
+        // A leaf has depth one, so MAX_EVAL_DEPTH - 1 binary operators
+        // produce an expression whose exact evaluation depth is the limit.
+        let src = format!("1{}", "+1".repeat(MAX_EVAL_DEPTH - 1));
+        let value = eval_painless(&src, &ctx(&doc, &params, 0.0)).unwrap();
+        assert_eq!(value.as_f64(), Some(MAX_EVAL_DEPTH as f64));
+
+        let too_deep = format!("1{}", "+1".repeat(MAX_EVAL_DEPTH));
+        assert_eq!(
+            eval_painless(&too_deep, &ctx(&doc, &params, 0.0)).unwrap_err(),
+            EVAL_TOO_DEEP_MSG
+        );
+    }
+
+    #[test]
+    fn postfix_chain_accepts_exact_eval_depth_boundary() {
+        let doc = json!({});
+        let params = json!({});
+        // Statement evaluation must not consume one level of the expression
+        // budget: a leaf plus 499 calls is exactly depth 500.
+        let src = format!(
+            "\"x\"{}",
+            ".toString()".repeat(MAX_EVAL_DEPTH.saturating_sub(1))
+        );
+        let value = eval_painless(&src, &ctx(&doc, &params, 0.0)).unwrap();
+        assert!(matches!(value, PainlessValue::String(ref text) if text == "x"));
+
+        let too_deep = format!("\"x\"{}", ".toString()".repeat(MAX_EVAL_DEPTH));
+        assert_eq!(
+            eval_painless(&too_deep, &ctx(&doc, &params, 0.0)).unwrap_err(),
+            EVAL_TOO_DEEP_MSG
+        );
+    }
+
+    #[test]
+    fn index_chain_accepts_exact_boundary_without_native_recursion() {
+        let doc = json!({});
+        let params = json!({"items": [7]});
+        // params.items has depth two; 498 indices reach exactly 500.
+        let src = format!(
+            "params.items{}",
+            "[0]".repeat(MAX_EVAL_DEPTH.saturating_sub(2))
+        );
+        assert!(eval_painless(&src, &ctx(&doc, &params, 0.0)).is_ok());
+
+        let too_deep = format!(
+            "params.items{}",
+            "[0]".repeat(MAX_EVAL_DEPTH.saturating_sub(1))
+        );
+        assert_eq!(
+            eval_painless(&too_deep, &ctx(&doc, &params, 0.0)).unwrap_err(),
+            EVAL_TOO_DEEP_MSG
+        );
+    }
+
+    #[test]
+    fn argument_depth_contributes_exactly_once() {
+        let doc = json!({});
+        let params = json!({});
+        // The argument has depth 499 and the Math member-call parent makes 500.
+        let boundary_arg = format!("1{}", "+1".repeat(MAX_EVAL_DEPTH - 2));
+        let boundary = format!("Math.max(0, {boundary_arg})");
+        assert_eq!(
+            eval_painless(&boundary, &ctx(&doc, &params, 0.0))
+                .unwrap()
+                .as_f64(),
+            Some((MAX_EVAL_DEPTH - 1) as f64)
+        );
+
+        let over_limit_arg = format!("1{}", "+1".repeat(MAX_EVAL_DEPTH - 1));
+        let over_limit = format!("Math.max(0, {over_limit_arg})");
+        assert_eq!(
+            eval_painless(&over_limit, &ctx(&doc, &params, 0.0)).unwrap_err(),
+            EVAL_TOO_DEEP_MSG
+        );
+    }
+
+    #[test]
+    fn iterative_access_preserves_special_dispatch_and_error_order() {
+        let doc = json!({"date": "2024-03-04T05:06:07Z"});
+        let params = json!({"obj": {"name": "X"}, "items": [3]});
+        let context = ctx(&doc, &params, 0.0);
+
+        assert!(matches!(
+            eval_painless("params.obj.name.toLowerCase()", &context).unwrap(),
+            PainlessValue::String(value) if value == "x"
+        ));
+        assert_eq!(
+            eval_painless("params.items[0]", &context).unwrap().as_f64(),
+            Some(3.0)
+        );
+        assert_eq!(
+            eval_painless("doc['date'].value.getHour()", &context)
+                .unwrap()
+                .as_f64(),
+            Some(5.0)
+        );
+        assert_eq!(
+            eval_painless("Math.max(2, 4).toString()", &context).unwrap_err(),
+            "unsupported member access .toString"
+        );
+
+        // String methods historically ignore their syntactic argument list;
+        // the unknown call must remain unevaluated.
+        assert!(matches!(
+            eval_painless("\"X\".toLowerCase(missing())", &context).unwrap(),
+            PainlessValue::String(value) if value == "x"
+        ));
+        // General index access evaluates its base before its key.
+        assert_eq!(
+            eval_painless("missing()[alsoMissing()]", &context).unwrap_err(),
+            "unsupported function missing"
+        );
+        // The doc special form evaluates the key directly.
+        assert_eq!(
+            eval_painless("doc[missing()]", &context).unwrap_err(),
+            "unsupported function missing"
+        );
+    }
+
+    #[test]
+    fn binary_depth_tracks_mixed_precedence_and_associativity() {
+        let doc = json!({});
+        let params = json!({});
+        // The exact AST is (((1 + (2 * 3)) + (4 / 2)) - 5), not a token-count
+        // approximation. This also exercises the iterative left-spine
+        // evaluator across distinct precedence levels.
+        let value = eval_painless("1 + 2 * 3 + 4 / 2 - 5", &ctx(&doc, &params, 0.0)).unwrap();
+        assert_eq!(value.as_f64(), Some(4.0));
+    }
+
+    #[test]
+    fn iterative_binary_chain_preserves_short_circuiting() {
+        let doc = json!({});
+        let params = json!({});
+        // `missing()` would return an error if evaluated. Every RHS must remain
+        // skipped even though the left-associated spine is evaluated in a loop.
+        let src = format!(
+            "false{}",
+            " && missing()".repeat(MAX_EVAL_DEPTH.saturating_sub(2))
+        );
+        let value = eval_painless(&src, &ctx(&doc, &params, 0.0)).unwrap();
+        assert!(!value.as_bool());
+    }
+
+    #[test]
+    fn eval_depth_error_is_actionable_and_limit_checks_report_it() {
+        let src = format!("1{}", "+1".repeat(MAX_EVAL_DEPTH));
+        let error = check_script_limits(&src).unwrap_err();
+        assert_eq!(error, EVAL_TOO_DEEP_MSG);
+        assert!(error.contains("split the expression into smaller statements"));
+    }
+
+    #[test]
+    fn oversized_source_rejected() {
+        let doc = json!({});
+        let params = json!({});
+        let src = format!("{} + 1.0", "1.0".repeat(MAX_SCRIPT_LEN));
+        let r = eval_painless(&src, &ctx(&doc, &params, 0.0));
+        assert!(r.is_err(), "expected length-limit error, got {:?}", r);
+    }
+
+    #[test]
+    fn check_script_limits_flags_nesting_but_ignores_plain_syntax_errors() {
+        // Nesting past the cap → reported (becomes a 400 at the request layer).
+        let deep = format!("{}1.0{}", "(".repeat(5000), ")".repeat(5000));
+        assert!(check_script_limits(&deep).is_err());
+
+        // Oversized → reported.
+        let big = "1.0".repeat(MAX_SCRIPT_LEN);
+        assert!(check_script_limits(&big).is_err());
+
+        // Deep unary chain past the cap → reported (use `!`; see note above).
+        let deep_unary = format!("{}true", "!".repeat(5000));
+        assert!(
+            check_script_limits(&deep_unary).is_err(),
+            "deep unary should be flagged by the parse-depth guard"
+        );
+
+        // A normal, valid script → OK.
+        assert!(check_script_limits("doc['x'].value * 2 + _score").is_ok());
+
+        // An unsupported-but-shallow script (syntax our subset rejects) must
+        // NOT be flagged — it should keep degrading gracefully at runtime, not
+        // turn into a spurious 400.
+        assert!(check_script_limits("some garbage )(").is_ok());
+    }
+
+    #[test]
+    fn deeply_nested_statements_do_not_overflow_parser() {
+        let doc = json!({});
+        let params = json!({});
+        let src = format!(
+            "{}return 1;{}",
+            "if (true) {".repeat(5000),
+            "}".repeat(5000)
+        );
+        assert_eq!(
+            eval_painless(&src, &ctx(&doc, &params, 0.0)).unwrap_err(),
+            TOO_DEEP_MSG
+        );
+        assert_eq!(check_script_limits(&src).unwrap_err(), TOO_DEEP_MSG);
+    }
+
+    #[test]
+    fn normal_script_still_evaluates_after_guards() {
+        let doc = json!({"x": 4});
+        let params = json!({"m": 3});
+        // Moderate nesting well within limits still works.
+        let v = eval_painless(
+            "((doc['x'].value + 1) * params.m)",
+            &ctx(&doc, &params, 0.0),
+        )
+        .unwrap();
+        assert!((v.as_f64().unwrap() - 15.0).abs() < 1e-9);
+    }
+
+    // ── String comparison semantics (RC4 W2 item 6) ─────────────────────
+    //
+    // Regression: string operands used to coerce to 0.0 on both sides of
+    // every comparison, so `doc['color'].value == 'red'` was true for ALL
+    // docs. Strings must compare as strings (ES `def` equality semantics).
+
+    fn eval_bool(src: &str, doc: &Value) -> bool {
+        let params = json!({});
+        eval_painless(src, &ctx(doc, &params, 0.0))
+            .unwrap()
+            .as_bool()
+    }
+
+    #[test]
+    fn string_equality_compares_content() {
+        let doc = json!({"color": "blue"});
+        assert!(!eval_bool("doc['color'].value == 'red'", &doc));
+        assert!(eval_bool("doc['color'].value == 'blue'", &doc));
+        assert!(eval_bool("doc['color'].value != 'red'", &doc));
+        assert!(!eval_bool("doc['color'].value != 'blue'", &doc));
+    }
+
+    #[test]
+    fn string_vs_non_string_is_not_equal() {
+        let doc = json!({"color": "red", "n": 5});
+        // ES Painless def equality: String.equals(non-String) is false.
+        assert!(!eval_bool("doc['color'].value == 5", &doc));
+        assert!(eval_bool("doc['color'].value != 5", &doc));
+        assert!(!eval_bool("doc['color'].value == null", &doc));
+        // Numeric string does NOT numerically equal a number.
+        let doc2 = json!({"tag": "5"});
+        assert!(!eval_bool("doc['tag'].value == 5", &doc2));
+    }
+
+    #[test]
+    fn string_relational_is_lexicographic() {
+        let doc = json!({"color": "blue"});
+        assert!(eval_bool("doc['color'].value < 'red'", &doc));
+        assert!(eval_bool("doc['color'].value <= 'blue'", &doc));
+        assert!(!eval_bool("doc['color'].value > 'red'", &doc));
+        assert!(eval_bool("'9' > '10'", &doc)); // lexicographic, not numeric
+    }
+
+    #[test]
+    fn string_equality_in_ternary_and_params() {
+        let doc = json!({"color": "green"});
+        let params = json!({"want": "green"});
+        let v = eval_painless(
+            "doc['color'].value == params.want ? 'A' : 'B'",
+            &ctx(&doc, &params, 0.0),
+        )
+        .unwrap();
+        match v {
+            PainlessValue::String(s) => assert_eq!(s, "A"),
+            other => panic!("expected string, got {:?}", other),
+        }
+        // Numbers still compare numerically.
+        assert!(eval_bool("1 + 1 == 2", &doc));
+        assert!(eval_bool("doc['color'].value.length() == 5", &doc));
+    }
+
+    #[test]
+    fn missing_doc_field_value_errors() {
+        // This is ES's own behaviour, not a local hardening choice: since
+        // 7.0 an empty `ScriptDocValues` throws rather than yielding a
+        // default (6.x returned 0/"" with a deprecation warning). Returning
+        // `null` here instead would reopen the hole this closes — see
+        // `comparison_against_missing_field_errors_not_matches_everything`.
+        let doc = json!({});
+        let params = json!({});
+        let r = eval_painless("doc['missing'].value", &ctx(&doc, &params, 0.0));
+        let e = r.expect_err("a missing field must error, matching ES 7+");
+        // The message points at the supported guard, exactly as ES's does.
+        assert!(
+            e.contains("size()==0"),
+            "the error must name the .size()==0 guard: {e}"
+        );
+    }
+
+    #[test]
+    fn comparison_against_missing_field_errors_not_matches_everything() {
+        let doc = json!({});
+        let params = json!({});
+        let r = eval_painless("doc['missing'].value > -1", &ctx(&doc, &params, 0.0));
+        assert!(
+            r.is_err(),
+            "a comparison against a missing field must error, not silently match: got {:?}",
+            r
+        );
+    }
+
+    #[test]
+    fn empty_multi_value_field_errors() {
+        let doc = json!({"tags": []});
+        let params = json!({});
+        let r = eval_painless("doc['tags'].value", &ctx(&doc, &params, 0.0));
+        assert!(r.is_err(), "expected an error, got {:?}", r);
+    }
+
+    #[test]
+    fn present_field_still_works_after_fail_closed_change() {
+        let doc = json!({"x": 10});
+        let params = json!({});
+        let v = eval_painless("doc['x'].value > 5", &ctx(&doc, &params, 0.0)).unwrap();
+        assert!(v.as_bool());
+    }
+
+    #[test]
+    fn exponential_string_doubling_is_bounded_not_a_crash() {
+        let doc = json!({});
+        let params = json!({});
+        // 30 doublings from a 1-byte string would reach ~1 GiB unbounded;
+        // the cap must trip well before that.
+        let src = format!("def s = \"a\";{}return s;", "s = s + s;".repeat(30));
+        let r = eval_painless(&src, &ctx(&doc, &params, 0.0));
+        assert!(
+            r.is_err(),
+            "expected the string-length cap to trip, got {:?}",
+            r
+        );
+    }
+
+    #[test]
+    fn ordinary_string_concatenation_still_works() {
+        let doc = json!({});
+        let params = json!({});
+        let v = eval_painless("'a' + 'b' + 'c'", &ctx(&doc, &params, 0.0)).unwrap();
+        match v {
+            PainlessValue::String(s) => assert_eq!(s, "abc"),
+            other => panic!("expected a string, got {:?}", other),
+        }
+    }
+
+    // ── The null-guard idiom ──────────────────────────────────────────────────
+    // Making a missing field error (above) is only safe if a script can still
+    // ASK whether the field is there. Elasticsearch's answer is
+    // `doc['x'].size() == 0`, which is also the remedy its own exception
+    // message names, so that is the idiom that has to work here. It relies on
+    // two properties, both asserted below: `.size()` is defined on a missing
+    // field, and the ternary evaluates only the branch it takes.
+
+    #[test]
+    fn size_guard_is_defined_on_a_missing_field() {
+        let params = json!({});
+        for (doc, expected_size, expected_empty) in [
+            (json!({}), 0.0, true),
+            (json!({"x": null}), 0.0, true),
+            (json!({"x": []}), 0.0, true),
+            (json!({"x": 7}), 1.0, false),
+            (json!({"x": [1, 2, 3]}), 3.0, false),
+        ] {
+            let c = ctx(&doc, &params, 0.0);
+            let size = eval_painless("doc['x'].size()", &c)
+                .unwrap_or_else(|e| panic!(".size() must never error on {doc}: {e}"));
+            assert_eq!(size.as_f64().unwrap(), expected_size, "doc {doc}");
+            let empty = eval_painless("doc['x'].empty", &c)
+                .unwrap_or_else(|e| panic!(".empty must never error on {doc}: {e}"));
+            assert_eq!(empty.as_bool(), expected_empty, "doc {doc}");
+        }
+    }
+
+    #[test]
+    fn null_guard_idiom_evaluates_on_both_shapes() {
+        // The canonical ES form, verbatim.
+        let src = "doc['x'].size() == 0 ? 0 : doc['x'].value";
+        let params = json!({});
+
+        for (doc, expected) in [
+            (json!({}), 0.0),
+            (json!({"x": []}), 0.0),
+            (json!({"x": 42}), 42.0),
+            (json!({"x": [7, 8]}), 7.0),
+        ] {
+            let v = eval_painless(src, &ctx(&doc, &params, 0.0))
+                .unwrap_or_else(|e| panic!("the null-guard idiom must not error on {doc}: {e}"));
+            assert_eq!(v.as_f64().unwrap(), expected, "doc {doc}");
+        }
+    }
+
+    #[test]
+    fn guarded_script_filters_rather_than_erroring_everywhere() {
+        // The whole point of the idiom: one script, run over documents that
+        // do and don't have the field, returning a boolean for each.
+        let params = json!({"min": 5});
+        let src = "doc['x'].size() == 0 ? false : doc['x'].value > params.min";
+
+        for (doc, expected) in [
+            (json!({"x": 10}), true),
+            (json!({"x": 1}), false),
+            (json!({}), false),
+        ] {
+            let v = eval_painless(src, &ctx(&doc, &params, 0.0))
+                .unwrap_or_else(|e| panic!("guarded script errored on {doc}: {e}"));
+            assert_eq!(v.as_bool(), expected, "doc {doc}");
+        }
+    }
+
+    #[test]
+    fn null_guard_on_a_missing_param_is_a_boolean() {
+        // `params` is a real `Map<String, Object>` in Painless, so a key
+        // that wasn't supplied reads as null and comparing it to null is an
+        // ordinary reference comparison — unlike `doc[...]`, which throws.
+        let doc = json!({});
+
+        let empty = json!({});
+        let v = eval_painless("params.y == null", &ctx(&doc, &empty, 0.0))
+            .expect("a params null guard must evaluate, not error");
+        assert!(v.as_bool(), "missing param: `== null` must be true");
+
+        let supplied = json!({"y": 3});
+        let v = eval_painless("params.y == null", &ctx(&doc, &supplied, 0.0))
+            .expect("a params null guard must evaluate, not error");
+        assert!(!v.as_bool(), "supplied param: `== null` must be false");
+
+        // `!=` is the same comparison inverted, and a present-but-null value
+        // is indistinguishable from an absent one, as in ES.
+        let explicit_null = json!({"y": null});
+        let v = eval_painless("params.y != null", &ctx(&doc, &explicit_null, 0.0)).unwrap();
+        assert!(!v.as_bool());
+    }
+
+    #[test]
+    fn genuinely_invalid_arithmetic_still_errors() {
+        let doc = json!({});
+        let params = json!({"obj": {"a": 1}});
+        // Null-awareness is scoped to `==`/`!=`; nothing else got looser, so
+        // the fail-closed property the script query depends on is intact.
+        for src in [
+            "'abc' - params.obj",
+            "params.missing + 1",
+            "params.missing > 0",
+            "doc['nope'].value * 2",
+            "doc['nope'].value >= 0",
+            "-params.missing",
+        ] {
+            let r = eval_painless(src, &ctx(&doc, &params, 0.0));
+            assert!(r.is_err(), "`{src}` must still error, got {:?}", r);
+        }
+    }
+
+    // ── Compiled-script cache ─────────────────────────────────────────────────
+    // The cache is thread-local, and each `#[test]` gets its own thread, so
+    // every assertion below observes only what its own test evaluated.
+
+    /// `(entries, src_bytes, actual bytes held)` for the calling thread.
+    fn cache_stats() -> (usize, usize, usize) {
+        SCRIPT_CACHE.with(|c| {
+            let c = c.borrow();
+            (
+                c.entries.len(),
+                c.src_bytes,
+                c.entries.keys().map(|k| k.len()).sum(),
+            )
+        })
+    }
+
+    #[test]
+    fn compiled_script_cache_is_bounded_by_entry_count() {
+        let doc = json!({});
+        let params = json!({});
+        // Far more distinct sources than the cache may retain. Each is tiny,
+        // so the entry-count bound is the one under test.
+        for i in 0..(MAX_SCRIPT_CACHE_ENTRIES * 8) {
+            let src = format!("{i} + 1");
+            eval_painless(&src, &ctx(&doc, &params, 0.0)).unwrap();
+        }
+        let (entries, src_bytes, actual) = cache_stats();
+        assert!(
+            entries <= MAX_SCRIPT_CACHE_ENTRIES,
+            "cache grew to {entries} entries, bound is {MAX_SCRIPT_CACHE_ENTRIES}"
+        );
+        assert!(
+            src_bytes <= MAX_SCRIPT_CACHE_SRC_BYTES,
+            "cache holds {src_bytes} source bytes, bound is {MAX_SCRIPT_CACHE_SRC_BYTES}"
+        );
+        // The accounting the bound rests on must match reality.
+        assert_eq!(actual, src_bytes, "src_bytes accounting drifted");
+    }
+
+    #[test]
+    fn compiled_script_cache_is_bounded_by_source_bytes() {
+        let doc = json!({});
+        let params = json!({});
+        // Distinct ~33 KiB scripts (each legal under MAX_SCRIPT_LEN, and
+        // flat rather than deep so they compile and run cleanly). Well under
+        // MAX_SCRIPT_CACHE_ENTRIES of them already exceed the byte budget,
+        // so the byte bound has to be what stops the growth.
+        for i in 0..24 {
+            let src = format!("{}return {i};", "def a = 1;".repeat(3300));
+            assert!(src.len() > 32 * 1024);
+            eval_painless(&src, &ctx(&doc, &params, 0.0)).unwrap();
+        }
+        let (entries, src_bytes, actual) = cache_stats();
+        assert!(
+            src_bytes <= MAX_SCRIPT_CACHE_SRC_BYTES,
+            "cache holds {src_bytes} source bytes, bound is {MAX_SCRIPT_CACHE_SRC_BYTES}"
+        );
+        assert!(entries <= MAX_SCRIPT_CACHE_ENTRIES);
+        assert!(
+            entries < 24,
+            "the byte bound must have evicted something: {entries} entries retained"
+        );
+        assert_eq!(actual, src_bytes, "src_bytes accounting drifted");
+    }
+
+    #[test]
+    fn cached_script_is_parsed_once_and_still_correct() {
+        let params = json!({"multiplier": 3});
+        let src = "doc['n'].value * params.multiplier /* cache-once probe */";
+        for n in 1..=5 {
+            let doc = json!({ "n": n });
+            let v = eval_painless(src, &ctx(&doc, &params, 0.0)).unwrap();
+            assert!((v.as_f64().unwrap() - (n * 3) as f64).abs() < 1e-9);
+        }
+        assert!(
+            SCRIPT_CACHE.with(|c| c.borrow().entries.contains_key(src)),
+            "repeated evaluation of one source must leave a cached AST"
+        );
+        assert_eq!(
+            cache_stats().0,
+            1,
+            "five evaluations of one source must leave exactly one entry"
+        );
+    }
+
+    #[test]
+    fn cached_parse_failure_still_reports_the_same_error() {
+        let doc = json!({});
+        let params = json!({});
+        let src = "return ( ( ( /* unbalanced, cache-error probe */";
+        let first = eval_painless(src, &ctx(&doc, &params, 0.0)).unwrap_err();
+        let second = eval_painless(src, &ctx(&doc, &params, 0.0)).unwrap_err();
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn caching_does_not_share_state_between_evaluations() {
+        // The AST is shared but mutable evaluation state is not: a script
+        // that mutates a local must start from scratch on every document.
+        let params = json!({});
+        let src = "def acc = 0; acc = acc + doc['n'].value; \
+                   acc = acc + doc['n'].value; acc = acc + doc['n'].value; \
+                   return acc; /* shared-state probe */";
+        for n in 1..=4 {
+            let doc = json!({ "n": n });
+            let v = eval_painless(src, &ctx(&doc, &params, 0.0)).unwrap();
+            assert_eq!(v.as_f64().unwrap(), (n * 3) as f64, "n = {n}");
+        }
+    }
+
+    #[test]
+    fn cached_ast_does_not_leak_the_call_budget_across_evaluations() {
+        // MAX_CALL_COUNT lives on the per-evaluation `PainlessCtx`, not on
+        // the AST, so memoising the AST must not let one document's closure
+        // invocations count against the next document's budget. A script
+        // that spends a large slice of the budget has to keep succeeding
+        // when it is re-run against document after document.
+        let doc = json!({});
+        let params = json!({});
+        // 2^11 = 2048 invocations per evaluation, comfortably under
+        // MAX_CALL_COUNT (10_000) but far more than a per-process budget
+        // would survive being run 8 times.
+        let src = "def f = (g, n) -> { if (n <= 0) { return 1; } return g(g, n - 1) + g(g, n - 1); }; return f(f, 11); /* budget-reset probe */";
+        for round in 0..8 {
+            let v = eval_painless(src, &ctx(&doc, &params, 0.0))
+                .unwrap_or_else(|e| panic!("round {round} must stay within budget: {e}"));
+            assert!((v.as_f64().unwrap() - 2048.0).abs() < 1e-9, "round {round}");
+        }
+    }
+
+    // ── Per-evaluation work budget (issue #122) ──────────────────────────
+
+    /// The largest *benign* script the 64 KiB source limit admits: 4,300
+    /// statements of flat arithmetic (59,773 bytes). This is the number
+    /// [`MAX_SCRIPT_OPS`] is calibrated against — if the charging scheme
+    /// changes, this test says by how much the margin moved rather than
+    /// leaving the ceiling a guess.
+    fn largest_benign_script() -> String {
+        let mut src = String::from("double t = 0;\n");
+        for i in 0..4300 {
+            src.push_str(&format!("t = t + {}.5;\n", i % 97));
+        }
+        src.push_str("return t;");
+        src
+    }
+
+    #[test]
+    fn the_budget_leaves_the_largest_benign_script_a_wide_margin() {
+        let src = largest_benign_script();
+        assert!(src.len() < MAX_SCRIPT_LEN, "must be a submittable script");
+        let doc = json!({ "rank": 7 });
+        let params = json!({});
+        let c = ctx(&doc, &params, 1.0);
+        eval_painless(&src, &c).expect("a benign script must not trip the budget");
+        let used = c.work_units();
+        assert_eq!(
+            used, 34_407,
+            "the calibration point moved; re-derive MAX_SCRIPT_OPS rather than \
+             editing this number"
+        );
+        assert!(
+            MAX_SCRIPT_OPS / used >= 100,
+            "the ceiling must keep a two-order-of-magnitude margin over the \
+             largest benign script, got {}x",
+            MAX_SCRIPT_OPS / used
+        );
+    }
+
+    /// Work is not the same thing as shape. This script is *smaller* than the
+    /// benign one above and runs a fraction of its statements, yet costs
+    /// hundreds of times more — which is the whole of issue #122.
+    #[test]
+    fn quadratic_string_growth_trips_the_work_budget() {
+        let mut src = String::from("def c = \"");
+        src.push_str(&"x".repeat(1024));
+        src.push_str("\";\ndef s = c;\n");
+        for _ in 0..4000 {
+            src.push_str("s = s + c;\n");
+        }
+        src.push_str("return s.length();");
+        assert!(src.len() < MAX_SCRIPT_LEN, "must be a submittable script");
+
+        let doc = json!({});
+        let params = json!({});
+        let err = eval_painless(&src, &ctx(&doc, &params, 0.0)).unwrap_err();
+        assert_eq!(err, SCRIPT_OVER_BUDGET_MSG);
+        assert!(
+            is_resource_limit_error(&err),
+            "a budget trip must reach the caller as a 400, not degrade to a \
+             wrong score"
+        );
+    }
+
+    /// Charging only per interpreter *step* would miss it: the trip happens
+    /// after a few hundred statements, so the step count at the trip is tiny
+    /// next to the benign script's 43,012 — the cost is all in the bytes.
+    #[test]
+    fn the_budget_is_charged_for_bytes_not_just_steps() {
+        let big = PainlessValue::String("x".repeat(64 * 1024));
+        assert_eq!(value_work_units(&big), 1 + 1024);
+        let small = PainlessValue::Number(1.0);
+        assert_eq!(value_work_units(&small), 1);
+        // A nested document is weighed by everything it contains, because
+        // cloning it copies everything it contains.
+        let nested = PainlessValue::from_json(&json!({ "a": [1, 2, 3], "b": { "c": 4 } }));
+        assert_eq!(value_work_units(&nested), 7);
+    }
+
+    /// A whole-document read is O(document) — `get_doc_value` clones the doc
+    /// before walking it — so the budget has to see the document's size, not
+    /// the field's.
+    #[test]
+    fn a_document_read_is_charged_for_the_whole_document() {
+        let doc = json!({ "rank": 1, "blob": (0..500).collect::<Vec<u32>>() });
+        let params = json!({});
+        let c = ctx(&doc, &params, 0.0);
+        eval_painless("doc['rank'].value", &c).expect("evaluate");
+        assert!(
+            c.work_units() > 500,
+            "a read of a 500-element document was charged {} units",
+            c.work_units()
+        );
+    }
+
+    /// The budget must not fire on scripts that are merely *long*: the
+    /// evaluation below runs the interpreter tens of thousands of times and
+    /// must still come out with a real value.
+    #[test]
+    fn a_long_but_cheap_script_still_returns_its_value() {
+        let doc = json!({});
+        let params = json!({});
+        let src = largest_benign_script();
+        let value = eval_painless(&src, &ctx(&doc, &params, 0.0)).expect("evaluate");
+        assert!(value.as_f64().is_some());
+    }
+
+    /// The time budget's anchor is fixed before any work is charged.
+    ///
+    /// Deriving it inside the first `clock_check` instead spends a whole
+    /// sampling window establishing the deadline and a second one being able
+    /// to fail it — and a window is bounded in work units, not in time, so
+    /// "one window" is however long the largest single charge takes. Pinning
+    /// the resolution point here keeps that structural property a test rather
+    /// than a comment.
+    #[test]
+    fn the_evaluation_deadline_exists_before_any_work_is_charged() {
+        let doc = json!({});
+        let params = json!({});
+        let before = std::time::Instant::now();
+        let c = ctx(&doc, &params, 0.0);
+        let after = std::time::Instant::now();
+        assert_eq!(c.work_units(), 0, "nothing has been charged yet");
+        // Outside a request scope the slice is MAX_EVAL_SLICE, and it is
+        // measured from construction, not from the first clock read.
+        assert!(
+            c.eval_deadline >= before + MAX_EVAL_SLICE,
+            "the deadline must be anchored at construction"
+        );
+        assert!(
+            c.eval_deadline <= after + MAX_EVAL_SLICE,
+            "the deadline must not be anchored later than construction"
+        );
+    }
+
+    /// A `params` member read is charged for the subtree it materialises, on
+    /// both spellings and before the value is built.
+    ///
+    /// `params.x` / `params['x']` are resolved by a fast path at chain
+    /// position 0 that used to `continue` past the access chain's charge, so a
+    /// read of an arbitrarily large caller-supplied value cost two units. The
+    /// assertion is on the work count, so it holds regardless of how fast the
+    /// machine running it is.
+    #[test]
+    fn a_params_member_read_is_charged_for_the_subtree_it_materialises() {
+        let doc = json!({});
+        let blob: Vec<Value> = (0..5_000).map(|i| json!(format!("v{i}"))).collect();
+        let params = json!({ "blob": blob });
+        for src in ["params.blob;", "params['blob'];"] {
+            let c = ctx(&doc, &params, 0.0);
+            eval_painless(src, &c).expect("evaluate");
+            assert!(
+                c.work_units() > 5_000,
+                "`{src}` materialised a 5,000-node value for {} work units",
+                c.work_units()
+            );
+        }
+    }
+
+    /// `params['_source']` clones the document, so it is charged the
+    /// document's weight — the same charge `doc['x'].value` pays.
+    #[test]
+    fn a_params_source_read_is_charged_for_the_document_it_clones() {
+        let blob: Vec<Value> = (0..5_000).map(|i| json!(format!("v{i}"))).collect();
+        let doc = json!({ "blob": blob });
+        let params = json!({});
+        let c = ctx(&doc, &params, 0.0);
+        eval_painless("params['_source'];", &c).expect("evaluate");
+        assert!(
+            c.work_units() > 5_000,
+            "a whole-document clone was charged {} work units",
+            c.work_units()
+        );
+    }
+
+    /// Regression for the crash the `painless` fuzz target found in under a
+    /// second (issue #207). The tokeniser walks bytes but slices `&src[..]` as
+    /// a `&str`, and every continuation byte of a multi-byte character reads as
+    /// an alphabetic Latin-1 char — so an identifier scan could stop inside one
+    /// and the slice panicked on a char boundary. Scripts arrive in ordinary
+    /// search and update bodies and the release profile sets `panic = "abort"`,
+    /// so this was not a 400, it was the process.
+    ///
+    /// Before the fix each of these aborts the test process rather than
+    /// failing an assertion.
+    #[test]
+    fn a_non_ascii_character_in_a_script_is_an_error_not_a_panic() {
+        let doc = json!({ "title": "the quick brown fox" });
+        let params = json!({});
+
+        for src in [
+            // The input libFuzzer minimised to: an identifier scan that runs
+            // into U+028B.
+            "emit(doc[\"title\"].value\u{28b}oUppe",
+            "\u{28b}",
+            "value\u{28b}",
+            "\u{28b}value",
+            "doc[\"title\"].\u{4e2d}\u{6587}",
+            // Multi-byte inside a string literal must still be fine — the
+            // fix must not have made ordinary Unicode text unusable.
+            "\"caf\u{e9} \u{4e2d}\u{6587} \u{28b}\"",
+            // Non-ASCII at the very end, where the scan runs off the input.
+            "a\u{e9}",
+            "\u{e9}\u{e9}\u{e9}",
+        ] {
+            // Neither entry point may panic. Both are allowed to fail.
+            let _ = check_script_limits(src);
+            let _ = eval_painless(src, &ctx(&doc, &params, 0.0));
+        }
+
+        // A string literal carrying non-ASCII still evaluates to itself: the
+        // fix narrows the *identifier* scan, not the language.
+        let v = eval_painless("\"caf\u{e9}\"", &ctx(&doc, &params, 0.0)).expect("evaluate");
+        assert!(
+            matches!(&v, PainlessValue::String(s) if s == "caf\u{e9}"),
+            "{v:?}"
+        );
+
+        // ASCII identifiers are untouched by the narrowed scan.
+        let v = eval_painless("doc['title'].value", &ctx(&doc, &params, 0.0)).expect("evaluate");
+        assert!(
+            matches!(&v, PainlessValue::String(s) if s == "the quick brown fox"),
+            "{v:?}"
+        );
+    }
+}

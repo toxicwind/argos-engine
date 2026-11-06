@@ -24,27 +24,27 @@ fuzz_target!(|data: &[u8]| {
     // ways — the rounding paths do the calendar arithmetic that can overflow.
     for base in [0i64, 1_700_000_000_000] {
         for round_up in [false, true] {
-            let _ = xerj_query::dates::apply_date_math(base, text, round_up);
+            let _ = argos_query::dates::apply_date_math(base, text, round_up);
         }
     }
 
     // Pattern compilation, then parsing real values with whatever compiled.
-    if let Ok(formats) = xerj_query::dates::compile_formats(text) {
+    if let Ok(formats) = argos_query::dates::compile_formats(text) {
         for probe in [
             serde_json::Value::String("2026-01-31T23:59:59.999Z".to_string()),
             serde_json::Value::String(text.to_string()),
             serde_json::Value::from(1_700_000_000_000i64),
         ] {
-            let _ = xerj_query::dates::date_value_matches_formats(&probe, &formats);
+            let _ = argos_query::dates::date_value_matches_formats(&probe, &formats);
         }
         for round_up in [false, true] {
-            let _ = xerj_query::dates::resolve_date_bound_str(text, round_up, Some(&formats));
+            let _ = argos_query::dates::resolve_date_bound_str(text, round_up, Some(&formats));
         }
     }
 
     // Bound resolution with no declared format — the `now`-anchored and
     // `<anchor>||<math>` branches.
     for round_up in [false, true] {
-        let _ = xerj_query::dates::resolve_date_bound_str(text, round_up, None);
+        let _ = argos_query::dates::resolve_date_bound_str(text, round_up, None);
     }
 });

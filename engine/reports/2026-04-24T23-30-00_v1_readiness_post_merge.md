@@ -10,28 +10,28 @@ shipped on its own.
 ## Build
 
 ```
-cargo build --release -p xerj-server -p es-yaml-runner
+cargo build --release -p argos-server -p es-yaml-runner
 Finished `release` profile [optimized] target(s) in 2m 00s
 ```
 
-Clean — no errors, only style warnings (33 in `xerj-engine`, 13 in
-`xerj-api`, mostly unused-import / dead-code from the ES-compat
+Clean — no errors, only style warnings (33 in `argos-engine`, 13 in
+`argos-api`, mostly unused-import / dead-code from the ES-compat
 side that don't affect behavior).
 
 ## Lib tests
 
 `cargo test --lib -j $(nproc)` — **390 passed, 0 failed** across:
-xerj-cluster (16), xerj-common (53), xerj-compress (23),
-xerj-engine (41), xerj-fts (27), xerj-logs (30), xerj-query
+argos-cluster (16), argos-common (53), argos-compress (23),
+argos-engine (41), argos-fts (27), argos-logs (30), argos-query
 (70 — including the 3 mechanical fixes the merge required:
 `SortField` `format` field, `constant_score` flatten behaviour,
-`query_string` Bool lowering), xerj-storage (55), xerj-vector
-(26), xerj-ai (29), xerj-api (20).
+`query_string` Bool lowering), argos-storage (55), argos-vector
+(26), argos-ai (29), argos-api (20).
 
 ## ES YAML compat suite
 
 ```
-target/release/xerj --config /tmp/xerj-merged.toml --data-dir /tmp/xerj-merged-data
+target/release/argos --config /tmp/argos-merged.toml --data-dir /tmp/argos-merged-data
 target/release/es-yaml-runner --dir tests/es-compat-yaml/yaml \
                               --url http://localhost:19200
 ```
@@ -93,17 +93,17 @@ branch reached on its own.  No behavioural regression detected.
 
 ```bash
 # Start server
-rm -rf /tmp/xerj-merged-data
-cat > /tmp/xerj-merged.toml <<'EOF'
+rm -rf /tmp/argos-merged-data
+cat > /tmp/argos-merged.toml <<'EOF'
 [server]
 rest_port      = 19201
 es_compat_port = 19200
-data_dir       = "/tmp/xerj-merged-data"
+data_dir       = "/tmp/argos-merged-data"
 bind_address   = "127.0.0.1"
 [auth]
 enabled = false
 EOF
-target/release/xerj --config /tmp/xerj-merged.toml --data-dir /tmp/xerj-merged-data &
+target/release/argos --config /tmp/argos-merged.toml --data-dir /tmp/argos-merged-data &
 
 # Wait + run suite
 sleep 3

@@ -95,15 +95,15 @@ engine/reports/
 ## Branch state at time of writing
 
 ```
-bed1a46 fix(xerj-engine): kNN post-flush + raw-bytes flush FTS visibility (B-3)
+bed1a46 fix(argos-engine): kNN post-flush + raw-bytes flush FTS visibility (B-3)
 605ac7b fix(durability): ES-compat _flush route + force-flush on shutdown (B-2a, B-2b)
 eb8ab0c docs(reports): POV test battery — 2 P0 bugs found, 1 fixed
-ffd49ac fix(xerj-engine): merge silently dropping every segment via simd_json + RawValue
+ffd49ac fix(argos-engine): merge silently dropping every segment via simd_json + RawValue
 b474b50 docs(reports): post-merge ES YAML run — 1303/1329 = 98.04%
 c686432 Merge main (ES-compat 98.12%) into prod/v1-readiness
 40bb163 docs(reports): v1-readiness audit + corrections + perf backlog
-723a8b1 perf(xerj-storage): VersionEntry.segment_id Arc<str>; hoist per batch
-f0221a4 perf(xerj-engine): condvar wait_for_drain replaces 5ms sleep loop
+723a8b1 perf(argos-storage): VersionEntry.segment_id Arc<str>; hoist per batch
+f0221a4 perf(argos-engine): condvar wait_for_drain replaces 5ms sleep loop
 ```
 
 `prod/v1-readiness` is now ready for a customer POV provided the POV

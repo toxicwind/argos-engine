@@ -1,0 +1,5188 @@
+//! Thin blocking ES-compat client (reqwest). Retries with exponential
+//! backoff on 429/5xx/transport errors; parses per-item bulk errors; and
+//! lets a 429 shrink how much load the run offers, not just when it offers
+//! it ([`BulkAdmission`]).
+
+use anyhow::{anyhow, Context, Result};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Condvar, Mutex};
+use std::time::{Duration, Instant};
+
+#[derive(Clone)]
+pub struct Es {
+    base: String,
+    http: reqwest::blocking::Client,
+    api_key: Option<String>,
+    bulk_timeout: Duration,
+    retry_initial_delay: Duration,
+    retry_max_delay: Duration,
+    /// Shared by every clone of this client on purpose: congestion is a
+    /// property of the server, so all of a run's workers must see the same
+    /// admission limit.
+    admission: Arc<BulkAdmission>,
+    /// How long one `bulk` call keeps re-offering records the server
+    /// rejected with a per-item 429 (see [`THROTTLE_PATIENCE`]).
+    throttle_patience: Duration,
+    /// How long a bulk that has not had a single item accepted keeps
+    /// re-asking a parent memory breaker (see [`ZERO_PROGRESS_PATIENCE`]).
+    zero_progress_patience: Duration,
+    /// Most actions this client puts in one `_bulk` request before the server
+    /// has said anything about it. See [`BULK_MAX_ACTIONS`]; tests shrink it.
+    bulk_max_actions: usize,
+    /// What this run has learned from the server about how large a request it
+    /// takes (#955). Shared by every clone, like `admission`.
+    request_size: Arc<RequestSizeLedger>,
+    /// Run-wide record of per-item back-pressure re-sends (#944), reported on
+    /// `argos-done`. Shared by every clone, like `admission`.
+    throttle_ledger: Arc<ThrottleLedger>,
+    /// Set once a connect failure shows the node is not accepting connections
+    /// (#2177). Shared by every clone: one dead `_bulk` stops the rest of the
+    /// run from retrying into the same process.
+    node_down: Arc<NodeDownLatch>,
+    /// Every delay this client has actually backed off for, in order.
+    /// Test-only, and per-instance rather than global so a concurrent test
+    /// cannot perturb it — `--test-threads=2` in CI is exactly the shape that
+    /// would.
+    ///
+    /// The DELAYS and not a count. Counting alone pins the arity and nothing
+    /// else, so removing the doubling, ignoring `retry_max_delay`, or deleting
+    /// the sleep outright while still counting it all pass — the last turning
+    /// this into a six-shot hot loop against a struggling server, which is the
+    /// retry storm the doc comment on `with_retry` exists to prevent. The
+    /// sequence pins the arity, the ordering, the doubling and the cap at once.
+    /// It replaces a wall-clock bound that sat 20 ms above a 240 ms budget and
+    /// failed about one run in five under load (#436).
+    /// `(requested, observed)` per backoff, in order. Shared by every clone of
+    /// this client, like `admission` — a clone is the same client.
+    #[cfg(test)]
+    backoff_delays: Arc<std::sync::Mutex<Vec<(Duration, Duration)>>>,
+    /// The reason text each retry notice rendered, in order. The print itself
+    /// goes to stderr; this is what a test asserts (#2177).
+    #[cfg(test)]
+    notices: Arc<Mutex<Vec<String>>>,
+}
+
+/// The message latched when the node stops accepting connections.
+struct NodeDownLatch {
+    message: Mutex<Option<String>>,
+}
+
+/// How long a non-connect retry notice may be, in characters.
+///
+/// Connect failures are not capped ([`notice_reason`]). This bound is only
+/// for the other transport and 5xx chains, and it keeps the tail — the
+/// cause — rather than a fixed prefix.
+const NOTICE_REASON_CHARS: usize = 240;
+
+/// `true` when `text` is the report [`node_down_message`] builds. The phase-B
+/// bail prints that report on its own, instead of wrapping it as a generic
+/// bulk failure.
+pub(crate) fn is_node_down_report(text: &str) -> bool {
+    text.contains("is down or unreachable")
+}
+
+/// One line of an anyhow chain (`{:#}` joins causes with `: `).
+fn one_line_chain(error: &anyhow::Error) -> String {
+    format!("{error:#}").replace(['\n', '\r'], " ")
+}
+
+/// The text a retry notice shows for `error`.
+///
+/// A node that is not accepting connections is rendered in full. The chain
+/// reqwest and hyper-util produce for a refused `_bulk` is
+///
+/// ```text
+/// bulk send (request timeout 300s): error sending request for url (http://127.0.0.1:9200/_bulk): client error (Connect): tcp connect error: Connection refused (os error 111)
+/// ```
+///
+/// and character 120 of that string is the `t` of `tcp connect error`.
+/// Truncating there is what #2177 printed as `client error (Connect): t`.
+/// The address is the `for url (...)` segment; the OS cause is the last
+/// segment. Both have to survive.
+///
+/// This is the only place a transport-error chain is shortened. The other
+/// caps in this file (`SERVER_REASON_MAX`) bound the server's response body,
+/// and `generation_catalog` bounds a catalog field diff. Neither formats a
+/// connect error.
+fn notice_reason(error: &anyhow::Error) -> String {
+    let full = one_line_chain(error);
+    if is_node_unreachable(error) {
+        return full;
+    }
+    cap_keeping_tail(&full, NOTICE_REASON_CHARS)
+}
+
+/// Keep the end of `full` when it is longer than `max_chars`.
+///
+/// Causes are appended after `: `. If the cut would leave only a few
+/// characters of the next segment, start at the following boundary so a
+/// cause is never reduced to its first letter.
+fn cap_keeping_tail(full: &str, max_chars: usize) -> String {
+    let chars: Vec<char> = full.chars().collect();
+    if chars.len() <= max_chars || max_chars == 0 {
+        return full.to_string();
+    }
+    let mut start = chars.len() - (max_chars - 1);
+    let preview: String = chars[start..].iter().collect();
+    if let Some(rel) = preview.find(": ") {
+        if rel > 0 && rel < 8 {
+            start = (start + rel + 2).min(chars.len());
+        }
+    }
+    let mut out = String::from("…");
+    out.extend(chars[start..].iter().copied());
+    out
+}
+
+/// `true` when `err` is "nothing accepted the connection", not a timeout, a
+/// TLS failure after connect, or an HTTP status.
+///
+/// `reqwest::Error::is_connect` is necessary but not sufficient: a connect
+/// timeout is also a connect error, and that one still belongs to the
+/// ordinary six-attempt budget. The OS refusal (`ConnectionRefused`, and the
+/// Windows wording "actively refused") is the dead-node signal.
+fn is_node_unreachable(err: &anyhow::Error) -> bool {
+    if chain_is_timeout(err) {
+        return false;
+    }
+    let mut connectish = false;
+    let mut refused = false;
+    for cause in err.chain() {
+        if let Some(req) = cause.downcast_ref::<reqwest::Error>() {
+            if req.is_connect() {
+                connectish = true;
+            }
+        }
+        if let Some(io) = cause.downcast_ref::<std::io::Error>() {
+            match io.kind() {
+                std::io::ErrorKind::ConnectionRefused
+                | std::io::ErrorKind::AddrNotAvailable
+                | std::io::ErrorKind::HostUnreachable
+                | std::io::ErrorKind::NetworkUnreachable => return true,
+                _ => {}
+            }
+        }
+        let text = cause.to_string().to_ascii_lowercase();
+        if text.contains("client error (connect)") || text.contains("tcp connect error") {
+            connectish = true;
+        }
+        if text.contains("connection refused")
+            || text.contains("actively refused")
+            || text.contains("network is unreachable")
+            || text.contains("host is unreachable")
+            || text.contains("no route to host")
+        {
+            refused = true;
+        }
+    }
+    connectish && refused
+}
+
+fn chain_is_timeout(err: &anyhow::Error) -> bool {
+    err.chain().any(|cause| {
+        if let Some(req) = cause.downcast_ref::<reqwest::Error>() {
+            if req.is_timeout() {
+                return true;
+            }
+        }
+        if let Some(io) = cause.downcast_ref::<std::io::Error>() {
+            if io.kind() == std::io::ErrorKind::TimedOut {
+                return true;
+            }
+        }
+        cause.to_string().to_ascii_lowercase().contains("timed out")
+    })
+}
+
+fn node_down_message(url: &str, cause: &anyhow::Error) -> String {
+    let detail = one_line_chain(cause);
+    format!(
+        "the node at {url} is down or unreachable ({detail}). \
+         The run can be resumed: files already journaled stay indexed, and the \
+         file in flight was not marked complete. Re-run this command:\n  {}",
+        resume_command()
+    )
+}
+
+/// The process argv, quoted so a path with spaces pastes as one command.
+fn resume_command() -> String {
+    std::env::args()
+        .map(|arg| quote_resume_arg(&arg))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Quote one argv element. Unquoted when every character is safe to paste.
+/// Otherwise POSIX single quotes, or double quotes on Windows, where the
+/// report that found this (#2177) was pasted into cmd / PowerShell.
+fn quote_resume_arg(s: &str) -> String {
+    if s.is_empty() {
+        return if cfg!(windows) {
+            "\"\"".to_string()
+        } else {
+            "''".to_string()
+        };
+    }
+    let safe = s
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '.' | '_' | '-' | ':' | '\\'));
+    if safe {
+        s.to_string()
+    } else if cfg!(windows) {
+        format!("\"{}\"", s.replace('"', "\\\""))
+    } else {
+        format!("'{}'", s.replace('\'', "'\\''"))
+    }
+}
+
+/// The server understood a create-index or put-mapping request and REFUSED it.
+///
+/// This is a different event from "the endpoint is unreachable, overloaded or
+/// rejecting our credentials", and the difference decides how much of a run it
+/// may take down. A refusal is a statement about ONE index's mapping — a field
+/// type this server does not support, a field-count limit, a conflict with a
+/// mapping an earlier release left behind — so it can only ever be a reason to
+/// fail that one dataset. An endpoint failure says nothing about any particular
+/// dataset and still aborts the run. Before this type existed both arrived as
+/// the same stringly `anyhow!`, so the only safe reading was the pessimistic
+/// one, and a single unmappable field name aborted a 48,533-file run with zero
+/// documents indexed (#929).
+///
+/// Only HTTP 400 is classified as a refusal. 401/403 are credentials, 404 is a
+/// vanished index, 408/429/5xx are the endpoint — none of them is specific to
+/// the dataset being installed, so none of them is safe to route around.
+///
+/// `Display` is byte-identical to the message these calls produced before, so
+/// every log line, test expectation and operator runbook keyed on
+/// `PUT /<index>/_mapping failed: 400 …` keeps matching.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MappingRefused {
+    /// Request path, e.g. `/ax-logs/_mapping`.
+    pub path: String,
+    pub status: u16,
+    /// The server's response body, verbatim.
+    pub detail: String,
+}
+
+impl std::fmt::Display for MappingRefused {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let status = reqwest::StatusCode::from_u16(self.status)
+            .map(|status| status.to_string())
+            .unwrap_or_else(|_| self.status.to_string());
+        write!(f, "PUT {} failed: {status} {}", self.path, self.detail)
+    }
+}
+
+impl std::error::Error for MappingRefused {}
+
+/// Classify a failed create-index / put-mapping response. See [`MappingRefused`].
+fn mapping_error(path: String, status: reqwest::StatusCode, detail: String) -> anyhow::Error {
+    if status.as_u16() == 400 {
+        return anyhow::Error::new(MappingRefused {
+            path,
+            status: status.as_u16(),
+            detail,
+        });
+    }
+    anyhow!("PUT {path} failed: {status} {detail}")
+}
+/// How many bulk requests a run may have in flight, and how a 429 changes
+/// that number (#240 §8).
+///
+/// Before this, backpressure handling was transport-only: a 429 slept
+/// 250 ms..8 s and then re-offered exactly the same load from exactly as
+/// many workers, six times, before failing the file. The sleep is the right
+/// *first* move and is kept; what was missing is the feedback edge — the
+/// signal never reached the thing generating the load.
+///
+/// The rule is AIMD, the same shape TCP uses and for the same reason:
+/// congestion is expensive and must be answered immediately, while probing
+/// for recovered capacity must be slow enough not to re-cause it.
+///
+/// * **Multiplicative decrease** — a 429 halves the limit at once, floor 1.
+///   Further 429s inside [`SHRINK_COOLDOWN`] are the same congestion event
+///   seen by other workers, so they do not compound: without that damping,
+///   8 workers × 6 retries would collapse the limit to 1 on a single
+///   momentary stall.
+/// * **Additive increase** — after [`RECOVER_AFTER`] consecutive clean bulks
+///   the limit rises by one, never above the ceiling the operator asked for
+///   with `--workers`. Recovery is a probe, not a reset: a run that meets
+///   sustained pressure stays small for the rest of the run.
+///
+/// Honest scope: no peer engine does this. quickwit's rest client sleeps
+/// 500 ms and retries the same batch
+/// (`quickwit-rest-client/src/rest_client.rs:371-380`), meilisearch's REST
+/// embedder classifies 429 as retry-later
+/// (`crates/milli/src/vector/embedder/rest.rs:550`), and its S3 path treats
+/// it as a transient backoff (`.../enterprise_edition/s3.rs:447`). All three
+/// are the transport half ARGOS already had. The AIMD shape is adapted from
+/// congestion control, not copied from a search engine.
+pub struct BulkAdmission {
+    inner: Mutex<AdmissionState>,
+    space: Condvar,
+    /// Upper bound on the limit — what the operator asked for. `0` means the
+    /// gate is off entirely (probes and one-shot clients).
+    ceiling: usize,
+    /// How long `acquire` will wait for a slot before failing the bulk.
+    ///
+    /// A leaked permit (the holder never returned) used to park every later
+    /// bulk on `Condvar::wait` with no timeout. The field report's 56% stall
+    /// was a client with no open connections and a frozen progress line. The
+    /// budget matches the bulk HTTP timeout: a slot is only supposed to be
+    /// held for one request.
+    wait_budget: Duration,
+    congestion_events: AtomicU64,
+    /// Whether limit changes are announced on stderr. Off for `--quiet` and
+    /// for clients that are not a user-visible run.
+    announce: bool,
+}
+
+/// One congestion event may be reported by every worker that was in flight
+/// when the server pushed back; they must count once.
+const SHRINK_COOLDOWN: Duration = Duration::from_secs(1);
+/// While no bulk has succeeded since the last shrink, coalesce repeated 429
+/// retries from the same parent-breaker trip into a single halving for up to
+/// 15 s (issue #1250) instead of cascading 32 → 16 → 8 → 4 → 2 → 1 once per
+/// second while the server drains. Sized from the issue's data: the server's
+/// breaker/drain cycle repeated every ~12 s, so a window shorter than that
+/// (1 s before, or 2 s) still lets one trip halve the window five times.
+const EPISODE_MAX_COOLDOWN: Duration = Duration::from_secs(15);
+/// Clean bulks required before the limit is probed upward by one below
+/// `ssthresh` (above `ssthresh`, congestion avoidance scales this by `limit`).
+const RECOVER_AFTER: usize = 8;
+
+/// Minimum gap between two "raising bulk concurrency" lines on stderr.
+///
+/// The limit is probed upward one step per `RECOVER_AFTER` clean bulks, which
+/// on a run of small bulks is several steps a second: the full-corpus capture
+/// behind #944 holds 117 such lines for 11 shrinks. One line per interval,
+/// naming the whole climb since the last one, says the same thing legibly.
+const RAISE_ANNOUNCE_EVERY: Duration = Duration::from_secs(10);
+
+struct AdmissionState {
+    limit: usize,
+    in_flight: usize,
+    ok_streak: usize,
+    last_shrink: Option<Instant>,
+    /// True after a shrink until at least one bulk succeeds, so sustained 429
+    /// retries during a single breaker trip do not halve repeatedly every 1 s.
+    shrunk_in_episode: bool,
+    /// Slow-start threshold, set on each shrink to 3/4 of the limit that
+    /// tripped (kept above the halved limit). Below it, recovery steps every
+    /// `RECOVER_AFTER` clean bulks; at or above it — the band just under the
+    /// concurrency that last tripped the breaker — congestion avoidance needs
+    /// `RECOVER_AFTER * limit` clean bulks per +1 step, so the client creeps
+    /// up to the old ceiling instead of sprinting back into it.
+    ssthresh: usize,
+    /// When the last "raising" line was printed, and the limit it named —
+    /// so the next line can name the whole climb since.
+    last_raise_announce: Option<Instant>,
+    announced_limit: usize,
+}
+
+/// A slot in the bulk admission window, returned to the pool on drop —
+/// including on the error and panic paths, which is why it is a guard and
+/// not a pair of calls.
+pub struct BulkPermit<'a> {
+    admission: Option<&'a BulkAdmission>,
+}
+
+impl Drop for BulkPermit<'_> {
+    fn drop(&mut self) {
+        if let Some(admission) = self.admission {
+            let mut state = admission.inner.lock().unwrap();
+            state.in_flight = state.in_flight.saturating_sub(1);
+            drop(state);
+            admission.space.notify_one();
+        }
+    }
+}
+
+impl BulkAdmission {
+    /// A gate that never blocks and never shrinks — the behaviour of every
+    /// client that is not a bulk-loading run.
+    pub fn off() -> Self {
+        Self::new(0, false)
+    }
+
+    /// `ceiling` is the operator's concurrency (`--workers`); `0` disables.
+    pub fn new(ceiling: usize, announce: bool) -> Self {
+        Self {
+            inner: Mutex::new(AdmissionState {
+                limit: ceiling,
+                in_flight: 0,
+                ok_streak: 0,
+                last_shrink: None,
+                shrunk_in_episode: false,
+                ssthresh: ceiling,
+                last_raise_announce: None,
+                announced_limit: ceiling,
+            }),
+            space: Condvar::new(),
+            ceiling,
+            wait_budget: Duration::from_secs(300),
+            congestion_events: AtomicU64::new(0),
+            announce,
+        }
+    }
+
+    /// Tests use a short budget. Production sets this from the bulk HTTP
+    /// timeout in `Es::with_bulk_concurrency`.
+    fn with_wait_budget(mut self, budget: Duration) -> Self {
+        self.wait_budget = budget;
+        self
+    }
+
+    fn enabled(&self) -> bool {
+        self.ceiling > 0
+    }
+
+    /// Whether this run's client speaks on stderr about server pushback.
+    fn announces(&self) -> bool {
+        self.announce
+    }
+
+    /// Current admission limit; equals the ceiling until the server pushes
+    /// back. `0` when the gate is off.
+    pub fn limit(&self) -> usize {
+        if !self.enabled() {
+            return 0;
+        }
+        self.inner.lock().unwrap().limit
+    }
+
+    /// How many distinct congestion events this run has answered.
+    pub fn congestion_events(&self) -> u64 {
+        self.congestion_events.load(Ordering::Relaxed)
+    }
+
+    /// Block until a bulk slot is free. Cheap and non-blocking when off.
+    ///
+    /// The wait is sliced so a missed wakeup rechecks the condition, and it
+    /// fails once `wait_budget` elapses. A heartbeat goes to stderr while
+    /// the run is still waiting, on the same cadence the progress bar uses
+    /// for a person watching a pipe.
+    fn acquire(&self) -> Result<BulkPermit<'_>> {
+        if !self.enabled() {
+            return Ok(BulkPermit { admission: None });
+        }
+        const SLICE: Duration = Duration::from_secs(5);
+        const HEARTBEAT: Duration = Duration::from_secs(15);
+        let started = Instant::now();
+        let mut next_heartbeat = HEARTBEAT;
+        let mut state = self.inner.lock().unwrap();
+        while state.in_flight >= state.limit {
+            let left = self.wait_budget.saturating_sub(started.elapsed());
+            if left.is_zero() {
+                anyhow::bail!(
+                    "autoindex: waited {}s for a bulk slot (in_flight={} limit={}). \
+                     A previous bulk did not return its slot, so this run stops \
+                     instead of hanging. Re-run the same command to resume.",
+                    started.elapsed().as_secs(),
+                    state.in_flight,
+                    state.limit
+                );
+            }
+            let (guard, _) = self
+                .space
+                .wait_timeout(state, SLICE.min(left))
+                .expect("bulk admission lock poisoned");
+            state = guard;
+            if state.in_flight < state.limit {
+                break;
+            }
+            let waited = started.elapsed();
+            if waited >= self.wait_budget {
+                anyhow::bail!(
+                    "autoindex: waited {}s for a bulk slot (in_flight={} limit={}). \
+                     A previous bulk did not return its slot, so this run stops \
+                     instead of hanging. Re-run the same command to resume.",
+                    waited.as_secs(),
+                    state.in_flight,
+                    state.limit
+                );
+            }
+            if self.announce && waited >= next_heartbeat {
+                eprintln!(
+                    "autoindex: still waiting for a bulk slot (in_flight={} limit={}) after {}s",
+                    state.in_flight,
+                    state.limit,
+                    waited.as_secs()
+                );
+                next_heartbeat += HEARTBEAT;
+            }
+        }
+        state.in_flight += 1;
+        Ok(BulkPermit {
+            admission: Some(self),
+        })
+    }
+
+    /// The server said 429. Halve the offered load, once per event.
+    fn on_congestion(&self) {
+        if !self.enabled() {
+            return;
+        }
+        let mut state = self.inner.lock().unwrap();
+        let now = Instant::now();
+        if state
+            .last_shrink
+            .is_some_and(|last| now.duration_since(last) < SHRINK_COOLDOWN)
+        {
+            return;
+        }
+        if state.shrunk_in_episode
+            && state
+                .last_shrink
+                .is_some_and(|last| now.duration_since(last) < EPISODE_MAX_COOLDOWN)
+        {
+            return;
+        }
+        state.last_shrink = Some(now);
+        state.ok_streak = 0;
+        state.shrunk_in_episode = true;
+        self.congestion_events.fetch_add(1, Ordering::Relaxed);
+        let previous = state.limit;
+        state.limit = (previous / 2).max(1);
+        state.ssthresh = (previous * 3 / 4).max(state.limit + 1);
+        if state.limit != previous && self.announce {
+            eprintln!(
+                "autoindex: server pushed back (HTTP 429); lowering bulk concurrency \
+                 {previous} → {} for this run",
+                state.limit
+            );
+        }
+        // The next climb is reported from here, and its first step at once.
+        state.announced_limit = state.limit;
+        state.last_raise_announce = None;
+    }
+
+    /// A bulk was accepted. Probe upward once a clean streak says the
+    /// server has room again.
+    fn on_success(&self) {
+        if !self.enabled() {
+            return;
+        }
+        let mut state = self.inner.lock().unwrap();
+        state.shrunk_in_episode = false;
+        if state.limit >= self.ceiling {
+            return;
+        }
+        state.ok_streak += 1;
+        let needed = if state.limit < state.ssthresh {
+            RECOVER_AFTER
+        } else {
+            RECOVER_AFTER.saturating_mul(state.limit.max(1))
+        };
+        if state.ok_streak < needed {
+            return;
+        }
+        state.ok_streak = 0;
+        let previous = state.limit;
+        state.limit = (previous + 1).min(self.ceiling);
+        if self.announce {
+            // One line per `RAISE_ANNOUNCE_EVERY`, naming the climb since the
+            // last line; the first step after a shrink and the step that
+            // reaches the ceiling are always printed, so the record still
+            // shows when recovery started and when it completed.
+            let now = Instant::now();
+            let due = state.limit == self.ceiling
+                || state
+                    .last_raise_announce
+                    .is_none_or(|last| now.duration_since(last) >= RAISE_ANNOUNCE_EVERY);
+            if due {
+                eprintln!(
+                    "autoindex: server healthy again; raising bulk concurrency {} → {}",
+                    state.announced_limit, state.limit
+                );
+                state.last_raise_announce = Some(now);
+                state.announced_limit = state.limit;
+            }
+        }
+        drop(state);
+        self.space.notify_one();
+    }
+}
+
+/// How long one `bulk` call keeps re-offering records the server rejected
+/// with a per-item `status: 429` before handing the rejection to the caller.
+///
+/// That is the shape of ARGOS's parent memory circuit breaker: HTTP 200, every
+/// item `429`, reason `[parent] real memory circuit breaker tripped … writes
+/// rejected to prevent an out-of-memory kill`. It is transient by design —
+/// the governor releases it as soon as RSS drops back under the watermark
+/// (`argos-engine/src/governor.rs`: "RSS back below the memory watermark"),
+/// which on the 1 GB Takeout mailbox run took between 0.3 s and 10 s each
+/// time it tripped. Before this, the FIRST such answer aborted the run: the
+/// per-item path never retried (only HTTP-level 429s went through
+/// `with_retry`, and that gives up after ~8 s of backoff anyway), the file
+/// was left un-journaled, and the "rerun the same command" the error message
+/// advises re-extracted the whole mailbox and hit the same wall — measured
+/// twice, 226.9 s and 298.7 s to the same failure.
+///
+/// Ten minutes is deliberately long: a 429 here is not a bad record, it is
+/// the server asking for time, and the alternative is losing the run. Per-item
+/// 5xx and write blocks are NOT waited on — they are not congestion.
+pub const THROTTLE_PATIENCE: Duration = Duration::from_secs(600);
+
+/// How long a bulk that has accepted nothing will keep re-asking the parent
+/// memory breaker before the run stops and names the cap (#2238).
+///
+/// [`THROTTLE_PATIENCE`] stays the budget once any item in the bulk has been
+/// accepted: a drain that is freeing memory (the #944 mailbox held the
+/// breaker for 57 s before drains existed; releases after #948 are seconds)
+/// must be allowed to finish. A bulk the server has not taken a single item
+/// from is the other shape — the 8 GiB auto tier's breaker loop, indexed
+/// count stuck at 0 for several minutes with no statement of what to change.
+/// Ninety seconds is past that 57 s hold and past one drain of the auto
+/// tier's 2 GiB memtable budget, and short of a multi-minute spin.
+pub const ZERO_PROGRESS_PATIENCE: Duration = Duration::from_secs(90);
+
+/// The parent memory breaker, as opposed to a disk flood-stage 429 or a
+/// thread-pool rejection. Both of its reasons carry one of these phrases.
+pub(crate) fn is_parent_memory_breaker(reason: &str) -> bool {
+    reason.contains("circuit breaker") || reason.contains("memtable byte budget")
+}
+
+/// Name `limits.max_process_memory_mb` on a parent-breaker 429 that does not
+/// already name it (#2238). Other failures are returned unchanged, and a
+/// reason that already carries the knob is not annotated twice.
+pub(crate) fn memory_cap_hint(reason: &str) -> String {
+    const MARKER: &str = "limits.max_process_memory_mb";
+    if reason.contains(MARKER) || !is_parent_memory_breaker(reason) {
+        return reason.to_owned();
+    }
+    format!(
+        "{reason} — raise {MARKER} or ARGOS_MAX_PROCESS_MEMORY_MB \
+         (the auto memory tier derives this breaker's limit from that cap; 0 = whole machine)"
+    )
+}
+
+/// The back-pressure stop, with the process-memory cap named when the
+/// rejection is the parent breaker.
+pub(crate) fn backpressure_exhausted(
+    items: u64,
+    patience: Duration,
+    reason: &str,
+) -> BackpressureExhausted {
+    BackpressureExhausted {
+        items,
+        patience,
+        reason: memory_cap_hint(reason),
+    }
+}
+
+/// How often the wait is announced on stderr, so a run that is waiting on
+/// the server does not look like a hang.
+const NOTICE_EVERY: Duration = Duration::from_secs(30);
+
+/// Most actions one `_bulk` request carries, whoever built the body (#955).
+///
+/// Every producer windows its bodies by BYTES (`--bulk-mb`), and two of them
+/// did not window at all: the catalog write of either indexing path sent the
+/// whole projection — one document per file, per dataset and per run — as one
+/// request. On the 48,533-file reference corpus that was 51,129 actions in a
+/// 31.9 MB body, the engine's `limits.max_actions_per_bulk` is 50,000, and the
+/// run ended `exit=1 reason=aborted` in `finalize-catalog`, 10,336 s in, with
+/// all 47,444 sealed operations already applied (capture
+/// `benchmarks/autoindex-resilience/before-955.stderr.txt`).
+///
+/// Bounding a request in both dimensions is the shape every bulk client in the
+/// reference corpus has — Elasticsearch's `BulkProcessor2` closes a request
+/// under construction when EITHER its action count (default 1,000) or its byte
+/// size (default 5 MB) is reached (`action/bulk/BulkProcessor2.java:78-79,
+/// 503-509`; approach only, nothing copied), and quickwit's REST client cuts a
+/// payload under the server's content-length limit before it sends and merges
+/// the per-batch responses (`quickwit-rest-client/src/rest_client.rs:43,
+/// 333-390`). What neither does is ask the server: the second half of this
+/// change is that a request the server still answers "too large" is halved and
+/// re-sent, because `max_actions_per_bulk` is an operator's setting and a
+/// constant on this side cannot know it.
+///
+/// 10,000 is a fifth of the engine's default and above every body the
+/// per-file producers build today (the legacy path cuts at 5,000 documents,
+/// the sealed replay at one file's records, capped at 4,096 by default), so it
+/// binds only on a body nobody windowed.
+const BULK_MAX_ACTIONS: usize = 10_000;
+
+/// Most "too large" refusals announced on stderr in one run. A server with a
+/// very low limit is learned in about `log2(10_000)` halvings; a run that
+/// passes this is repeating itself and the count on `argos-done` is the record.
+const SPLIT_ANNOUNCE_CAP: u64 = 16;
+
+/// Page timeout every [`Es::search_page`] request carries when its caller set
+/// no `timeout` of its own (#1212). The engine's default — a 30 s cooperative
+/// deadline on any body without one — answers a slow node with HTTP 200,
+/// partial hits and `timed_out: true`, which a page walker cannot tell from
+/// the last page. 120 s sits above the slowest sorted page measured on a
+/// breaker-drained node (40 s); the bounded retry in `search_page` covers
+/// anything slower.
+pub const SEARCH_PAGE_TIMEOUT: &str = "120s";
+
+/// How many times [`Es::search_page`] re-asks the SAME page when the node
+/// keeps answering it partial. Six attempts at a 120 s page timeout is a
+/// 12-minute ceiling per page — enough to ride out a merge or a breaker
+/// drain, short enough to fail a genuinely wedged node within a run's
+/// patience (the bulk patience is 600 s, `THROTTLE_PATIENCE`).
+pub(crate) const PARTIAL_PAGE_ATTEMPTS: usize = 6;
+
+/// What this run has learned about how large a `_bulk` request the server
+/// takes, shared by every clone of a client like [`BulkAdmission`].
+struct RequestSizeLedger {
+    /// Most actions to put in one request after a "too large" answer;
+    /// `usize::MAX` until the server has given one.
+    max_actions: AtomicUsize,
+    /// Most bytes to put in one request after an HTTP 413; `usize::MAX` until
+    /// the server has given one.
+    max_bytes: AtomicUsize,
+    /// Requests the server refused as too large and this client halved.
+    splits: AtomicU64,
+}
+
+impl Default for RequestSizeLedger {
+    fn default() -> Self {
+        Self {
+            max_actions: AtomicUsize::new(usize::MAX),
+            max_bytes: AtomicUsize::new(usize::MAX),
+            splits: AtomicU64::new(0),
+        }
+    }
+}
+
+/// Run-wide record of per-item back-pressure re-sends (#944), shared by every
+/// clone of a client like [`BulkAdmission`] — it is what `argos-done` reports
+/// as `bulk_retries` / `bulk_items_reissued`.
+#[derive(Default)]
+struct ThrottleLedger {
+    /// Re-sent bulks (each carrying only the items the previous response
+    /// rejected 429).
+    reissues: AtomicU64,
+    /// Items re-sent, summed over every re-send.
+    items_reissued: AtomicU64,
+}
+
+/// How the server said a whole `_bulk` request was too large (#955).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TooLarge {
+    /// HTTP 413 on the request: a body-size limit (`limits.max_body_bytes`,
+    /// or a proxy in front of the node).
+    Bytes,
+    /// HTTP 200 carrying ONE item answered 413 for a body of several actions:
+    /// the engine's `limits.max_actions_per_bulk`.
+    Actions,
+}
+
+/// What [`Es::bulk_window`] did with one window of a body.
+enum SentWindow {
+    /// Landed, or handed back with the errors the caller must see.
+    Done(BulkOutcome),
+    /// Refused whole as too large and cut in two; nothing was written.
+    Halved(Vec<Vec<u8>>),
+}
+
+/// The server was still answering a bulk's items 429 when the client ran out
+/// of patience (#944): back-pressure that did not clear, as opposed to a
+/// broken endpoint or a record the server refuses.
+///
+/// A type rather than a message for the reason [`MappingRefused`] is one: the
+/// callers that end a run on it have to tell it from every other failure, so
+/// the terminal line can say `reason=server-backpressure` and name what is
+/// left, instead of the `reason=aborted` that also covers a crashed journal.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BackpressureExhausted {
+    /// Items the server was still rejecting (sent and unsent windows).
+    pub items: u64,
+    pub patience: Duration,
+    pub reason: String,
+}
+
+impl std::fmt::Display for BackpressureExhausted {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "the server kept rejecting {} of a prepared bulk's items after {}s of \
+             back-pressure re-sends with nothing accepted: {}. Nothing from this \
+             bulk was journaled applied; rerun the same command once the server \
+             condition clears and the run resumes from its last committed operation",
+            self.items,
+            self.patience.as_secs(),
+            self.reason
+        )
+    }
+}
+
+impl std::error::Error for BackpressureExhausted {}
+
+impl BackpressureExhausted {
+    /// The back-pressure stop under any amount of `anyhow` context.
+    pub fn in_chain(error: &anyhow::Error) -> Option<&Self> {
+        error.chain().find_map(|cause| cause.downcast_ref::<Self>())
+    }
+}
+
+/// One attempt of a retried request, as [`Es::retry_loop`] sees it.
+enum Attempt<T> {
+    Done(T),
+    /// HTTP 429, with the server's stated reason when it gave one.
+    Throttled(Option<String>),
+    /// 5xx or a transport error.
+    Failed(anyhow::Error),
+    /// Not retryable: returned to the caller as-is.
+    Abort(anyhow::Error),
+}
+
+/// What one round of a bulk request said, item by item.
+struct Round {
+    outcome: BulkOutcome,
+    /// Indexes (in request order) of the items the server rejected `429`.
+    throttled: Vec<usize>,
+    /// Server-side failures that are NOT throttling — 5xx, write blocks.
+    other_server_errors: u64,
+    /// The first per-item error that waiting cannot fix (a 400).
+    first_settled_error: Option<String>,
+    /// The server's stated reason for the first 429 item.
+    throttle_reason: Option<String>,
+    /// Items in the response, for alignment with the request body.
+    items: usize,
+    /// Set when the server refused the WHOLE request as too large (#955),
+    /// with the dimension it named. Nothing in such a request was written.
+    too_large: Option<TooLarge>,
+}
+
+/// The byte ranges of the items in a bulk body, in request order: an action
+/// line plus its source line, or the action line alone for `delete`. `None`
+/// if the body is not well-formed NDJSON — a caller then does not retry.
+fn bulk_item_ranges(body: &[u8]) -> Option<Vec<std::ops::Range<usize>>> {
+    let mut ranges = Vec::new();
+    let mut pos = 0usize;
+    while pos < body.len() {
+        let start = pos;
+        let action_end = memchr::memchr(b'\n', &body[pos..]).map_or(body.len(), |i| pos + i + 1);
+        let action: Value = serde_json::from_slice(&body[start..action_end]).ok()?;
+        let object = action.as_object()?;
+        if object.len() != 1 {
+            return None;
+        }
+        pos = action_end;
+        if !object.contains_key("delete") {
+            if pos >= body.len() {
+                return None;
+            }
+            pos = memchr::memchr(b'\n', &body[pos..]).map_or(body.len(), |i| pos + i + 1);
+        }
+        ranges.push(start..pos);
+    }
+    Some(ranges)
+}
+
+/// The sub-body holding only the items at `keep`, byte-identical to their
+/// original lines. `None` if the body does not have exactly `expected`
+/// items — the response cannot then be aligned with the request.
+fn select_bulk_items(body: &[u8], keep: &[usize], expected: usize) -> Option<Vec<u8>> {
+    let ranges = bulk_item_ranges(body)?;
+    if ranges.len() != expected {
+        return None;
+    }
+    let mut out = Vec::with_capacity(body.len());
+    for &i in keep {
+        let range = ranges.get(i)?.clone();
+        out.extend_from_slice(&body[range]);
+    }
+    Some(out)
+}
+
+/// How many actions an NDJSON bulk body holds. `None` when the body is not
+/// well-formed NDJSON — such a body is neither windowed nor halved.
+fn count_bulk_actions(body: &[u8]) -> Option<usize> {
+    bulk_item_ranges(body).map(|ranges| ranges.len())
+}
+
+/// Cut an NDJSON bulk body into consecutive windows of at most `max_actions`
+/// actions and `max_bytes` bytes, in order (#955). A window is closed BEFORE
+/// the action that would take it past a bound, the rule the byte-windowing
+/// producers already use, so a body one of them built under the same byte
+/// bound is never cut again; one action larger than `max_bytes` travels alone.
+///
+/// `None` when the body already fits, or when it is not well-formed NDJSON —
+/// such a body is sent as it is, exactly as before.
+fn window_bulk_body(body: &[u8], max_actions: usize, max_bytes: usize) -> Option<Vec<Vec<u8>>> {
+    let max_actions = max_actions.max(1);
+    // Lines bound actions from above, so the common case costs one scan and
+    // no JSON parse.
+    if body.len() <= max_bytes && body.iter().filter(|byte| **byte == b'\n').count() <= max_actions
+    {
+        return None;
+    }
+    let ranges = bulk_item_ranges(body)?;
+    let mut windows: Vec<Vec<u8>> = Vec::new();
+    let mut current: Vec<u8> = Vec::new();
+    let mut current_actions = 0usize;
+    for range in ranges {
+        let needed = range.len();
+        if current_actions > 0
+            && (current_actions >= max_actions || current.len() + needed > max_bytes)
+        {
+            windows.push(std::mem::take(&mut current));
+            current_actions = 0;
+        }
+        current.extend_from_slice(&body[range]);
+        current_actions += 1;
+    }
+    if current_actions > 0 {
+        windows.push(current);
+    }
+    (windows.len() > 1).then_some(windows)
+}
+
+/// Whether a parsed HTTP 200 `_bulk` response is the engine refusing the whole
+/// request for its action count (#955): exactly ONE item, answered 413, for a
+/// body that held several actions. The engine checks
+/// `limits.max_actions_per_bulk` before it parses anything and answers with a
+/// single synthetic item, so nothing in such a request was written. A lone
+/// action answered 413 is a statement about that record and is left alone.
+fn is_whole_request_too_large(v: &Value, sent_actions: Option<usize>) -> bool {
+    let Some(items) = v.get("items").and_then(Value::as_array) else {
+        return false;
+    };
+    if items.len() != 1 || sent_actions.is_none_or(|sent| sent <= 1) {
+        return false;
+    }
+    items[0]
+        .as_object()
+        .and_then(|item| item.values().next())
+        .and_then(|op| op.get("status"))
+        .and_then(Value::as_u64)
+        == Some(413)
+}
+
+/// Read a bulk response body item by item.
+fn parse_round(v: &Value) -> Round {
+    let items = v.get("items").and_then(|i| i.as_array());
+    let mut round = Round {
+        outcome: BulkOutcome::default(),
+        throttled: Vec::new(),
+        other_server_errors: 0,
+        first_settled_error: None,
+        throttle_reason: None,
+        items: items.map_or(0, Vec::len),
+        too_large: None,
+    };
+    if !v.get("errors").and_then(|e| e.as_bool()).unwrap_or(false) {
+        return round;
+    }
+    for (i, it) in items.into_iter().flatten().enumerate() {
+        let op = it
+            .get("index")
+            .or_else(|| it.get("create"))
+            .or_else(|| it.get("update"))
+            .or_else(|| it.get("delete"));
+        let Some(op) = op else { continue };
+        if op.get("error").is_none() {
+            continue;
+        }
+        round.outcome.item_errors += 1;
+        let item_status = op.get("status").and_then(Value::as_u64).unwrap_or(500);
+        let error_text = || {
+            op["error"]
+                .to_string()
+                .chars()
+                .take(500)
+                .collect::<String>()
+        };
+        if item_status == 429 {
+            round.throttled.push(i);
+            if round.throttle_reason.is_none() {
+                round.throttle_reason = Some(
+                    op["error"]
+                        .get("reason")
+                        .and_then(Value::as_str)
+                        .map(|r| r.chars().take(SERVER_REASON_MAX).collect())
+                        .unwrap_or_else(error_text),
+                );
+            }
+        }
+        if item_status == 429 || item_status >= 500 || is_index_block_error(&op["error"]) {
+            round.outcome.server_errors += 1;
+            if item_status != 429 {
+                round.other_server_errors += 1;
+            }
+            if round.outcome.first_server_error.is_none() {
+                round.outcome.first_server_error = Some(error_text());
+            }
+        } else if round.first_settled_error.is_none() {
+            round.first_settled_error = Some(op["error"].to_string().chars().take(300).collect());
+        }
+        if round.outcome.first_error.is_none() {
+            round.outcome.first_error = Some(op["error"].to_string().chars().take(300).collect());
+        }
+    }
+    round
+}
+
+#[derive(Debug, Default)]
+pub struct BulkOutcome {
+    pub item_errors: u64,
+    /// Per-item backend/admission failures — 5xx/429 statuses plus
+    /// cluster/index write blocks recognised by TYPE (see
+    /// [`is_index_block_error`]). These are not bad source records: the same
+    /// record indexes fine once the server-side condition clears. Callers
+    /// must not journal the source file complete.
+    pub server_errors: u64,
+    pub first_error: Option<String>,
+    pub first_server_error: Option<String>,
+    /// How many of `server_errors` are items the server was still answering
+    /// 429 when [`Es::bulk`] ran out of patience (#944) — the one server
+    /// failure that says "come back later" rather than "something is broken".
+    /// Callers use it to name the stop as back-pressure, not as an abort.
+    pub throttled_out: u64,
+    /// The patience budget that elapsed when `throttled_out` was set.
+    /// `None` until a bulk gives up. The full [`THROTTLE_PATIENCE`] once any
+    /// item was accepted; [`ZERO_PROGRESS_PATIENCE`] when none was (#2238).
+    pub exhausted_after: Option<Duration>,
+}
+
+impl BulkOutcome {
+    /// Fold the outcome of a later window of the same body into this one.
+    fn absorb(&mut self, other: BulkOutcome) {
+        self.item_errors += other.item_errors;
+        self.server_errors += other.server_errors;
+        self.throttled_out += other.throttled_out;
+        if self.first_error.is_none() {
+            self.first_error = other.first_error;
+        }
+        if self.first_server_error.is_none() {
+            self.first_server_error = other.first_server_error;
+        }
+        if self.exhausted_after.is_none() {
+            self.exhausted_after = other.exhausted_after;
+        }
+    }
+}
+
+/// Whether a per-item bulk `error` object reports a cluster/index write
+/// block (e.g. `read_only_allow_delete` at the disk flood-stage watermark,
+/// or an explicit `index.blocks.write`).
+///
+/// Blocks must be recognised by error TYPE and wording, never by HTTP
+/// status: Elasticsearch maps explicit/API blocks to 403 FORBIDDEN and only
+/// the flood-stage block to 429 (IndexMetadata block constants), and ARGOS
+/// mirrors that split, so a status-only classifier files a 403 block under
+/// "bad source record". That is issue #195: every rejected document was
+/// counted as junk, the source file was journaled complete, and the
+/// instructed rerun then resumed past the journal and reported success over
+/// an empty index. ES itself carries retryability on the block, not the
+/// status (ClusterBlockException::retryable) — the type is the contract.
+///
+/// Matches (verified against live responses):
+///   - ARGOS:  `{"type":"engine_exception","reason":"index [x] is blocked
+///     for write operations","status":403}`
+///   - ES:    `{"type":"cluster_block_exception","reason":"index [x]
+///     blocked by: [FORBIDDEN/8/index write (api)];"}`
+///
+/// A reason merely *containing* "blocked" could in principle be a
+/// field-value echo in a mapping error; misclassifying that direction is
+/// the safe one — the file is retried instead of silently dropped.
+fn is_index_block_error(error: &Value) -> bool {
+    let type_is_block = error
+        .get("type")
+        .and_then(Value::as_str)
+        .is_some_and(|t| t.contains("cluster_block") || t.contains("index_block"));
+    let reason_is_block = error
+        .get("reason")
+        .and_then(Value::as_str)
+        .is_some_and(|reason| reason.contains("blocked"));
+    type_is_block || reason_is_block
+}
+
+/// How much of a 429/5xx body [`server_reason`] keeps. A 5xx body can be a
+/// whole stack trace; the sentence that names the condition is at the front.
+const SERVER_REASON_MAX: usize = 512;
+
+/// The server's own explanation for a 429/5xx, bounded to a prefix.
+///
+/// [`Es::with_retry`] used to report only `HTTP 500 Internal Server Error` and
+/// drop the body, which is the same sentence for a poisoned index, a full disk
+/// and a panicking handler. That is why #345 was filed as "not investigated":
+/// the reporter had a status line and nothing to act on, while the response
+/// they discarded carried the reason — every by-query refusal answers
+/// `{"error": {"type", "reason"}, "status"}` (`es_compat::by_query_response`),
+/// and `_bulk` already surfaces the per-item half of the same thing
+/// ([`BulkOutcome::first_server_error`]).
+///
+/// `error.type: error.reason` is preferred because that is the shape both ARGOS
+/// and Elasticsearch answer with; the raw body is the fallback for anything
+/// else (an HTML proxy error page, a bare string), because a reverse proxy in
+/// front of the server is exactly the case where the status alone is useless.
+fn server_reason(resp: reqwest::blocking::Response) -> Option<String> {
+    let body = resp.text().ok()?;
+    let reason = serde_json::from_str::<Value>(&body)
+        .ok()
+        .and_then(|value| {
+            let error = value.get("error")?;
+            let kind = error.get("type").and_then(Value::as_str);
+            let why = error.get("reason").and_then(Value::as_str);
+            match (kind, why) {
+                (Some(kind), Some(why)) => Some(format!("{kind}: {why}")),
+                (Some(only), None) | (None, Some(only)) => Some(only.to_owned()),
+                (None, None) => None,
+            }
+        })
+        .unwrap_or(body);
+    // `chars`, not bytes: the body can be any encoding the server chose, and
+    // slicing one mid-codepoint would panic on the error path (#326).
+    let reason: String = reason.trim().chars().take(SERVER_REASON_MAX).collect();
+    (!reason.is_empty()).then_some(reason)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EmbeddingExecutionIdentity {
+    pub version: u32,
+    pub backend: String,
+    pub identity_sha256: String,
+    /// Absent when the server has not pinned a vector width: a `proxy` whose
+    /// endpoint has not confirmed one (#2306), and a `neural` node that could
+    /// not resolve its model assets. A confirmed proxy reports the probed
+    /// width, and a resolved `neural` node reports its `config.json`
+    /// `hidden_size` (#487). An absent width must not be read as 384.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dimensions: Option<usize>,
+    pub semantic_contract: String,
+    pub resumable: bool,
+    #[serde(default)]
+    pub non_resumable_reason: Option<String>,
+    /// Advisory neural-ingest sample from `GET /v1/embedding/identity`.
+    /// Absent on older servers and on every non-neural backend. Not part of
+    /// `identity_sha256`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ingest_probe_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ingest_probe_passages: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ingest_probe_millis: Option<u64>,
+}
+
+/// Ensure an autoindex index-create body pins the index to a single WAL shard.
+///
+/// autoindex creates one index per inferred dataset — hundreds for a large
+/// repo. Each index otherwise opens one WAL file per ingest shard (a count that
+/// scales with the server's CPU cores), so hundreds of indices exhaust the
+/// process file-descriptor limit — fatal on macOS, whose default soft limit is
+/// 256. `index.argos_ingest_shards = 1` keeps each index at a single WAL fd.
+/// Non-destructive: only fills the key when absent.
+fn with_single_wal_shard(body: &Value) -> Value {
+    let mut body = body.clone();
+    if let Some(obj) = body.as_object_mut() {
+        let settings = obj
+            .entry("settings")
+            .or_insert_with(|| serde_json::json!({}));
+        if let Some(sobj) = settings.as_object_mut() {
+            let index = sobj.entry("index").or_insert_with(|| serde_json::json!({}));
+            if let Some(iobj) = index.as_object_mut() {
+                iobj.entry("argos_ingest_shards")
+                    .or_insert_with(|| serde_json::json!(1));
+            }
+        }
+    }
+    body
+}
+
+/// HTTP client for one ARGOS node.
+///
+/// A loopback URL (`127.0.0.1`, `localhost`, `::1`, `0.0.0.0` — the same
+/// hosts as [`argos_common::localauth::url_is_loopback`]) skips
+/// `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY`. reqwest would otherwise send
+/// `127.0.0.1` through them, and a proxy that cannot reach loopback answers
+/// HTTP 503 while the node is up (#2379). A non-loopback URL keeps those
+/// variables, including `NO_PROXY`.
+pub(crate) fn node_blocking_builder(url: &str) -> reqwest::blocking::ClientBuilder {
+    let builder = reqwest::blocking::Client::builder();
+    if argos_common::localauth::url_is_loopback(url) {
+        builder.no_proxy()
+    } else {
+        builder
+    }
+}
+
+impl Es {
+    pub fn new(url: &str, api_key: Option<String>) -> Result<Self> {
+        Self::with_bulk_timeout(url, api_key, 300)
+    }
+
+    pub fn with_bulk_timeout(
+        url: &str,
+        api_key: Option<String>,
+        bulk_timeout_secs: u64,
+    ) -> Result<Self> {
+        Self::with_bulk_policy(
+            url,
+            api_key,
+            Duration::from_secs(bulk_timeout_secs),
+            Duration::from_millis(250),
+            Duration::from_secs(8),
+        )
+    }
+
+    fn with_bulk_policy(
+        url: &str,
+        api_key: Option<String>,
+        bulk_timeout: Duration,
+        retry_initial_delay: Duration,
+        retry_max_delay: Duration,
+    ) -> Result<Self> {
+        // Loopback skips HTTP(S)_PROXY / ALL_PROXY (#2379). A non-loopback
+        // URL keeps them, including NO_PROXY. Same rule as `argos mcp`.
+        let http = node_blocking_builder(url)
+            .timeout(Duration::from_secs(300))
+            .danger_accept_invalid_certs(true)
+            .build()
+            .context("build http client")?;
+        Ok(Es {
+            base: url.trim_end_matches('/').to_string(),
+            http,
+            api_key,
+            bulk_timeout,
+            retry_initial_delay,
+            retry_max_delay,
+            admission: Arc::new(BulkAdmission::off()),
+            throttle_patience: THROTTLE_PATIENCE,
+            zero_progress_patience: ZERO_PROGRESS_PATIENCE,
+            bulk_max_actions: BULK_MAX_ACTIONS,
+            request_size: Arc::new(RequestSizeLedger::default()),
+            throttle_ledger: Arc::new(ThrottleLedger::default()),
+            node_down: Arc::new(NodeDownLatch {
+                message: Mutex::new(None),
+            }),
+            #[cfg(test)]
+            backoff_delays: Arc::new(std::sync::Mutex::new(Vec::new())),
+            #[cfg(test)]
+            notices: Arc::new(Mutex::new(Vec::new())),
+        })
+    }
+
+    /// Give this client a bulk admission window `workers` wide, so a 429 can
+    /// shrink the load the run offers instead of only delaying it (#240 §8).
+    ///
+    /// Off by default: a probe or a one-shot client has nothing to throttle.
+    /// A run enables it once, before its workers start, and every clone made
+    /// afterwards shares the same window.
+    /// How long a bulk keeps re-offering per-item-429 records (tests shrink it).
+    #[cfg(test)]
+    fn with_throttle_patience(mut self, patience: Duration) -> Self {
+        self.throttle_patience = patience;
+        self
+    }
+
+    /// How long a bulk the server has not accepted a single item from keeps
+    /// re-asking a parent memory breaker (tests shrink it).
+    #[cfg(test)]
+    fn with_zero_progress_patience(mut self, patience: Duration) -> Self {
+        self.zero_progress_patience = patience;
+        self
+    }
+
+    /// How long one `bulk` call waits on a server that is accepting nothing
+    /// before the rejection is handed back — what the terminal line quotes.
+    pub fn throttle_patience(&self) -> Duration {
+        self.throttle_patience
+    }
+
+    /// Most actions in one `_bulk` request. Tests only: the real bound is
+    /// [`BULK_MAX_ACTIONS`], tightened at run time by what the server refuses.
+    #[cfg(test)]
+    pub(crate) fn with_bulk_max_actions(mut self, actions: usize) -> Self {
+        self.bulk_max_actions = actions.max(1);
+        self
+    }
+
+    /// Bulks this run re-sent because the server answered items `429` — what
+    /// `argos-done` reports as `bulk_retries` (#944).
+    pub fn bulk_backpressure_retries(&self) -> u64 {
+        self.throttle_ledger.reissues.load(Ordering::Relaxed)
+    }
+
+    /// Items re-sent, summed over every re-send (#944).
+    pub fn bulk_items_reissued(&self) -> u64 {
+        self.throttle_ledger.items_reissued.load(Ordering::Relaxed)
+    }
+
+    /// Requests the server refused as too large and this client halved — what
+    /// `argos-done` reports as `bulk_splits` (#955).
+    pub fn bulk_requests_split(&self) -> u64 {
+        self.request_size.splits.load(Ordering::Relaxed)
+    }
+
+    pub fn with_bulk_concurrency(mut self, workers: usize, announce: bool) -> Self {
+        self.admission = Arc::new(
+            BulkAdmission::new(workers.max(1), announce).with_wait_budget(self.bulk_timeout),
+        );
+        self
+    }
+
+    /// The current bulk admission limit (`0` when the gate is off).
+    pub fn bulk_concurrency_limit(&self) -> usize {
+        self.admission.limit()
+    }
+
+    /// How many distinct 429 congestion events this client answered.
+    pub fn bulk_congestion_events(&self) -> u64 {
+        self.admission.congestion_events()
+    }
+
+    /// `true` after a connect failure has shown the node is not accepting
+    /// connections. Phase B stops taking files when this flips (#2177).
+    pub fn node_is_down(&self) -> bool {
+        self.node_down.message.lock().unwrap().is_some()
+    }
+
+    fn req(&self, method: reqwest::Method, path: &str) -> reqwest::blocking::RequestBuilder {
+        let mut r = self.http.request(method, format!("{}{}", self.base, path));
+        if let Some(k) = &self.api_key {
+            r = r.header("Authorization", format!("ApiKey {k}"));
+        }
+        r
+    }
+
+    /// True when `ping` failed because the node answered 401/403. That is not
+    /// "no node reachable" — the node is up and the key is missing or wrong.
+    pub fn ping_failure_is_auth(err: &anyhow::Error) -> bool {
+        let text = format!("{err:#}");
+        text.contains("(HTTP 401)") || text.contains("(HTTP 403)")
+    }
+
+    pub fn ping(&self) -> Result<Value> {
+        let resp = self
+            .req(reqwest::Method::GET, "/")
+            .send()
+            .with_context(|| format!("endpoint unreachable: {}", self.base))?;
+        let status = resp.status();
+        if status.as_u16() == 401 || status.as_u16() == 403 {
+            anyhow::bail!(self.auth_help(status.as_u16()));
+        }
+        Ok(resp.json().unwrap_or(Value::Null))
+    }
+
+    /// The recovery message for a server that wants credentials we do not have.
+    ///
+    /// This exists because the failure it replaces was actively misleading. A
+    /// server with auth on (which is the shipped default) answered the very
+    /// first request with 401, `ping` threw the status away, and the run went
+    /// on to print ~15 lines of healthy-looking progress before dying at the
+    /// embedding-identity probe with "requires a ARGOS server that exposes a
+    /// resumable embedding identity". A real user read that, concluded their
+    /// server lacked the feature, and disabled auth to get past it — when all
+    /// that was missing was a key the server had already written to disk.
+    ///
+    /// So: name every way out, and name them at the first round trip.
+    fn auth_help(&self, status: u16) -> String {
+        let what = if self.api_key.is_some() {
+            "rejected the API key we sent"
+        } else {
+            "requires authentication and no API key was supplied"
+        };
+        // Order and framing matter here. A blind onboarding run showed that
+        // listing `--insecure` as a co-equal third bullet makes it the
+        // cheapest thing to try — one flag, no path to look up — which is the
+        // straight line to "I turned auth off", the very outcome this message
+        // exists to prevent. So: the two fixes that keep auth on come first
+        // and concretely, and turning auth off is fenced as a last resort for
+        // a throwaway local server. The server's own 401 already words it
+        // this way; this makes the CLI say what the server says.
+        format!(
+            "the server at {} {what} (HTTP {status}).\n\
+             \x20 To fix, in order of preference:\n\
+             \x20 1. export ARGOS_API_KEY=\"$(cat <data_dir>/admin.key)\" — the server \
+             generates this key on first startup and prints the path in its startup banner\n\
+             \x20 2. or pass it explicitly: --api-key <key>\n\
+             \x20 3. last resort, and only for a throwaway local server you can afford to \
+             leave unauthenticated: restart it with --insecure, which disables TLS and auth \
+             for every client, not just this command",
+            self.base
+        )
+    }
+
+    pub fn embedding_execution_identity(&self) -> Result<EmbeddingExecutionIdentity> {
+        let response = self
+            .req(reqwest::Method::GET, "/v1/embedding/identity")
+            .send()
+            .context("GET /v1/embedding/identity")?;
+        let status = response.status();
+        // Defence in depth: `ping` already fails closed on 401/403, but a
+        // `--url` target can answer `GET /` anonymously and still guard this
+        // endpoint. Blaming the server's capabilities for a missing credential
+        // is what sent the original reporter down the wrong path.
+        if status.as_u16() == 401 || status.as_u16() == 403 {
+            anyhow::bail!(self.auth_help(status.as_u16()));
+        }
+        if !status.is_success() {
+            anyhow::bail!(
+                "GET /v1/embedding/identity failed: HTTP {status}; semantic autoindex requires \
+                 a ARGOS server that exposes a resumable embedding identity"
+            );
+        }
+        let value: Value = response
+            .json()
+            .context("parse embedding identity response")?;
+        let identity: EmbeddingExecutionIdentity = serde_json::from_value(
+            value
+                .get("data")
+                .cloned()
+                .ok_or_else(|| anyhow!("embedding identity response has no data object"))?,
+        )
+        .context("parse embedding identity")?;
+        if identity.version != 1
+            || identity.identity_sha256.len() != 64
+            || !identity
+                .identity_sha256
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+            || identity.dimensions == Some(0)
+            // `lexical` and `onnx-experimental` are the backends whose width
+            // the server does pin, so an absent width from one of them means
+            // the response did not come from a server that pins it. Only the
+            // explicitly unpinned backends may omit it.
+            || (matches!(identity.backend.as_str(), "lexical" | "onnx-experimental")
+                && identity.dimensions.is_none())
+            || identity.semantic_contract != "semantic_text-derived-vector.v1"
+            || !matches!(
+                identity.backend.as_str(),
+                "lexical" | "neural" | "proxy" | "onnx-experimental"
+            )
+        {
+            anyhow::bail!("server returned an unsupported embedding execution identity");
+        }
+        Ok(identity)
+    }
+
+    /// GET an arbitrary path and return only the HTTP status code.
+    ///
+    /// One attempt, no retry/backoff: `argos brain` uses this to probe
+    /// whether a server is listening (`/health/ready`, auth-exempt) and
+    /// whether its credentials are accepted (`/`), and a liveness probe
+    /// that silently retried for ~16s would misreport "already running"
+    /// as "boot took 16s". A transport error means nothing answered.
+    pub fn get_status(&self, path: &str) -> Result<u16> {
+        let resp = self
+            .req(reqwest::Method::GET, path)
+            .send()
+            .with_context(|| format!("no response from {}{}", self.base, path))?;
+        Ok(resp.status().as_u16())
+    }
+
+    /// GET a JSON body. One attempt like [`Self::get_status`] — the callers
+    /// (`argos gain` reading the audit log) are interactive CLI reads where a
+    /// transport error should surface immediately, not after backoff.
+    pub fn get_json(&self, path: &str) -> Result<Value> {
+        let resp = self
+            .req(reqwest::Method::GET, path)
+            .send()
+            .with_context(|| format!("no response from {}{}", self.base, path))?;
+        let status = resp.status();
+        let body: Value = resp
+            .json()
+            .with_context(|| format!("non-JSON response from {}{}", self.base, path))?;
+        if !status.is_success() {
+            anyhow::bail!("{}{} returned HTTP {}: {}", self.base, path, status, body);
+        }
+        Ok(body)
+    }
+
+    /// One JSON request, one attempt, status handed back to the caller.
+    ///
+    /// For interactive commands whose statuses *are* the answer — `argos share`
+    /// reads a 403 as "that key is not the admin key", a 404 as "no such
+    /// index" and a 409 as "this node has authentication off". `get_json`
+    /// folds every non-2xx into one opaque error, and the retry wrapper would
+    /// spend ~16s re-asking a question whose answer will not change. A body
+    /// that is not JSON comes back as `Value::Null` rather than an error: the
+    /// status is still the caller's to interpret.
+    ///
+    /// `method` is the verb as text (`"GET"`, `"POST"`, `"DELETE"`) so that a
+    /// caller in another crate does not need `reqwest` as a dependency of its
+    /// own just to name one.
+    pub fn request_json(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<&Value>,
+    ) -> Result<(u16, Value)> {
+        let method = reqwest::Method::from_bytes(method.as_bytes())
+            .with_context(|| format!("not an HTTP method: {method}"))?;
+        let mut r = self.req(method, path);
+        if let Some(b) = body {
+            r = r.json(b);
+        }
+        let resp = r
+            .send()
+            .with_context(|| format!("no response from {}{}", self.base, path))?;
+        let status = resp.status().as_u16();
+        Ok((status, resp.json().unwrap_or(Value::Null)))
+    }
+
+    /// One attempt of a retried request, classified.
+    fn attempt_from<T>(
+        what: &str,
+        resp: reqwest::blocking::Response,
+        parse: impl FnOnce(reqwest::blocking::Response) -> Result<T>,
+    ) -> Attempt<T> {
+        let status = resp.status();
+        if status.as_u16() == 429 {
+            return Attempt::Throttled(server_reason(resp));
+        }
+        if status.is_server_error() {
+            return Attempt::Failed(match server_reason(resp) {
+                Some(reason) => anyhow!("{what}: HTTP {status}: {reason}"),
+                None => anyhow!("{what}: HTTP {status}"),
+            });
+        }
+        match parse(resp) {
+            Ok(v) => Attempt::Done(v),
+            Err(e) => Attempt::Abort(e),
+        }
+    }
+
+    /// Retry wrapper: 429/5xx/transport → backoff 250ms..8s.
+    ///
+    /// A 5xx or a transport error is retried 6 times. A 429 is reported to
+    /// the bulk admission window (sleeping is how this request survives
+    /// congestion, shrinking is how the *run* stops causing it, #240 §8) and,
+    /// for a loading run, re-asked for as long as [`THROTTLE_PATIENCE`]
+    /// lasts — see [`Es::retry_loop`].
+    fn with_retry<T>(
+        &self,
+        what: &str,
+        mut f: impl FnMut() -> Result<reqwest::blocking::Response>,
+        parse: impl Fn(reqwest::blocking::Response) -> Result<T>,
+    ) -> Result<T> {
+        self.retry_loop(what, || match f() {
+            Ok(resp) => Self::attempt_from(what, resp, &parse),
+            Err(e) => Attempt::Failed(e),
+        })
+    }
+
+    /// The one retry policy every request goes through.
+    ///
+    /// * `Failed` (5xx, transport): six attempts, five backoffs between them
+    ///   and none after the last — a bounded budget, because nothing says a
+    ///   5xx will clear. A connect failure (nothing is accepting connections)
+    ///   uses the same six, then latches: every later request on this client
+    ///   fails immediately. Repeating the six once per remaining file is the
+    ///   retry loop #2177 saw against a dead node.
+    /// * `Throttled` (HTTP 429): the server asked for time, and how much time
+    ///   is the server's call. A loading run (the admission gate is on) keeps
+    ///   re-asking at the capped backoff for up to `throttle_patience`,
+    ///   announcing the wait every [`NOTICE_EVERY`]; a one-shot client (gate
+    ///   off — a probe, a status read) treats a 429 like a 5xx and gives up
+    ///   after six, because a 10-minute wait is wrong for a question. A
+    ///   parent memory breaker that has accepted nothing is the exception
+    ///   inside that budget: it stops at [`ZERO_PROGRESS_PATIENCE`] and names
+    ///   `limits.max_process_memory_mb` (#2238), because waiting out ten
+    ///   minutes cannot shrink a budget the drain is not being asked to free.
+    ///   Measured reason for the patience: the parent memory circuit breaker
+    ///   answered a bulk with HTTP 429 and held the server above the
+    ///   watermark for 57 s on the 1 GB mailbox run — the six attempts
+    ///   (~8 s of backoff) had run out at 233.8 s and the run was lost.
+    /// * `Abort`: not retried (a 4xx that is this client's fault, a body
+    ///   that does not parse).
+    fn retry_loop<T>(&self, what: &str, mut attempt: impl FnMut() -> Attempt<T>) -> Result<T> {
+        const MAX_ATTEMPTS: usize = 6;
+        if let Some(down) = self.latched_down() {
+            return Err(down);
+        }
+        let mut delay = self.retry_initial_delay;
+        let mut failures = 0usize;
+        let started = Instant::now();
+        let mut last_notice: Option<Instant> = None;
+        loop {
+            match attempt() {
+                Attempt::Done(v) => return Ok(v),
+                Attempt::Abort(e) => return Err(e),
+                Attempt::Throttled(reason) => {
+                    self.admission.on_congestion();
+                    let raw = reason.as_deref().unwrap_or("HTTP 429");
+                    let err = match &reason {
+                        Some(r) => {
+                            anyhow!("{what}: HTTP 429 Too Many Requests: {}", memory_cap_hint(r))
+                        }
+                        None => anyhow!("{what}: HTTP 429 Too Many Requests"),
+                    };
+                    if self.admission.enabled() {
+                        let waited = started.elapsed();
+                        // A whole-request 429 accepted nothing. The parent
+                        // memory breaker stops at the short budget; every
+                        // other 429 (disk flood, thread-pool rejection) keeps
+                        // the full patience, because that condition can clear.
+                        let limit = if is_parent_memory_breaker(raw) {
+                            self.throttle_patience.min(self.zero_progress_patience)
+                        } else {
+                            self.throttle_patience
+                        };
+                        if waited >= limit {
+                            return Err(err);
+                        }
+                        self.throttle_notice(
+                            &mut last_notice,
+                            raw,
+                            &format!("retrying {what}"),
+                            waited,
+                            limit,
+                        );
+                    } else {
+                        failures += 1;
+                        if failures >= MAX_ATTEMPTS {
+                            return Err(err);
+                        }
+                    }
+                }
+                Attempt::Failed(e) => {
+                    failures += 1;
+                    let unreachable = is_node_unreachable(&e);
+                    if failures >= MAX_ATTEMPTS {
+                        if unreachable {
+                            return Err(self.latch_down(&e));
+                        }
+                        return Err(e);
+                    }
+                    self.failure_notice(
+                        &mut last_notice,
+                        what,
+                        &e,
+                        failures,
+                        MAX_ATTEMPTS,
+                        started.elapsed(),
+                    );
+                }
+            }
+            self.backoff(delay);
+            // Another worker may have latched the node while this one slept.
+            if let Some(down) = self.latched_down() {
+                return Err(down);
+            }
+            delay = (delay * 2).min(self.retry_max_delay);
+        }
+    }
+
+    fn latched_down(&self) -> Option<anyhow::Error> {
+        self.node_down
+            .message
+            .lock()
+            .unwrap()
+            .clone()
+            .map(anyhow::Error::msg)
+    }
+
+    fn latch_down(&self, cause: &anyhow::Error) -> anyhow::Error {
+        let mut slot = self.node_down.message.lock().unwrap();
+        if slot.is_none() {
+            *slot = Some(node_down_message(&self.base, cause));
+        }
+        anyhow::Error::msg(slot.clone().expect("just inserted"))
+    }
+
+    /// Say on stderr that this run is waiting on the server, at most once per
+    /// [`NOTICE_EVERY`] per waiting request, so the wait does not read as a
+    /// hang. Silent for clients that do not announce (`--quiet`, probes).
+    fn throttle_notice(
+        &self,
+        last: &mut Option<Instant>,
+        reason: &str,
+        doing: &str,
+        waited: Duration,
+        giving_up_after: Duration,
+    ) {
+        if !self.admission.announces() || matches!(last, Some(t) if t.elapsed() < NOTICE_EVERY) {
+            return;
+        }
+        let reason = memory_cap_hint(reason);
+        eprintln!(
+            "autoindex: server is shedding load — {reason}; {doing} (waited {}s, giving up after {}s)",
+            waited.as_secs(),
+            giving_up_after.as_secs()
+        );
+        *last = Some(Instant::now());
+    }
+
+    /// Say on stderr that a request is retrying after a transport error or a
+    /// 5xx — the first failure immediately, then at most once per
+    /// [`NOTICE_EVERY`] per request, sharing [`Self::throttle_notice`]'s clock
+    /// so an alternating 429/timeout sequence cannot double-announce. Same
+    /// announce gate: loading runs speak, probes and `--quiet` stay silent.
+    ///
+    /// Why the first failure is worth a line: the retry envelope here is
+    /// bounded (six attempts at the client's 300 s request timeout ≈ 31 min
+    /// worst case) but was SILENT, and #1183 reported exactly that silence as
+    /// a deadlock — the caller parks on `reqwest::blocking`'s oneshot, which
+    /// `/proc/<pid>/task/*/wchan` reports as `futex_do_wait`, so eight
+    /// minutes of no output and zero CPU were indistinguishable from a lock
+    /// cycle. A line that names the request, the reason, and the attempt
+    /// count turns "stalled" into "retrying, bounded". Returns whether a
+    /// line was printed, so the gate is testable without capturing stderr.
+    fn failure_notice(
+        &self,
+        last: &mut Option<Instant>,
+        what: &str,
+        error: &anyhow::Error,
+        attempt: usize,
+        max_attempts: usize,
+        waited: Duration,
+    ) -> bool {
+        if !self.admission.announces() || matches!(last, Some(t) if t.elapsed() < NOTICE_EVERY) {
+            return false;
+        }
+        // The reason is one line. A connect failure is printed in full: the
+        // old 120-character prefix cut the chain at the first letter of
+        // `tcp connect error`, which is the `client error (Connect): t`
+        // line in #2177. Other transport errors keep a bounded tail so the
+        // same cut cannot reduce their cause to one character either.
+        let reason = notice_reason(error);
+        #[cfg(test)]
+        self.notices.lock().unwrap().push(reason.clone());
+        eprintln!(
+            "autoindex: {what} failed: {reason}; retrying (attempt {attempt} of {max_attempts}, \
+             {} s in this request so far)",
+            waited.as_secs()
+        );
+        *last = Some(Instant::now());
+        true
+    }
+
+    /// Sleep between attempts, recording how long was actually slept.
+    ///
+    /// One function so that moving the CALL SITE cannot separate recording from
+    /// sleeping: an earlier version incremented a counter next to a bare
+    /// `std::thread::sleep`, and moving only the sleep out of its guard produced
+    /// a sixth backoff the counter still reported as five.
+    ///
+    /// What this does NOT defend against: a sleep that never routes through
+    /// here. A bare `thread::sleep` elsewhere in the loop adds real delay that
+    /// no assertion over recorded data can observe, and the test carries no
+    /// wall-clock bound to catch it — deliberately, because a wall-clock bound
+    /// is what failed one run in five under load (#436). That is the whole of
+    /// the residual gap.
+    ///
+    /// An earlier version of this comment listed three survivors. Two of them
+    /// — the sleep moved out of `backoff`, and the sleep deleted while the push
+    /// stays — are killed by recording the OBSERVED duration alongside the
+    /// requested one, which the same commit introduced. Verification caught the
+    /// comment describing the code as it had been rather than as it was.
+    ///
+    /// Recording both is what makes `observed >= requested` checkable, so a
+    /// delay computed correctly and then not honoured shows up instead of
+    /// looking right.
+    fn backoff(&self, delay: Duration) {
+        #[cfg(test)]
+        let started = Instant::now();
+        std::thread::sleep(delay);
+        #[cfg(test)]
+        self.backoff_delays
+            .lock()
+            .expect("backoff_delays poisoned")
+            .push((delay, started.elapsed()));
+    }
+
+    /// PUT index with explicit mapping; tolerates already-exists.
+    pub fn ensure_index(&self, index: &str, body: &Value) -> Result<()> {
+        let body = with_single_wal_shard(body);
+        let resp = self
+            .req(reqwest::Method::PUT, &format!("/{index}"))
+            .json(&body)
+            .send()
+            .context("PUT index")?;
+        let status = resp.status();
+        if status.is_success() {
+            return Ok(());
+        }
+        let text = resp.text().unwrap_or_default();
+        if text.contains("resource_already_exists")
+            || status.as_u16() == 400 && text.contains("exists")
+        {
+            return Ok(());
+        }
+        Err(mapping_error(format!("/{index}"), status, text))
+    }
+
+    /// Additive mapping update for fields introduced after an index was created.
+    pub fn update_mapping(&self, index: &str, body: &Value) -> Result<()> {
+        let resp = self
+            .req(reqwest::Method::PUT, &format!("/{index}/_mapping"))
+            .json(body)
+            .send()
+            .context("PUT mapping")?;
+        let status = resp.status();
+        if status.is_success() {
+            return Ok(());
+        }
+        let text = resp.text().unwrap_or_default();
+        Err(mapping_error(format!("/{index}/_mapping"), status, text))
+    }
+
+    /// Send a bulk body, bounded in size and waited out under back-pressure.
+    ///
+    /// Two independent things happen here, and both are per-window:
+    ///
+    /// * **Size (#955).** A body above [`BULK_MAX_ACTIONS`] actions — or above
+    ///   `max_bytes` for a caller that has a byte bound — goes out as
+    ///   consecutive windows, in order. A window the server still refuses as
+    ///   too large is halved and the halves go back on the front of the queue,
+    ///   and the reduced bound is kept for the rest of the run, so the next
+    ///   body is cut before it is offered instead of after it is refused.
+    ///   Convergence: every round either sends a window or replaces one window
+    ///   with two strictly smaller ones, and a window of ONE action is never
+    ///   halved again — it is fatal with a message naming `max_body_bytes`.
+    /// * **Back-pressure (#944).** Inside one window, items the server
+    ///   answered `status: 429` are re-offered for up to
+    ///   [`THROTTLE_PATIENCE`] — see [`Es::bulk_window`].
+    ///
+    /// One admission slot is held for the whole body, so a caller that hands
+    /// in a large body never offers more load than a caller that hands in a
+    /// small one.
+    pub fn bulk(&self, body: Vec<u8>) -> Result<BulkOutcome> {
+        self.bulk_bounded(body, usize::MAX)
+    }
+
+    /// [`Self::bulk`] for a body nobody windowed by bytes — the catalog write
+    /// of either indexing path, which grows with the corpus (#955). The body
+    /// is sent as consecutive requests of at most `max_bytes` bytes and
+    /// [`BULK_MAX_ACTIONS`] actions, in order, and the outcomes are summed.
+    ///
+    /// Order is kept because a catalog body deletes stale ids before it writes
+    /// the desired ones. The windows are not a transaction, and neither was
+    /// the single request: `_bulk` applies action by action. Both catalog
+    /// writers are convergent (`index` by `_id`, then an exact read-back), so
+    /// a run that stops between two windows repeats the write when it resumes.
+    pub fn bulk_windowed(&self, body: Vec<u8>, max_bytes: usize) -> Result<BulkOutcome> {
+        self.bulk_bounded(body, max_bytes.max(1))
+    }
+
+    fn bulk_bounded(&self, body: Vec<u8>, max_bytes: usize) -> Result<BulkOutcome> {
+        let mut pending = std::collections::VecDeque::from([body]);
+        let mut total = BulkOutcome::default();
+        while let Some(next) = pending.pop_front() {
+            // Re-read every round: another worker may have learned a tighter
+            // bound from the server while this one was sending.
+            let max_actions = self
+                .bulk_max_actions
+                .min(self.request_size.max_actions.load(Ordering::Relaxed));
+            let max_bytes = max_bytes.min(self.request_size.max_bytes.load(Ordering::Relaxed));
+            if let Some(windows) = window_bulk_body(&next, max_actions, max_bytes) {
+                for window in windows.into_iter().rev() {
+                    pending.push_front(window);
+                }
+                continue;
+            }
+            match self.bulk_window(next)? {
+                SentWindow::Done(outcome) => total.absorb(outcome),
+                SentWindow::Halved(halves) => {
+                    for half in halves.into_iter().rev() {
+                        pending.push_front(half);
+                    }
+                }
+            }
+            if total.server_errors > 0 {
+                // The server stopped accepting: every window still queued
+                // would wait out the same patience to learn the same thing.
+                // They were not sent, so they count as not landed.
+                let unsent: u64 = pending
+                    .iter()
+                    .map(|window| count_bulk_actions(window).unwrap_or(1) as u64)
+                    .sum();
+                total.item_errors += unsent;
+                total.server_errors += unsent;
+                if total.throttled_out > 0 {
+                    total.throttled_out += unsent;
+                }
+                break;
+            }
+        }
+        Ok(total)
+    }
+
+    /// One window of a body: the back-pressure patience loop.
+    ///
+    /// Either the window is done — landed, or handed back with the errors the
+    /// caller must see — or the server refused the whole request as too large
+    /// and it comes back as two halves for [`Self::bulk_bounded`] (#955).
+    ///
+    /// Two kinds of retry live here. A transport error or an HTTP-level
+    /// 429/5xx retries the WHOLE request (`retry_loop`). A 200 whose items
+    /// carry `status: 429` re-offers ONLY those items, after a backoff, for up
+    /// to `throttle_patience` — the memory breaker's shape, see
+    /// [`THROTTLE_PATIENCE`]. A parent memory breaker that has not accepted a
+    /// single item of this bulk stops at [`ZERO_PROGRESS_PATIENCE`] instead
+    /// (#2238). Records the server took are never sent twice, and a record it
+    /// refused for a reason waiting cannot fix (a per-item 400, 5xx, or a
+    /// write block) is not re-offered.
+    fn bulk_window(&self, body: Vec<u8>) -> Result<SentWindow> {
+        let mut body = body;
+        // Item errors settled by earlier rounds of this call (a bad record's
+        // 400): the record is not re-offered, its error is still reported.
+        let mut settled_item_errors = 0u64;
+        let mut settled_first_error: Option<String> = None;
+        // Set once any round took an item. From then on the full patience
+        // applies, even if later rounds are all 429: a drain in progress
+        // (#944 held 57 s) must be allowed to finish.
+        let mut accepted_any = false;
+        let episode = Instant::now();
+        let mut delay = self.retry_initial_delay;
+        let mut last_notice: Option<Instant> = None;
+        loop {
+            let round = self.bulk_round(body.clone())?;
+            if let Some(dimension) = round.too_large {
+                return self.halve_refused_request(body, dimension, round.outcome);
+            }
+            let mut outcome = round.outcome;
+            outcome.item_errors += settled_item_errors;
+            if outcome.first_error.is_none() {
+                outcome.first_error = settled_first_error.clone();
+            }
+            if round.throttled.is_empty() || round.other_server_errors > 0 {
+                return Ok(SentWindow::Done(outcome));
+            }
+            if round.items > round.throttled.len() {
+                accepted_any = true;
+            }
+            // Only per-item 429s stand between this bulk and a clean
+            // outcome. Wait while patience lasts; after that the caller gets
+            // the server's own reason, exactly as before — but named as
+            // back-pressure (#944), so the run's terminal line can say
+            // `reason=server-backpressure` rather than `reason=aborted`.
+            // Zero accepts against the parent memory breaker use the short
+            // budget (#2238). Any other 429, and any bulk that has landed an
+            // item, keeps the full patience.
+            let parent = round
+                .throttle_reason
+                .as_deref()
+                .is_some_and(is_parent_memory_breaker);
+            let limit = if accepted_any || !parent {
+                self.throttle_patience
+            } else {
+                self.throttle_patience.min(self.zero_progress_patience)
+            };
+            let waited = episode.elapsed();
+            if waited >= limit {
+                outcome.throttled_out = round.throttled.len() as u64;
+                outcome.exhausted_after = Some(limit);
+                return Ok(SentWindow::Done(outcome));
+            }
+            // A response whose item count does not match the body cannot be
+            // mapped back onto it; guessing would re-send the wrong records.
+            let Some(retry) = select_bulk_items(&body, &round.throttled, round.items) else {
+                return Ok(SentWindow::Done(outcome));
+            };
+            settled_item_errors = outcome
+                .item_errors
+                .saturating_sub(round.throttled.len() as u64);
+            if round.first_settled_error.is_some() {
+                settled_first_error = round.first_settled_error;
+            }
+            self.throttle_notice(
+                &mut last_notice,
+                round
+                    .throttle_reason
+                    .as_deref()
+                    .unwrap_or("per-item HTTP 429"),
+                &format!("re-offering {} rejected record(s)", round.throttled.len()),
+                waited,
+                limit,
+            );
+            self.throttle_ledger
+                .reissues
+                .fetch_add(1, Ordering::Relaxed);
+            self.throttle_ledger
+                .items_reissued
+                .fetch_add(round.throttled.len() as u64, Ordering::Relaxed);
+            body = retry;
+            self.backoff(delay);
+            delay = (delay * 2).min(self.retry_max_delay);
+        }
+    }
+
+    /// The server refused this whole request as too large (#955). Nothing in it
+    /// was written, so it is cut in two by actions and handed back to be sent
+    /// as two requests, and the run remembers the bound so the next body is
+    /// cut before it is offered instead of after it is refused. A request of
+    /// ONE action cannot be cut: that is a statement about the record, and it
+    /// goes back to the caller as the error it always was.
+    fn halve_refused_request(
+        &self,
+        body: Vec<u8>,
+        dimension: TooLarge,
+        refused: BulkOutcome,
+    ) -> Result<SentWindow> {
+        let reason = refused
+            .first_error
+            .clone()
+            .unwrap_or_else(|| "no reason given".into());
+        let actions = count_bulk_actions(&body).unwrap_or(0);
+        let halves = (actions > 1)
+            .then(|| window_bulk_body(&body, actions.div_ceil(2), usize::MAX))
+            .flatten();
+        let Some(halves) = halves else {
+            return match dimension {
+                TooLarge::Bytes => Err(anyhow!(
+                    "_bulk: HTTP 413 Payload Too Large for a request of one action \
+                    ({} bytes): {reason}. One record is larger than the server accepts; raise \
+                    limits.max_body_bytes on the node (or the proxy in front of it), or exclude \
+                    the file",
+                    body.len()
+                )),
+                TooLarge::Actions => Ok(SentWindow::Done(refused)),
+            };
+        };
+        match dimension {
+            TooLarge::Bytes => {
+                self.request_size
+                    .max_bytes
+                    .fetch_min((body.len() / 2).max(1), Ordering::Relaxed);
+            }
+            TooLarge::Actions => {
+                self.request_size
+                    .max_actions
+                    .fetch_min(actions.div_ceil(2), Ordering::Relaxed);
+            }
+        }
+        // One line per refusal, not per window: the bound learned above stops
+        // the next body from being refused the same way.
+        if self.request_size.splits.fetch_add(1, Ordering::Relaxed) < SPLIT_ANNOUNCE_CAP
+            && self.admission.announces()
+        {
+            let short: String = reason
+                .chars()
+                .map(|c| if c.is_control() { ' ' } else { c })
+                .take(240)
+                .collect();
+            eprintln!(
+                "autoindex: the server refused a bulk request of {actions} action(s) \
+                ({} bytes) as too large ({short}); nothing in it was written — sending it \
+                as two requests and keeping later requests under that size",
+                body.len()
+            );
+        }
+        Ok(SentWindow::Halved(halves))
+    }
+
+    /// One request of a bulk body, with the transport-level retries, parsed.
+    ///
+    /// A 429 STATUS whose body is a bulk response — the memory breaker's
+    /// other shape: `{"took":…,"errors":true,"items":[…]}` under HTTP 429,
+    /// taken items `201`, rejected ones `429` — is read as one, so the taken
+    /// items are settled and only the rejected ones are re-offered by
+    /// [`Es::bulk_window`]. A 429 with any other body is a plain throttle.
+    ///
+    /// An HTTP 413, and an HTTP 200 carrying one synthetic item answered 413
+    /// for a body of several actions, are the two shapes of "this request is
+    /// too large" (#955): nothing in such a request was written, and it is
+    /// reported up as [`TooLarge`] for [`Es::halve_refused_request`].
+    fn bulk_round(&self, body: Vec<u8>) -> Result<Round> {
+        let actions = count_bulk_actions(&body);
+        // Whole-request 429s this attempt saw. `retry_loop` re-sends the body
+        // after every one but the last of a call that ends in an error, so
+        // these are re-sends for the same reason the per-item path counts them
+        // (#944): `bulk_retries` must not depend on which shape the engine's
+        // breaker happened to answer with.
+        let throttles = std::cell::Cell::new(0u64);
+        let round = self.retry_loop("_bulk", || {
+            // Acquire the admission permit per HTTP attempt rather than across
+            // the whole backoff loop (#1250), so throttled workers drop their
+            // slot before sleeping and immediately obey a halved window limit.
+            let _permit = match self.admission.acquire() {
+                Ok(permit) => permit,
+                Err(e) => return Attempt::Failed(e),
+            };
+            let resp = match self.send_bulk(body.clone()) {
+                Ok(resp) => resp,
+                Err(e) => return Attempt::Failed(e),
+            };
+            let status = resp.status();
+            if status.is_server_error() {
+                return Attempt::Failed(match server_reason(resp) {
+                    Some(reason) => anyhow!("_bulk: HTTP {status}: {reason}"),
+                    None => anyhow!("_bulk: HTTP {status}"),
+                });
+            }
+            if status.as_u16() == 429 {
+                let text = match resp.text() {
+                    Ok(text) => text,
+                    Err(e) => return Attempt::Failed(anyhow!(e).context("read bulk 429 body")),
+                };
+                return match serde_json::from_str::<Value>(&text)
+                    .ok()
+                    .filter(|v| v.get("items").is_some_and(Value::is_array))
+                {
+                    Some(v) => Attempt::Done(parse_round(&v)),
+                    None => {
+                        throttles.set(throttles.get() + 1);
+                        Attempt::Throttled(Some(text.chars().take(SERVER_REASON_MAX).collect()))
+                    }
+                };
+            }
+            if status.as_u16() == 413 {
+                // A body-size limit refused the whole request before any of it
+                // was read as a bulk (#955). `bulk_bounded` halves it.
+                let reason = server_reason(resp)
+                    .unwrap_or_else(|| format!("HTTP {status}"))
+                    .chars()
+                    .map(|c| if c.is_control() { ' ' } else { c })
+                    .collect::<String>();
+                let mut round = parse_round(&Value::Null);
+                round.outcome.item_errors = actions.unwrap_or(1) as u64;
+                round.outcome.first_error = Some(reason);
+                round.too_large = Some(TooLarge::Bytes);
+                return Attempt::Done(round);
+            }
+            if !status.is_success() {
+                return Attempt::Abort(anyhow!("bulk HTTP {status}"));
+            }
+            match resp.json::<Value>() {
+                Ok(v) => {
+                    let mut round = parse_round(&v);
+                    if is_whole_request_too_large(&v, actions) {
+                        round.too_large = Some(TooLarge::Actions);
+                        // ONE synthetic item stood in for every action sent,
+                        // and none of them was written.
+                        round.outcome.item_errors = actions.unwrap_or(1) as u64;
+                    }
+                    Attempt::Done(round)
+                }
+                Err(e) => Attempt::Abort(anyhow!(e).context("parse bulk response")),
+            }
+        });
+        // A call that ends in an error gave up on its last throttle instead of
+        // re-sending it.
+        let reissued = match &round {
+            Ok(_) => throttles.get(),
+            Err(_) => throttles.get().saturating_sub(1),
+        };
+        if reissued > 0 {
+            self.throttle_ledger
+                .reissues
+                .fetch_add(reissued, Ordering::Relaxed);
+            self.throttle_ledger
+                .items_reissued
+                .fetch_add(reissued * actions.unwrap_or(0) as u64, Ordering::Relaxed);
+        }
+        match &round {
+            // A request refused as too large is neither congestion nor a clean
+            // bulk: the window is not the thing that has to change.
+            Ok(r) if r.too_large.is_some() => {}
+            Ok(r) if r.throttled.is_empty() => self.admission.on_success(),
+            // A bulk can also be throttled *per item*: HTTP 200 with
+            // individual documents rejected `status: 429`. That is the same
+            // congestion signal wearing a different hat, and it must not be
+            // read as a clean bulk that earns concurrency back.
+            Ok(_) => self.admission.on_congestion(),
+            // A failed bulk earns nothing back. If it failed *because* of a
+            // 429, `retry_loop` has already shrunk the window.
+            Err(_) => {}
+        }
+        round
+    }
+
+    fn send_bulk(&self, body: Vec<u8>) -> Result<reqwest::blocking::Response> {
+        self.req(reqwest::Method::POST, "/_bulk")
+            .timeout(self.bulk_timeout)
+            .header("Content-Type", "application/x-ndjson")
+            .header("X-Turbo", "1")
+            .body(body)
+            .send()
+            .with_context(|| format!("bulk send (request timeout {:?})", self.bulk_timeout))
+    }
+
+    /// Remove every document matching `query` before a file-level replacement.
+    /// Refresh is requested so a retry cannot observe or retain an older
+    /// locator set alongside the replacement. The server executes ONE bounded
+    /// search-and-delete pass per call (size-capped at 10k docs), so a single
+    /// response is not complete removal: repeat until a pass deletes nothing.
+    pub fn delete_by_query(&self, index: &str, query: &Value) -> Result<()> {
+        const MAX_PASSES: usize = 1_000;
+        for _ in 0..MAX_PASSES {
+            if self.delete_by_query_pass(index, query)? == 0 {
+                return Ok(());
+            }
+        }
+        Err(anyhow!(
+            "POST /{index}/_delete_by_query still reported deletions after {MAX_PASSES} passes; \
+             refusing to treat the previous generation as fully removed"
+        ))
+    }
+
+    /// One server-side delete pass; returns the reported `deleted` count.
+    ///
+    /// A 404 is the answer, not a failure — the same rule as
+    /// [`Self::count_endpoint`]: this cleanup runs before a file-level
+    /// replacement against the index the journal names, and when a namespace
+    /// swap already retired that index the node answers 404. The stale
+    /// documents are then already absent (a missing index cannot hold any),
+    /// so the pass deleted nothing and the goal state holds. Treating it as
+    /// an abort (#1173) turned a converged state into a dead run whose final
+    /// message then claimed "wrote no new records" on a run that had written
+    /// plenty. Every other status keeps the refusal error.
+    fn delete_by_query_pass(&self, index: &str, query: &Value) -> Result<u64> {
+        self.with_retry(
+            "delete_by_query",
+            || {
+                self.req(
+                    reqwest::Method::POST,
+                    &format!("/{index}/_delete_by_query?refresh=true"),
+                )
+                .json(&serde_json::json!({"query": query}))
+                .send()
+                .map_err(|e| anyhow!("delete_by_query: {e}"))
+            },
+            |resp| {
+                if resp.status() == reqwest::StatusCode::NOT_FOUND {
+                    return Ok(0);
+                }
+                let status = resp.status();
+                let body: Value = resp.json().unwrap_or(Value::Null);
+                if status.is_success()
+                    && body
+                        .get("failures")
+                        .and_then(Value::as_array)
+                        .is_none_or(Vec::is_empty)
+                {
+                    Ok(body.get("deleted").and_then(Value::as_u64).unwrap_or(0))
+                } else {
+                    Err(anyhow!(
+                        "POST /{index}/_delete_by_query failed: HTTP {status}: {body}"
+                    ))
+                }
+            },
+        )
+    }
+
+    pub fn refresh(&self, pattern: &str) -> Result<()> {
+        self.with_retry(
+            "refresh",
+            || {
+                self.req(reqwest::Method::POST, &format!("/{pattern}/_refresh"))
+                    .send()
+                    .map_err(|e| anyhow!("refresh: {e}"))
+            },
+            |resp| {
+                if resp.status().is_success() {
+                    Ok(())
+                } else {
+                    Err(anyhow!("refresh HTTP {}", resp.status()))
+                }
+            },
+        )
+    }
+
+    /// One `_refresh`, with no retry.
+    ///
+    /// [`Self::refresh`] allows six attempts, and each attempt waits on the
+    /// client's 300s transport budget. Finalize used to call that against one
+    /// wildcard. A single index whose refresh did not return then stalled the
+    /// run for the whole budget and started again (#2234). Finalize names the
+    /// index it is waiting on and gives that request one attempt: the server
+    /// bounds a memtable publish, and a transport timeout is the backstop,
+    /// not the start of five more.
+    pub fn refresh_once(&self, pattern: &str) -> Result<()> {
+        let resp = self
+            .req(reqwest::Method::POST, &format!("/{pattern}/_refresh"))
+            .send()
+            .map_err(|e| anyhow!("refresh {pattern}: {e}"))?;
+        if resp.status().is_success() {
+            Ok(())
+        } else {
+            let status = resp.status();
+            let body = resp.text().unwrap_or_default();
+            Err(anyhow!("refresh {pattern}: HTTP {status}: {body}"))
+        }
+    }
+
+    fn search_raw(&self, index: &str, body: &Value) -> Result<(reqwest::StatusCode, Value)> {
+        self.search_raw_at(index, "", body)
+    }
+
+    fn search_raw_at(
+        &self,
+        index: &str,
+        query_string: &str,
+        body: &Value,
+    ) -> Result<(reqwest::StatusCode, Value)> {
+        self.with_retry(
+            "search",
+            || {
+                self.req(
+                    reqwest::Method::POST,
+                    &format!("/{index}/_search{query_string}"),
+                )
+                .json(body)
+                .send()
+                .map_err(|e| anyhow!("search: {e}"))
+            },
+            |resp| {
+                let status = resp.status();
+                let v: Value = resp.json().unwrap_or(Value::Null);
+                Ok((status, v))
+            },
+        )
+    }
+
+    pub fn search(&self, index: &str, body: &Value) -> Result<Value> {
+        let (status, v) = self.search_raw(index, body)?;
+        if !status.is_success() {
+            return Err(anyhow!("search /{index} HTTP {status}: {v}"));
+        }
+        Ok(v)
+    }
+
+    /// [`Es::search`] for a caller that never reads the node's `_savings`
+    /// statistic (`argos search`). Measuring what a `_source` filter withheld
+    /// needs the whole stored document, so asking for it forces the node to
+    /// decode every column of every hit even when the body names the few
+    /// fields it prints (#2422/#2423).
+    pub fn search_without_savings(&self, index: &str, body: &Value) -> Result<Value> {
+        let (status, v) = self.search_raw_at(index, "?savings=false", body)?;
+        if !status.is_success() {
+            return Err(anyhow!("search /{index} HTTP {status}: {v}"));
+        }
+        Ok(v)
+    }
+
+    /// `POST /{index}/_mget` with the `{"ids":[...]}` short form.
+    ///
+    /// The catalog read-back uses this instead of a `run_id` + `search_after`
+    /// walk (#1267). `_id` lookup stays O(ids) when the catalog's version map
+    /// carries deletes; the sorted walk re-parsed every matching stored
+    /// document on every page.
+    pub fn mget(&self, index: &str, ids: &[String]) -> Result<Value> {
+        self.with_retry(
+            "mget",
+            || {
+                self.req(reqwest::Method::POST, &format!("/{index}/_mget"))
+                    .json(&serde_json::json!({"ids": ids}))
+                    .send()
+                    .map_err(|e| anyhow!("mget: {e}"))
+            },
+            |resp| {
+                let status = resp.status();
+                let body: Value = resp.json().unwrap_or(Value::Null);
+                if status.is_success() {
+                    Ok(body)
+                } else {
+                    Err(anyhow!("mget /{index} HTTP {status}: {body}"))
+                }
+            },
+        )
+    }
+
+    /// How often [`Es::search_for_verify`] re-checks that its target still
+    /// exists while the window search is in flight (#2222). A fast window
+    /// returns before the first check, so the common path adds no request.
+    const VERIFY_INDEX_POLL: Duration = Duration::from_millis(500);
+
+    /// Bound on one existence probe. A probe that does not answer is "still
+    /// there": only a real 404 ends the wait, so a busy node cannot be read
+    /// as a deleted index.
+    const VERIFY_INDEX_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
+
+    /// The search [`crate::sync_executor`] finalize-verify issues per window.
+    ///
+    /// `search` blocks the caller for the whole request. The engine resolves
+    /// the index when the request arrives, so a `DELETE` that lands while
+    /// that search is running does not turn it into a 404 — the handle is
+    /// already taken, and the client sits in `waiting_on` that index until
+    /// the transport budget (300 s, six attempts on a 5xx) runs out. The
+    /// generation never commits (#2222). This call keeps the search in flight
+    /// and, beside it, asks `HEAD /{index}`. The moment that answers 404 —
+    /// or the search itself does — it returns
+    /// `index {name} was deleted during verify` and the caller stops waiting.
+    /// A live index is unchanged: the search result comes back as `search`
+    /// would have returned it.
+    pub(crate) fn search_for_verify(&self, index: &str, body: &Value) -> Result<Value> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let es = self.clone();
+        let index_owned = index.to_owned();
+        let body = body.clone();
+        // #1122: `Builder::spawn` panics in the child on a failed signal-stack
+        // mmap after returning `Ok`. A failed `try_spawn` runs the search on
+        // this thread instead: the parallel HEAD probe is the optimization,
+        // and the process stays up.
+        if let Err(failure) =
+            argos_common::thread_spawn::try_spawn("argos-verify-search", move || {
+                let _ = tx.send(es.search(&index_owned, &body));
+            })
+        {
+            if let Some(job) = failure.job {
+                job();
+            } else {
+                anyhow::bail!(
+                    "could not start finalize-verify search for {index}: {}; the process stayed up",
+                    failure.error
+                );
+            }
+        }
+        loop {
+            match rx.recv_timeout(Self::VERIFY_INDEX_POLL) {
+                Ok(Ok(value)) => return Ok(value),
+                Ok(Err(error)) => {
+                    if Self::verify_search_says_index_missing(&error)
+                        || self.verify_index_present(index) == Some(false)
+                    {
+                        anyhow::bail!("index {index} was deleted during verify");
+                    }
+                    return Err(error);
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    if self.verify_index_present(index) == Some(false) {
+                        anyhow::bail!("index {index} was deleted during verify");
+                    }
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    anyhow::bail!("finalize-verify search for {index} ended without a result");
+                }
+            }
+        }
+    }
+
+    /// [`Es::search_for_verify`] carrying [`Es::search_page`]'s deadline and
+    /// bounded retry. The finalize-verify windows treated the first partial
+    /// `timed_out` page as fatal — exit 1 on a 92-dataset corpus whose
+    /// documents were all indexed (#2405) — while the same answer on a
+    /// walked page has been re-asked since #1212. The body gets the page
+    /// timeout when the caller set none and the SAME window is re-asked
+    /// while the node answers `timed_out`, bounded by
+    /// [`PARTIAL_PAGE_ATTEMPTS`]. Every attempt still goes through
+    /// `search_for_verify`, so a target deleted mid-window (#2222) ends the
+    /// wait at once, and a window that never completes bails loud rather
+    /// than being counted as zero (#1761).
+    pub(crate) fn search_page_for_verify(&self, index: &str, body: &Value) -> Result<Value> {
+        let mut body = body.clone();
+        body.as_object_mut()
+            .context("search page body must be a JSON object")?
+            .entry("timeout")
+            .or_insert_with(|| Value::String(SEARCH_PAGE_TIMEOUT.to_owned()));
+        for attempt in 1..=PARTIAL_PAGE_ATTEMPTS {
+            let response = self.search_for_verify(index, &body)?;
+            if response.get("timed_out") != Some(&Value::Bool(true)) {
+                return Ok(response);
+            }
+            if attempt == PARTIAL_PAGE_ATTEMPTS {
+                anyhow::bail!(
+                    "finalize-verify search on {index} answered partial (timed_out) on \
+                     {PARTIAL_PAGE_ATTEMPTS} consecutive attempts at timeout \
+                     {SEARCH_PAGE_TIMEOUT}: a partial page is not a live count \
+                     (a concurrent writer on this index can hold publication \
+                     across the deadline). Nothing from this window was \
+                     counted — reduce load on the node and rerun the same \
+                     command, which resumes"
+                );
+            }
+        }
+        unreachable!("the attempt loop returns on its final iteration")
+    }
+
+    /// `Some(true)` the index is there, `Some(false)` the node answered 404,
+    /// `None` when this probe learned nothing (timeout, transport error, or
+    /// any other status). `None` must not be read as gone.
+    fn verify_index_present(&self, index: &str) -> Option<bool> {
+        match self
+            .req(reqwest::Method::HEAD, &format!("/{index}"))
+            .timeout(Self::VERIFY_INDEX_PROBE_TIMEOUT)
+            .send()
+        {
+            Ok(resp) => match resp.status().as_u16() {
+                404 => Some(false),
+                200..=299 => Some(true),
+                _ => None,
+            },
+            Err(_) => None,
+        }
+    }
+
+    /// Whether `search`'s error is the node saying the index is not there.
+    ///
+    /// `search` renders a non-2xx as `search /{index} HTTP {status}: {body}`.
+    /// 404 on `_search` is `index_not_found`; an empty index is HTTP 200.
+    fn verify_search_says_index_missing(error: &anyhow::Error) -> bool {
+        let text = format!("{error:#}");
+        text.contains("HTTP 404") || text.to_ascii_lowercase().contains("index_not_found")
+    }
+
+    /// `search`, but a missing index is an answer rather than a failure.
+    ///
+    /// A probe whose whole job is to decide "does the server still hold what
+    /// the journal says it holds?" must be able to tell *the index is gone*
+    /// apart from *the server refused* — only the first has a recovery worth
+    /// printing, and propagating its 404 replaces that recovery text with a raw
+    /// HTTP error. Every other status keeps `search`'s behaviour, so this never
+    /// launders a real failure into an absence.
+    pub fn search_present(&self, index: &str, body: &Value) -> Result<Option<Value>> {
+        let (status, v) = self.search_raw(index, body)?;
+        if status == reqwest::StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        if !status.is_success() {
+            return Err(anyhow!("search /{index} HTTP {status}: {v}"));
+        }
+        Ok(Some(v))
+    }
+
+    /// One page of a paged walk, complete or not at all.
+    ///
+    /// The engine applies a 30 s cooperative deadline to any search whose
+    /// body carries no `timeout`, and answers a missed deadline with HTTP
+    /// 200, PARTIAL hits and `timed_out: true` — legal on the wire, and
+    /// lethal to a walker: a page that comes back short looks exactly like
+    /// the last page. That truncated the argos-search catalog read-back at
+    /// 56,441 of 58,568 documents (#1212; the index held all 58,568 the
+    /// whole time). This helper sends the body with an explicit page
+    /// timeout (added only when the caller set none — 120 s covers the
+    /// slowest sorted page measured on a breaker-drained node, 40 s) and
+    /// re-asks the SAME page when the node answers `timed_out`, bounded by
+    /// [`PARTIAL_PAGE_ATTEMPTS`]. A timed-out page costs the node its whole
+    /// page budget, so consecutive attempts are naturally spaced; there is
+    /// no extra backoff to add. Exhaustion is a loud error naming the
+    /// index: rerunning the same command resumes, and every walker above
+    /// this layer is idempotent per page.
+    pub fn search_page(&self, index: &str, body: &Value) -> Result<Value> {
+        Ok(self
+            .search_page_inner(index, body, false)?
+            .expect("strict search page never returns None"))
+    }
+
+    /// [`Es::search_page`] for walkers over an index that may legitimately
+    /// not exist: a 404 is `Ok(None)`, every other non-success is an error,
+    /// and a `timed_out` page is retried exactly like `search_page`'s.
+    pub fn search_page_present(&self, index: &str, body: &Value) -> Result<Option<Value>> {
+        self.search_page_inner(index, body, true)
+    }
+
+    fn search_page_inner(
+        &self,
+        index: &str,
+        body: &Value,
+        allow_missing: bool,
+    ) -> Result<Option<Value>> {
+        let mut body = body.clone();
+        body.as_object_mut()
+            .context("search page body must be a JSON object")?
+            .entry("timeout")
+            .or_insert_with(|| Value::String(SEARCH_PAGE_TIMEOUT.to_owned()));
+        for attempt in 1..=PARTIAL_PAGE_ATTEMPTS {
+            let (status, response) = self.search_raw(index, &body)?;
+            if allow_missing && status == reqwest::StatusCode::NOT_FOUND {
+                return Ok(None);
+            }
+            if !status.is_success() {
+                return Err(anyhow!("search /{index} HTTP {status}: {response}"));
+            }
+            if response.get("timed_out") != Some(&Value::Bool(true)) {
+                return Ok(Some(response));
+            }
+            if attempt == PARTIAL_PAGE_ATTEMPTS {
+                anyhow::bail!(
+                    "search /{index} answered this page partial (timed_out) on \
+                     {PARTIAL_PAGE_ATTEMPTS} consecutive attempts at timeout \
+                     {SEARCH_PAGE_TIMEOUT}: the node cannot complete one page of \
+                     the walk. Nothing from this page was acted on — reduce load \
+                     on the node and rerun the same command, which resumes"
+                );
+            }
+        }
+        unreachable!("the attempt loop returns on its final iteration")
+    }
+
+    pub fn count(&self, index: &str) -> Result<u64> {
+        // `_count` first: it is the endpoint this call always meant, and a
+        // node audits it as `count.post` — a size:0 search here lands in the
+        // audit log as a user `search` with zero hits, which is exactly the
+        // machine traffic `argos gain` must not count as the user's (#1105).
+        // The size:0 search stays as the fallback for builds without `_count`
+        // (the reason this was a search in the first place).
+        match self.count_endpoint(index) {
+            Count::Number(n) => Ok(n),
+            Count::Zero => Ok(0),
+            Count::Unknown(reason) => {
+                let v = self.search(
+                    index,
+                    &serde_json::json!({"size": 0, "track_total_hits": true}),
+                )?;
+                search_hit_total(&v)
+                    .with_context(|| format!("count /{index}: _count did not answer ({reason})"))
+            }
+        }
+    }
+
+    /// `_cat/indices` is plain text, no header (?format=json is IGNORED —
+    /// verified). Returns (index, docs_count) with `.argos_*` system indices
+    /// filtered out.
+    pub fn cat_indices(&self) -> Result<Vec<(String, u64)>> {
+        let resp = self
+            .req(reqwest::Method::GET, "/_cat/indices")
+            .send()
+            .context("_cat/indices")?;
+        let text = resp.text().unwrap_or_default();
+        let mut out = Vec::new();
+        for line in text.lines() {
+            let cols: Vec<&str> = line.split_whitespace().collect();
+            if cols.len() < 3 {
+                continue;
+            }
+            // format: health status index uuid pri rep docs.count deleted size…
+            let name = cols[2].to_string();
+            if name.starts_with(".argos") || name.starts_with('.') {
+                continue;
+            }
+            let docs = cols
+                .get(6)
+                .and_then(|c| c.parse::<u64>().ok())
+                // fallback for column-order variants: first integer after the
+                // uuid that is not the 1-digit pri/rep pair
+                .or_else(|| cols.iter().skip(7).find_map(|c| c.parse::<u64>().ok()))
+                .unwrap_or(0);
+            out.push((name, docs));
+        }
+        Ok(out)
+    }
+
+    pub fn get_doc(&self, index: &str, id: &str) -> Result<Option<Value>> {
+        let resp = self
+            .req(reqwest::Method::GET, &format!("/{index}/_doc/{id}"))
+            .send()
+            .context("GET doc")?;
+        if resp.status().as_u16() == 404 {
+            return Ok(None);
+        }
+        let v: Value = resp.json().unwrap_or(Value::Null);
+        if v.get("found").and_then(|f| f.as_bool()).unwrap_or(false) {
+            Ok(v.get("_source").cloned())
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// `GET /_cat/indices/{pattern}?format=json&h=index` as index names.
+    ///
+    /// The JSON sibling of [`Self::cat_indices`], which parses the TEXT form
+    /// and is deliberately NOT retrofit — its callers depend on the text
+    /// column layout. The engine honours `format=json` on this endpoint
+    /// (`cat_indices_format_json_returns_a_real_json_array`), which is what
+    /// the reference-coding loop counts live indices with. A 404 on a
+    /// wildcard means "no such indices" -> `Ok(vec![])`; every other failure
+    /// is `Err`: a node that cannot answer must never be reported as
+    /// "0 live indices".
+    pub fn cat_indices_json(&self, pattern: &str) -> Result<Vec<String>> {
+        let path = format!("/_cat/indices/{pattern}?format=json&h=index");
+        let (status, v) = self.request_json("GET", &path, None)?;
+        match status {
+            200 => v
+                .as_array()
+                .map(|rows| {
+                    rows.iter()
+                        .filter_map(|r| r.get("index").and_then(Value::as_str))
+                        .map(str::to_string)
+                        .collect()
+                })
+                .ok_or_else(|| anyhow!("{path} returned non-array JSON")),
+            404 => Ok(Vec::new()),
+            other => Err(anyhow!("{path} returned HTTP {other}: {v}")),
+        }
+    }
+
+    /// Tri-state `GET /{pattern}/_count` — the #930 build-verify primitive.
+    ///
+    /// NOT [`Self::count`]: that is a `size:0` search pinned by its own
+    /// comment, and verification needs exactly the `_count` endpoint's
+    /// semantics, where 404 IS the answer "the wildcard matches no index, so
+    /// zero records". The three states and the difference between the last
+    /// two are the whole point:
+    ///
+    /// * `Number(n)` — the node counted them;
+    /// * `Zero`      — the node answered 404;
+    /// * `Unknown`   — the node DID NOT SAY (timeout, 5xx, refused, junk).
+    ///
+    /// "Did not say" used to be folded into 0 by every caller, and 0 is what
+    /// authorises the destructive steps of a build swap. A node under memory
+    /// pressure — the node a long build produces — answers exactly like that,
+    /// so UNKNOWN authorises no delete and no swap, ever.
+    pub fn count_endpoint(&self, pattern: &str) -> Count {
+        let path = format!("/{pattern}/_count");
+        let (status, v) = match self.request_json("GET", &path, None) {
+            Ok(r) => r,
+            Err(e) => return Count::Unknown(format!("{e:#}")),
+        };
+        match status {
+            200 => match v.get("count").and_then(Value::as_u64) {
+                Some(n) => Count::Number(n),
+                None => Count::Unknown(format!("no count in _count reply: {v}")),
+            },
+            404 => Count::Zero,
+            other => Count::Unknown(format!("{path} HTTP {other}: {v}")),
+        }
+    }
+}
+
+/// The `hits.total` of a size:0 search used as a `_count` fallback.
+///
+/// A deadline answer is HTTP 200 with `timed_out: true` and `total.value: 0`
+/// (`relation: gte`). Reading that 0 as the live count is what made
+/// finalize abort a finished run: the journal had the records, the node
+/// had not finished counting, and the zero-live gate treated the partial
+/// page as an empty index.
+pub(crate) fn search_hit_total(v: &Value) -> Result<u64> {
+    if v.get("timed_out") == Some(&Value::Bool(true)) {
+        anyhow::bail!(
+            "search count fallback timed out; the total is partial and is not a live count"
+        );
+    }
+    v.pointer("/hits/total/value")
+        .and_then(|t| t.as_u64())
+        .or_else(|| v.pointer("/hits/total").and_then(|t| t.as_u64()))
+        .ok_or_else(|| anyhow!("no total in search response"))
+}
+
+/// The tri-state answer of [`Es::count_endpoint`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Count {
+    Number(u64),
+    Zero,
+    /// The node did not say. NEVER to be treated as zero.
+    Unknown(String),
+}
+
+impl Count {
+    pub fn is_number(&self) -> bool {
+        matches!(self, Count::Number(_))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{bulk_item_ranges, select_bulk_items, Es};
+    use std::io::Read;
+    use std::io::Write;
+    use std::net::TcpListener;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{mpsc, Arc, Mutex};
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn a_timed_out_search_is_not_a_zero_count() {
+        let partial = serde_json::json!({
+            "timed_out": true,
+            "hits": {"total": {"value": 0, "relation": "gte"}, "hits": []}
+        });
+        let err = super::search_hit_total(&partial).unwrap_err();
+        assert!(
+            err.to_string().contains("timed out"),
+            "a partial total must not become 0: {err}"
+        );
+        let complete = serde_json::json!({"hits": {"total": {"value": 3, "relation": "eq"}}});
+        assert_eq!(super::search_hit_total(&complete).unwrap(), 3);
+        let bare = serde_json::json!({"hits": {"total": 4}});
+        assert_eq!(super::search_hit_total(&bare).unwrap(), 4);
+    }
+
+    #[test]
+    fn bulk_request_uses_custom_timeout_and_drops_timed_out_connection() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let (closed_tx, closed_rx) = mpsc::channel();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(4)))
+                .unwrap();
+            let mut request = [0u8; 4096];
+            let read = stream.read(&mut request).unwrap();
+            assert!(String::from_utf8_lossy(&request[..read]).contains("POST /_bulk"));
+            std::thread::sleep(Duration::from_millis(1300));
+            let closed = stream.read(&mut request).map(|n| n == 0).unwrap_or(true);
+            closed_tx.send(closed).unwrap();
+        });
+        let es = Es::with_bulk_policy(
+            &format!("http://{address}"),
+            None,
+            Duration::from_secs(1),
+            Duration::from_millis(10),
+            Duration::from_millis(20),
+        )
+        .unwrap();
+        let started = Instant::now();
+        let err = es.send_bulk(b"{}\n".to_vec()).unwrap_err();
+        let elapsed = started.elapsed();
+        assert!(format!("{err:#}").contains("timed out"), "{err:#}");
+        assert!(elapsed >= Duration::from_millis(800), "{elapsed:?}");
+        assert!(elapsed < Duration::from_secs(3), "{elapsed:?}");
+        assert!(closed_rx.recv_timeout(Duration::from_secs(4)).unwrap());
+        server.join().unwrap();
+    }
+
+    /// The fake page server for the `search_page` tests: answers each request
+    /// with the next body in `answers`, recording every request it saw.
+    fn page_server(answers: Vec<&'static [u8]>) -> (std::net::SocketAddr, Arc<Mutex<Vec<String>>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let recorded = Arc::clone(&seen);
+        std::thread::spawn(move || {
+            for answer in answers {
+                let (mut stream, _) = listener.accept().unwrap();
+                let request = read_request(&mut stream);
+                recorded
+                    .lock()
+                    .unwrap()
+                    .push(String::from_utf8_lossy(&request).into_owned());
+                respond_json(&mut stream, answer);
+            }
+        });
+        (address, seen)
+    }
+
+    /// #1212: the engine legally answers a missed search deadline with HTTP
+    /// 200, partial hits and `timed_out: true`. A page walker that took that
+    /// answer at face value read one partial page as the end of the catalog
+    /// (56,441 of 58,568 documents on the argos-search rebuild). `search_page`
+    /// must retry the SAME request until the node answers a complete page,
+    /// and must put an explicit page timeout on the wire so the engine's 30 s
+    /// default deadline is not what decides.
+    #[test]
+    fn search_page_retries_a_partial_answer_and_returns_the_complete_page() {
+        let (address, seen) = page_server(vec![
+            br#"{"timed_out":true,"hits":{"hits":[]}}"#,
+            br#"{"timed_out":true,"hits":{"hits":[]}}"#,
+            br#"{"timed_out":false,"hits":{"total":{"value":1,"relation":"eq"},"hits":[{"_id":"a","_source":{},"sort":["a"]}]}}"#,
+        ]);
+        let es = Es::new(&format!("http://{address}"), None).unwrap();
+        let page = es
+            .search_page(
+                "autoindex-catalog",
+                &serde_json::json!({"size": 1000, "sort": [{"_id": "asc"}]}),
+            )
+            .unwrap();
+        assert_eq!(
+            page.pointer("/hits/hits")
+                .unwrap()
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        let seen = seen.lock().unwrap();
+        assert_eq!(
+            seen.len(),
+            3,
+            "two partial answers, one retry each: {seen:?}"
+        );
+        assert!(
+            seen.iter()
+                .all(|request| request.contains("\"timeout\":\"120s\"")),
+            "every attempt must carry the explicit page timeout: {seen:?}"
+        );
+    }
+
+    /// #1212: a node that cannot complete one page at all must end the walk
+    /// in a named error, never in a short page the caller would read as
+    /// end-of-data — after exactly the bounded attempt count.
+    #[test]
+    fn search_page_fails_loudly_when_every_attempt_answers_partial() {
+        let answers: Vec<&'static [u8]> = (0..super::PARTIAL_PAGE_ATTEMPTS)
+            .map(|_| br#"{"timed_out":true,"hits":{"hits":[]}}"# as &'static [u8])
+            .collect();
+        let (address, seen) = page_server(answers);
+        let es = Es::new(&format!("http://{address}"), None).unwrap();
+        let error = es
+            .search_page("autoindex-catalog", &serde_json::json!({"size": 1000}))
+            .unwrap_err();
+        let message = format!("{error:#}");
+        assert!(message.contains("partial"), "{message}");
+        assert!(message.contains("autoindex-catalog"), "{message}");
+        assert_eq!(seen.lock().unwrap().len(), super::PARTIAL_PAGE_ATTEMPTS);
+    }
+
+    /// #1212: a caller's own `timeout` is honoured, not overridden — the page
+    /// budget belongs to the walk that knows how slow its node is.
+    #[test]
+    fn search_page_keeps_a_caller_supplied_timeout() {
+        let (address, seen) = page_server(vec![br#"{"timed_out":false,"hits":{"hits":[]}}"#]);
+        let es = Es::new(&format!("http://{address}"), None).unwrap();
+        es.search_page(
+            "autoindex-catalog",
+            &serde_json::json!({"size": 1000, "timeout": "5s"}),
+        )
+        .unwrap();
+        let seen = seen.lock().unwrap();
+        assert!(
+            seen[0].contains("\"timeout\":\"5s\"") && !seen[0].contains("120s"),
+            "caller timeout must survive: {seen:?}"
+        );
+    }
+
+    /// #1212: the present variant keeps `search_present`'s contract — a 404
+    /// is an answer (`Ok(None)`), and it is not retried as if it were a
+    /// partial page.
+    #[test]
+    fn search_page_present_treats_a_missing_index_as_an_answer() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let recorded = Arc::clone(&seen);
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let request = read_request(&mut stream);
+            recorded
+                .lock()
+                .unwrap()
+                .push(String::from_utf8_lossy(&request).into_owned());
+            respond_status(
+                &mut stream,
+                "404 Not Found",
+                br#"{"error":"index_missing"}"#,
+            );
+        });
+        let es = Es::new(&format!("http://{address}"), None).unwrap();
+        assert!(es
+            .search_page_present("autoindex-catalog", &serde_json::json!({"size": 1000}))
+            .unwrap()
+            .is_none());
+        assert_eq!(seen.lock().unwrap().len(), 1);
+    }
+
+    fn read_request(stream: &mut std::net::TcpStream) -> Vec<u8> {
+        stream
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        let mut request = Vec::new();
+        let mut buffer = [0u8; 4096];
+        loop {
+            let count = stream.read(&mut buffer).unwrap();
+            if count == 0 {
+                // Peer closed. Without this the loop spins on `Ok(0)` forever
+                // whenever the client gives up mid-request, and `server.join()`
+                // never returns — a HANGING test, which under load is worse
+                // than a failing one because CI has nothing to report. Seen
+                // 19 times in 219 runs at 20x CPU oversubscription.
+                break;
+            }
+            request.extend_from_slice(&buffer[..count]);
+            if let Some(header_end) = request.windows(4).position(|w| w == b"\r\n\r\n") {
+                let headers = String::from_utf8_lossy(&request[..header_end]);
+                let length = headers
+                    .lines()
+                    .find_map(|line| {
+                        line.to_ascii_lowercase()
+                            .strip_prefix("content-length:")
+                            .and_then(|v| v.trim().parse::<usize>().ok())
+                    })
+                    .unwrap_or(0);
+                if request.len() >= header_end + 4 + length {
+                    break;
+                }
+            }
+        }
+        request
+    }
+
+    fn success(stream: &mut std::net::TcpStream) {
+        respond_json(stream, br#"{"errors":false,"items":[]}"#);
+    }
+
+    fn respond_json(stream: &mut std::net::TcpStream, body: &[u8]) {
+        respond_status(stream, "200 OK", body);
+    }
+
+    fn respond_status(stream: &mut std::net::TcpStream, status: &str, body: &[u8]) {
+        write!(
+            stream,
+            "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            body.len()
+        )
+        .unwrap();
+        stream.write_all(body).unwrap();
+    }
+
+    /// #1059: the wire body of a dataset-index CREATE carries the stemming
+    /// analyzer declaration next to the single-WAL-shard setting — the two
+    /// create-only settings compose under one `settings` object, and the
+    /// analyzer is not dropped or mangled on the way out. Observed on the
+    /// socket, not on the builder, so the transport layer cannot lose it.
+    #[test]
+    fn ensure_index_puts_the_declared_analyzer_beside_the_wal_shard_setting() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let request = read_request(&mut stream);
+            let text = String::from_utf8_lossy(&request);
+            assert!(text.starts_with("PUT /ax-prose HTTP/1.1"), "{text}");
+            let body = text.split("\r\n\r\n").nth(1).unwrap_or_default();
+            let sent: serde_json::Value = serde_json::from_str(body.trim()).unwrap();
+            assert_eq!(
+                sent.pointer("/settings/analysis/analyzer/default/type"),
+                Some(&serde_json::json!("stemmer")),
+                "{sent}"
+            );
+            assert_eq!(
+                sent.pointer("/settings/index/argos_ingest_shards"),
+                Some(&serde_json::json!(1)),
+                "the WAL-shard setting must land beside the analyzer, not replace it: {sent}"
+            );
+            respond_json(&mut stream, br#"{"acknowledged":true}"#);
+        });
+        let es = Es::new(&format!("http://{address}"), None).unwrap();
+        let body = serde_json::json!({
+            "mappings": {"properties": {"body": {"type": "semantic_text"}}},
+            "settings": {"analysis": {"analyzer": {"default": {"type": "stemmer"}}}}
+        });
+        es.ensure_index("ax-prose", &body).unwrap();
+        server.join().unwrap();
+    }
+
+    /// A deleted index is an answer for the probes that ask whether the server
+    /// still holds what a journal claims it holds — `search` propagating that
+    /// 404 replaces `argos brain`'s recovery text with a raw HTTP error. Every
+    /// other refusal must still propagate, so absence is never laundered out of
+    /// a real failure.
+    #[test]
+    fn search_present_reports_a_missing_index_as_absence_and_nothing_else() {
+        for (status, body, expect_absent) in [
+            (
+                "404 Not Found",
+                &br#"{"error":{"type":"index_not_found_exception"},"status":404}"#[..],
+                true,
+            ),
+            (
+                "403 Forbidden",
+                &br#"{"error":{"type":"security_exception"},"status":403}"#[..],
+                false,
+            ),
+            (
+                "200 OK",
+                &br#"{"hits":{"total":{"value":7,"relation":"eq"}}}"#[..],
+                false,
+            ),
+        ] {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap();
+            let owned = body.to_vec();
+            let status_line = status.to_owned();
+            let server = std::thread::spawn(move || {
+                let (mut stream, _) = listener.accept().unwrap();
+                let request = read_request(&mut stream);
+                assert!(
+                    String::from_utf8_lossy(&request).starts_with("POST /nodes/_search HTTP/1.1"),
+                    "{}",
+                    String::from_utf8_lossy(&request)
+                );
+                respond_status(&mut stream, &status_line, &owned);
+            });
+            let es = Es::new(&format!("http://{address}"), None).unwrap();
+            let result = es.search_present("nodes", &serde_json::json!({"size": 0}));
+            if expect_absent {
+                assert!(result.unwrap().is_none(), "{status}");
+            } else if status.starts_with("200") {
+                let value = result.unwrap().expect("a served index is present");
+                assert_eq!(value.pointer("/hits/total/value").unwrap(), 7);
+            } else {
+                let error = result.unwrap_err();
+                assert!(format!("{error:#}").contains("403"), "{error:#}");
+            }
+            server.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn embedding_identity_uses_native_endpoint_and_parses_sanitized_data() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let request = read_request(&mut stream);
+            assert!(
+                String::from_utf8_lossy(&request)
+                    .starts_with("GET /v1/embedding/identity HTTP/1.1"),
+                "{}",
+                String::from_utf8_lossy(&request)
+            );
+            respond_json(
+                &mut stream,
+                br#"{"data":{"version":1,"backend":"lexical","identity_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","dimensions":384,"semantic_contract":"semantic_text-derived-vector.v1","resumable":true},"took_ms":0,"request_id":"test"}"#,
+            );
+        });
+        let es = Es::new(&format!("http://{address}"), None).unwrap();
+        let identity = es.embedding_execution_identity().unwrap();
+        assert_eq!(identity.backend, "lexical");
+        assert!(identity.resumable);
+        assert_eq!(identity.dimensions, Some(384));
+        server.join().unwrap();
+    }
+
+    /// `neural` and `proxy` omit the width entirely, so the client must accept
+    /// a response without a `dimensions` key rather than failing to parse it.
+    /// It still rejects an explicit zero, which no backend should ever send,
+    /// and it rejects an omitted width from `lexical`/`onnx-experimental`,
+    /// whose widths a real ARGOS server always reports.
+    #[test]
+    fn embedding_identity_accepts_an_omitted_width_and_rejects_a_zero_one() {
+        for (body, expect_ok) in [
+            (
+                br#"{"data":{"version":1,"backend":"proxy","identity_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","semantic_contract":"semantic_text-derived-vector.v1","resumable":false,"non_resumable_reason":"remote"},"took_ms":0,"request_id":"test"}"#.to_vec(),
+                true,
+            ),
+            (
+                br#"{"data":{"version":1,"backend":"lexical","identity_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","dimensions":0,"semantic_contract":"semantic_text-derived-vector.v1","resumable":true},"took_ms":0,"request_id":"test"}"#.to_vec(),
+                false,
+            ),
+            (
+                br#"{"data":{"version":1,"backend":"lexical","identity_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","semantic_contract":"semantic_text-derived-vector.v1","resumable":true},"took_ms":0,"request_id":"test"}"#.to_vec(),
+                false,
+            ),
+            (
+                br#"{"data":{"version":1,"backend":"onnx-experimental","identity_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","semantic_contract":"semantic_text-derived-vector.v1","resumable":true},"took_ms":0,"request_id":"test"}"#.to_vec(),
+                false,
+            ),
+        ] {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap();
+            let server = std::thread::spawn(move || {
+                let (mut stream, _) = listener.accept().unwrap();
+                let _ = read_request(&mut stream);
+                respond_json(&mut stream, &body);
+            });
+            let es = Es::new(&format!("http://{address}"), None).unwrap();
+            let result = es.embedding_execution_identity();
+            assert_eq!(result.is_ok(), expect_ok, "{result:?}");
+            if let Ok(identity) = result {
+                assert_eq!(identity.dimensions, None);
+                assert!(!identity.resumable);
+            }
+            server.join().unwrap();
+        }
+    }
+
+    /// #195: cluster/index write blocks arrive with status 403 (only the
+    /// flood-stage block is 429), so they must be classified as backend
+    /// failures by error TYPE/wording — never counted as junk source
+    /// records. A genuine per-item 400 stays junk.
+    #[test]
+    fn per_item_write_block_errors_are_backend_failures_not_junk() {
+        for (body, expect_server_errors) in [
+            // ARGOS shape: explicit write block via the semantic bulk path.
+            (
+                br#"{"errors":true,"items":[{"index":{"_index":"i","_id":"a","status":403,"error":{"type":"engine_exception","reason":"index [i] is blocked for write operations","status":403}}}]}"#.to_vec(),
+                1u64,
+            ),
+            // ES shape: cluster_block_exception recognised by TYPE alone
+            // (reason deliberately free of the word "blocked").
+            (
+                br#"{"errors":true,"items":[{"index":{"_index":"i","_id":"a","status":403,"error":{"type":"cluster_block_exception","reason":"FORBIDDEN/8/index write (api)"}}}]}"#.to_vec(),
+                1u64,
+            ),
+            // A real bad-record 400 must stay in the junk bucket.
+            (
+                br#"{"errors":true,"items":[{"index":{"_index":"i","_id":"a","status":400,"error":{"type":"document_parsing_exception","reason":"failed to parse field [ts] of type [date]"}}}]}"#.to_vec(),
+                0u64,
+            ),
+        ] {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap();
+            let server = std::thread::spawn(move || {
+                let (mut stream, _) = listener.accept().unwrap();
+                let _ = read_request(&mut stream);
+                respond_json(&mut stream, &body);
+            });
+            let es = Es::new(&format!("http://{address}"), None).unwrap();
+            let outcome = es.bulk(b"{\"index\":{}}\n{}\n".to_vec()).unwrap();
+            assert_eq!(outcome.item_errors, 1);
+            assert_eq!(
+                outcome.server_errors, expect_server_errors,
+                "{:?}",
+                outcome.first_error
+            );
+            if expect_server_errors > 0 {
+                let reason = outcome.first_server_error.expect("server error recorded");
+                assert!(
+                    reason.contains("block") || reason.contains("FORBIDDEN"),
+                    "{reason}"
+                );
+            } else {
+                assert!(outcome.first_server_error.is_none());
+            }
+            server.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn retry_path_recovers_after_one_bulk_timeout() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut first, _) = listener.accept().unwrap();
+            read_request(&mut first);
+            let first = std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(120));
+                drop(first);
+            });
+            let (mut second, _) = listener.accept().unwrap();
+            read_request(&mut second);
+            success(&mut second);
+            first.join().unwrap();
+        });
+        let es = Es::with_bulk_policy(
+            &format!("http://{address}"),
+            None,
+            Duration::from_millis(50),
+            Duration::from_millis(10),
+            Duration::from_millis(20),
+        )
+        .unwrap();
+        let outcome = es.bulk(b"{\"index\":{}}\n{}\n".to_vec()).unwrap();
+        assert_eq!(outcome.item_errors, 0);
+        server.join().unwrap();
+    }
+
+    /// #1183: a retrying request must say so, or its bounded envelope reads
+    /// as a deadlock. The gate is the logic — first failure announces,
+    /// the next line waits for NOTICE_EVERY, a silent client never announces
+    /// — so it is pinned directly on the returned flag; the print itself is
+    /// a one-liner the flag stands for.
+    #[test]
+    fn failure_notices_announce_immediately_then_hold_the_cadence() {
+        let mk = |announce| {
+            Es::with_bulk_policy(
+                "http://127.0.0.1:1",
+                None,
+                Duration::from_millis(100),
+                Duration::from_millis(10),
+                Duration::from_millis(20),
+            )
+            .unwrap()
+            .with_bulk_concurrency(1, announce)
+        };
+        let error = anyhow::Error::msg("connection closed before message completed");
+        // a quiet client (probe, --quiet) never announces and never marks
+        let quiet = mk(false);
+        let mut last = None;
+        assert!(!quiet.failure_notice(&mut last, "search", &error, 1, 6, Duration::from_secs(0)));
+        assert!(last.is_none(), "a refused notice must not mark the clock");
+        // a loading run announces the first failure at once…
+        let loud = mk(true);
+        assert!(loud.failure_notice(&mut last, "search", &error, 1, 6, Duration::from_secs(310)));
+        let first = last.expect("an announced notice marks the clock");
+        // …and holds the cadence for the immediate next one
+        assert!(!loud.failure_notice(&mut last, "search", &error, 2, 6, Duration::from_secs(620)));
+        assert_eq!(
+            last,
+            Some(first),
+            "a held notice must not re-mark the clock"
+        );
+    }
+
+    /// The wire-level shape of the same contract: a connection dropped before
+    /// a response is a transport failure, the retry loop announces (loading
+    /// client) and re-offers, and the second attempt succeeds — the run is
+    /// bounded AND visibly so, never a silent stall.
+    #[test]
+    fn a_dropped_connection_is_retried_after_announcing() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let requests_server = requests.clone();
+        let server = std::thread::spawn(move || {
+            // first connection: read the request, answer nothing, close
+            let (mut first, _) = listener.accept().unwrap();
+            requests_server
+                .lock()
+                .unwrap()
+                .push(read_request(&mut first));
+            drop(first);
+            // second connection: the retried request, answered
+            let (mut second, _) = listener.accept().unwrap();
+            requests_server
+                .lock()
+                .unwrap()
+                .push(read_request(&mut second));
+            respond_json(&mut second, br#"{"deleted":0,"failures":[]}"#.as_slice());
+        });
+        let es = Es::with_bulk_policy(
+            &format!("http://{address}"),
+            None,
+            Duration::from_millis(100),
+            Duration::from_millis(10),
+            Duration::from_millis(20),
+        )
+        .unwrap()
+        .with_bulk_concurrency(1, true);
+        es.delete_by_query("data", &serde_json::json!({"term": {"ax_file": "key"}}))
+            .unwrap();
+        server.join().unwrap();
+        assert_eq!(requests.lock().unwrap().len(), 2, "one drop, one retry");
+    }
+
+    /// Unix says "Connection refused"; Windows says the target machine
+    /// "actively refused" it. Either is the OS cause #2177 cut off.
+    fn connect_refused(text: &str) -> bool {
+        let text = text.to_ascii_lowercase();
+        text.contains("connection refused") || text.contains("actively refused")
+    }
+
+    /// #2177: the 120-character prefix of a refused `_bulk` against the default
+    /// URL ends on the `t` of `tcp connect error`. The notice must keep the
+    /// address and the OS cause instead.
+    #[test]
+    fn the_connect_notice_keeps_the_cause_the_120_char_cut_reduced_to_t() {
+        let chain = "bulk send (request timeout 300s): error sending request for url (http://127.0.0.1:9200/_bulk): client error (Connect): tcp connect error: Connection refused (os error 111)";
+        let prefix: String = chain.chars().take(120).collect();
+        assert_eq!(
+            prefix,
+            "bulk send (request timeout 300s): error sending request for url (http://127.0.0.1:9200/_bulk): client error (Connect): t"
+        );
+        let err = anyhow::anyhow!("{chain}");
+        assert!(super::is_node_unreachable(&err), "{chain}");
+        assert_eq!(super::notice_reason(&err), chain);
+    }
+
+    /// A long non-connect failure shares [`super::notice_reason`]. The cap
+    /// keeps the cause at the end of the chain, not a one-character stub.
+    #[test]
+    fn a_long_transport_notice_keeps_the_tail_of_the_cause() {
+        let cause = "upstream closed the connection while flushing a segment";
+        let err = anyhow::anyhow!("{}: {cause}", "y".repeat(400));
+        let reason = super::notice_reason(&err);
+        assert!(reason.contains(cause), "{reason}");
+        assert!(reason.starts_with('…'), "{reason}");
+        assert!(
+            reason.chars().count() <= super::NOTICE_REASON_CHARS + 1,
+            "{}",
+            reason.chars().count()
+        );
+    }
+
+    /// The node accepts one `_bulk`, then closes the port. The next bulk must
+    /// name the address and the OS refusal, stop after the ordinary attempt
+    /// budget, and a bulk after that must not retry.
+    #[test]
+    fn bulk_against_a_node_that_closes_its_port_stops_and_names_the_connect_error() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let (closed_tx, closed_rx) = mpsc::channel();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            read_request(&mut stream);
+            respond_json(&mut stream, br#"{"errors":false,"items":[]}"#);
+            drop(stream);
+            drop(listener);
+            closed_tx.send(()).unwrap();
+        });
+        // 300s is the production bulk timeout, so the rendered chain has the
+        // same prefix the field report cut. A refused connect returns at once;
+        // the timeout is only text.
+        let es = Es::with_bulk_policy(
+            &format!("http://{address}"),
+            None,
+            Duration::from_secs(300),
+            Duration::from_millis(10),
+            Duration::from_millis(20),
+        )
+        .unwrap()
+        .with_bulk_concurrency(1, true);
+        let body = b"{\"index\":{}}\n{}\n".to_vec();
+        let first = es.bulk(body.clone()).unwrap();
+        assert_eq!(first.item_errors, 0);
+        closed_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        server.join().unwrap();
+
+        let before = es.backoff_delays.lock().unwrap().len();
+        let err = es.bulk(body.clone()).unwrap_err();
+        let backoffs = es.backoff_delays.lock().unwrap().len() - before;
+        assert_eq!(backoffs, 5, "six attempts, five sleeps, then stop");
+        let message = format!("{err:#}");
+        assert!(
+            message.contains(&format!(
+                "the node at http://{address} is down or unreachable"
+            )),
+            "{message}"
+        );
+        assert!(message.contains("tcp connect error"), "{message}");
+        assert!(connect_refused(&message), "{message}");
+        assert!(
+            message.contains(&format!("http://{address}/_bulk")),
+            "{message}"
+        );
+        assert!(message.contains("The run can be resumed"), "{message}");
+        let argv0 = std::env::args().next().expect("argv");
+        assert!(
+            message.contains(&argv0),
+            "the resume command must be this process's argv, missing {argv0} in {message}"
+        );
+        assert!(es.node_is_down());
+
+        let notices = es.notices.lock().unwrap().clone();
+        assert!(
+            !notices.is_empty(),
+            "the retries must say why they are retrying"
+        );
+        let reason = &notices[0];
+        assert!(reason.contains("tcp connect error"), "{reason}");
+        assert!(connect_refused(reason), "{reason}");
+        assert!(
+            reason.contains(&format!("http://{address}/_bulk")),
+            "{reason}"
+        );
+        let prefix: String = reason.chars().take(120).collect();
+        assert!(
+            !connect_refused(&prefix),
+            "the 120-character prefix is the #2177 cut and must not be what we print: {prefix}"
+        );
+        assert!(
+            reason.chars().count() > 120,
+            "the notice was cut to one character of the cause: {reason}"
+        );
+
+        let before = es.backoff_delays.lock().unwrap().len();
+        let again = es.bulk(body).unwrap_err();
+        let backoffs = es.backoff_delays.lock().unwrap().len() - before;
+        assert_eq!(
+            backoffs, 0,
+            "a later bulk retried a node already known to be down"
+        );
+        assert!(format!("{again:#}").contains("is down or unreachable"));
+    }
+
+    #[test]
+    fn all_timeout_retry_path_is_bounded_to_six_attempts_without_final_sleep() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let accepted = Arc::new(Mutex::new(0usize));
+        let accepted_server = accepted.clone();
+        let server = std::thread::spawn(move || {
+            let mut handlers = Vec::new();
+            for _ in 0..6 {
+                let (mut stream, _) = listener.accept().unwrap();
+                *accepted_server.lock().unwrap() += 1;
+                handlers.push(std::thread::spawn(move || {
+                    read_request(&mut stream);
+                    std::thread::sleep(Duration::from_millis(100));
+                }));
+            }
+            for handler in handlers {
+                handler.join().unwrap();
+            }
+        });
+        let es = Es::with_bulk_policy(
+            &format!("http://{address}"),
+            None,
+            Duration::from_millis(25),
+            Duration::from_millis(10),
+            Duration::from_millis(20),
+        )
+        .unwrap();
+        let error = match es.bulk(b"{}\n".to_vec()) {
+            Ok(_) => panic!("all six delayed responses unexpectedly succeeded"),
+            Err(error) => error,
+        };
+        assert!(format!("{error:#}").contains("timed out"), "{error:#}");
+        assert_eq!(*accepted.lock().unwrap(), 6);
+        // The property is a COUNT, not a duration: six attempts with five
+        // backoffs between them and none after the last. This used to be
+        // asserted as `elapsed < 260ms` against a 240ms budget, which measured
+        // the machine rather than the code and failed about one run in five —
+        // on `main`, so it reddened pull requests that had not touched it
+        // (#436). A sixth sleep is what the old bound was really looking for,
+        // and it is visible here directly.
+        // The REQUESTED sequence is asserted exactly, and each observed sleep
+        // only has to be at least what was asked for. That removes the last
+        // wall-clock upper bound from this test: an earlier version compared
+        // the observed value against `want + 50`, which is an upper bound on
+        // real time and therefore the one assertion load could break — while
+        // the comment eight lines above it said there was no such bound. A
+        // sleep can overrun and cannot underrun, so `observed >= requested` is
+        // safe at any load, and the requested sequence pins arity, ordering,
+        // the doubling and the `retry_max_delay` cap on its own.
+        let recorded = es.backoff_delays.lock().unwrap().clone();
+        let requested: Vec<u64> = recorded.iter().map(|(r, _)| r.as_millis() as u64).collect();
+        assert_eq!(
+            requested,
+            vec![10, 20, 20, 20, 20],
+            "six attempts back off five times, never after the final failure, \
+             doubling to the cap"
+        );
+        assert!(
+            recorded.iter().all(|(r, o)| o >= r),
+            "a delay that is computed correctly and then not honoured is the \
+             one thing the requested sequence alone cannot see: {recorded:?}"
+        );
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn delete_by_query_repeats_until_a_pass_deletes_nothing() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let requests_server = requests.clone();
+        let server = std::thread::spawn(move || {
+            // A previous generation larger than one server pass: the first
+            // pass removes its 10k cap and only the second reports done.
+            for body in [
+                br#"{"deleted":10000,"failures":[]}"#.as_slice(),
+                br#"{"deleted":0,"failures":[]}"#.as_slice(),
+            ] {
+                let (mut stream, _) = listener.accept().unwrap();
+                requests_server
+                    .lock()
+                    .unwrap()
+                    .push(read_request(&mut stream));
+                respond_json(&mut stream, body);
+            }
+        });
+        let es = Es::with_bulk_policy(
+            &format!("http://{address}"),
+            None,
+            Duration::from_millis(100),
+            Duration::from_millis(10),
+            Duration::from_millis(20),
+        )
+        .unwrap();
+        es.delete_by_query("data", &serde_json::json!({"term": {"ax_file": "key"}}))
+            .unwrap();
+        server.join().unwrap();
+        let requests = requests.lock().unwrap();
+        assert_eq!(requests.len(), 2);
+        for request in requests.iter() {
+            let text = String::from_utf8_lossy(request);
+            assert!(text.contains("POST /data/_delete_by_query"), "{text}");
+        }
+    }
+
+    /// #1173: the cleanup before a file-level replacement targets the index
+    /// the journal names. When a namespace swap already retired it the node
+    /// answers 404, and the client turned that converged state ("the stale
+    /// documents are already absent — a missing index cannot hold any") into
+    /// a fatal abort. 404 must be the answer "deleted nothing", the same rule
+    /// as `count_endpoint`'s, and it must be answered on the FIRST request —
+    /// convergent is not a thing to retry.
+    #[test]
+    fn delete_by_query_on_a_missing_index_is_already_clean_not_an_abort() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let requests_server = requests.clone();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            requests_server
+                .lock()
+                .unwrap()
+                .push(read_request(&mut stream));
+            respond_status(
+                &mut stream,
+                "404 Not Found",
+                br#"{"error":{"type":"index_not_found_exception","status":404},"status":404}"#,
+            );
+        });
+        let es = Es::with_bulk_policy(
+            &format!("http://{address}"),
+            None,
+            Duration::from_millis(100),
+            Duration::from_millis(10),
+            Duration::from_millis(20),
+        )
+        .unwrap();
+        es.delete_by_query(
+            "retired-generation",
+            &serde_json::json!({"term": {"ax_file": "key"}}),
+        )
+        .expect("a missing index is already clean, not a failed cleanup");
+        server.join().unwrap();
+        let requests = requests.lock().unwrap();
+        assert_eq!(
+            requests.len(),
+            1,
+            "a 404 is answered, not retried: {:#?}",
+            requests
+                .iter()
+                .map(|r| String::from_utf8_lossy(r).to_string())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    /// #345: the reporter's whole issue was `delete_by_query: HTTP 500
+    /// Internal Server Error` and nothing else, so it was filed "not
+    /// investigated". The server had already said why — every by-query refusal
+    /// answers `{"error": {"type", "reason"}, "status"}` — and the client threw
+    /// the body away after the last retry. Cover both shapes the wire really
+    /// produces: the structured refusal, and a proxy's HTML page.
+    #[test]
+    fn an_exhausted_5xx_retry_reports_the_server_reason_not_only_the_status() {
+        for (body, expect) in [
+            (
+                br#"{"error":{"type":"internal_server_error_exception","reason":"collection publication was interrupted"},"status":500}"#.as_slice(),
+                "internal_server_error_exception: collection publication was interrupted",
+            ),
+            (
+                b"<html><body>502 upstream connect error</body></html>".as_slice(),
+                "<html><body>502 upstream connect error</body></html>",
+            ),
+        ] {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap();
+            let server = std::thread::spawn(move || {
+                for _ in 0..6 {
+                    let (mut stream, _) = listener.accept().unwrap();
+                    read_request(&mut stream);
+                    respond_status(&mut stream, "500 Internal Server Error", body);
+                }
+            });
+            let es = Es::with_bulk_policy(
+                &format!("http://{address}"),
+                None,
+                Duration::from_millis(100),
+                Duration::from_millis(1),
+                Duration::from_millis(2),
+            )
+            .unwrap();
+            let error = es
+                .delete_by_query("data", &serde_json::json!({"term": {"ax_file": "key"}}))
+                .unwrap_err();
+            let rendered = format!("{error:#}");
+            assert!(rendered.contains("HTTP 500 Internal Server Error"), "{rendered}");
+            assert!(rendered.contains(expect), "{rendered}");
+            server.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn delete_by_query_that_never_reaches_zero_fails_at_the_pass_cap() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let mut served = 0usize;
+            loop {
+                let (mut stream, _) = listener.accept().unwrap();
+                let request = read_request(&mut stream);
+                if request.starts_with(b"STOP") {
+                    break;
+                }
+                respond_json(&mut stream, br#"{"deleted":10000,"failures":[]}"#);
+                served += 1;
+            }
+            served
+        });
+        let es = Es::with_bulk_policy(
+            &format!("http://{address}"),
+            None,
+            Duration::from_millis(100),
+            Duration::from_millis(10),
+            Duration::from_millis(20),
+        )
+        .unwrap();
+        let error = es
+            .delete_by_query("data", &serde_json::json!({"term": {"ax_file": "key"}}))
+            .unwrap_err();
+        assert!(
+            format!("{error:#}").contains("still reported deletions"),
+            "{error:#}"
+        );
+        let mut stop = std::net::TcpStream::connect(address).unwrap();
+        stop.write_all(b"STOP\r\n\r\n").unwrap();
+        drop(stop);
+        assert_eq!(server.join().unwrap(), 1_000);
+    }
+
+    #[test]
+    fn ambiguous_dropped_response_retries_byte_identical_bulk_body() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let requests_server = requests.clone();
+        let server = std::thread::spawn(move || {
+            let (mut first, _) = listener.accept().unwrap();
+            requests_server
+                .lock()
+                .unwrap()
+                .push(read_request(&mut first));
+            drop(first); // backend may have committed, but response is ambiguous
+            let (mut second, _) = listener.accept().unwrap();
+            requests_server
+                .lock()
+                .unwrap()
+                .push(read_request(&mut second));
+            success(&mut second);
+        });
+        let body = b"{\"index\":{\"_index\":\"i\",\"_id\":\"stable-id\"}}\n{\"v\":1}\n".to_vec();
+        let es = Es::with_bulk_policy(
+            &format!("http://{address}"),
+            None,
+            Duration::from_millis(100),
+            Duration::from_millis(10),
+            Duration::from_millis(20),
+        )
+        .unwrap();
+        es.bulk(body.clone()).unwrap();
+        server.join().unwrap();
+        let requests = requests.lock().unwrap();
+        assert_eq!(requests.len(), 2);
+        for request in requests.iter() {
+            let offset = request.windows(4).position(|w| w == b"\r\n\r\n").unwrap() + 4;
+            assert_eq!(&request[offset..], body.as_slice());
+        }
+    }
+
+    // ── #240 §8: backpressure must reach the thing generating the load ──
+
+    fn throttled(stream: &mut std::net::TcpStream) {
+        let body = br#"{"error":{"type":"es_rejected_execution_exception"},"status":429}"#;
+        write!(
+            stream,
+            "HTTP/1.1 429 Too Many Requests\r\nContent-Type: application/json\r\n\
+             Content-Length: {}\r\nConnection: close\r\n\r\n",
+            body.len()
+        )
+        .unwrap();
+        stream.write_all(body).unwrap();
+    }
+
+    /// Serve `plan` responses, one per connection, in order.
+    fn serve(listener: TcpListener, plan: Vec<bool>) -> std::thread::JoinHandle<()> {
+        std::thread::spawn(move || {
+            for ok in plan {
+                let (mut stream, _) = listener.accept().unwrap();
+                let _ = read_request(&mut stream);
+                if ok {
+                    success(&mut stream);
+                } else {
+                    throttled(&mut stream);
+                }
+            }
+        })
+    }
+
+    fn client(address: std::net::SocketAddr, workers: usize) -> Es {
+        Es::with_bulk_policy(
+            &format!("http://{address}"),
+            None,
+            Duration::from_secs(5),
+            Duration::from_millis(10),
+            Duration::from_millis(20),
+        )
+        .unwrap()
+        .with_bulk_concurrency(workers, false)
+    }
+
+    const BULK: &[u8] = b"{\"index\":{\"_index\":\"i\",\"_id\":\"a\"}}\n{\"v\":1}\n";
+
+    /// #2234 — finalize uses one attempt. `refresh` would open a second
+    /// connection after this 500; `refresh_once` must not.
+    #[test]
+    fn refresh_once_does_not_retry_a_failed_refresh() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let hits = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let hits_for_server = Arc::clone(&hits);
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            hits_for_server.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let _ = read_request(&mut stream);
+            respond_status(
+                &mut stream,
+                "500 Internal Server Error",
+                br#"{"error":"no"}"#,
+            );
+            listener.set_nonblocking(true).unwrap();
+            std::thread::sleep(Duration::from_millis(300));
+            if listener.accept().is_ok() {
+                hits_for_server.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
+        });
+
+        let es = client(address, 1);
+        let error = es.refresh_once("idx").unwrap_err();
+        let text = format!("{error:#}");
+        assert!(
+            text.contains("500"),
+            "the failure must name the HTTP status: {text}"
+        );
+        server.join().unwrap();
+        assert_eq!(
+            hits.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "a failed finalize refresh must not be retried"
+        );
+    }
+
+    /// A 429 must shrink the window the run offers load through, and a clean
+    /// streak must probe it back up — never past what the operator asked for.
+    ///
+    /// Before this, the client slept and re-offered exactly the same load
+    /// from exactly as many workers: `bulk_concurrency_limit()` stayed at 8
+    /// no matter how hard the server pushed back.
+    #[test]
+    fn a_429_shrinks_the_bulk_window_and_a_clean_streak_probes_it_back() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        // one throttled attempt, then its retry, then RECOVER_AFTER clean bulks
+        let mut plan = vec![false, true];
+        plan.extend(std::iter::repeat_n(true, super::RECOVER_AFTER));
+        let server = serve(listener, plan);
+
+        let es = client(address, 8);
+        assert_eq!(es.bulk_concurrency_limit(), 8, "starts at --workers");
+
+        es.bulk(BULK.to_vec()).unwrap();
+        assert_eq!(
+            es.bulk_concurrency_limit(),
+            4,
+            "a 429 must halve the offered concurrency"
+        );
+        assert_eq!(es.bulk_congestion_events(), 1);
+
+        for _ in 0..super::RECOVER_AFTER {
+            es.bulk(BULK.to_vec()).unwrap();
+        }
+        assert_eq!(
+            es.bulk_concurrency_limit(),
+            5,
+            "recovery is additive: one worker back per clean streak, not a reset"
+        );
+        assert_eq!(es.bulk_congestion_events(), 1);
+        server.join().unwrap();
+    }
+
+    /// HTTP 200 whose *items* were rejected 429 is the same congestion
+    /// signal, and must not be counted as a clean bulk.
+    #[test]
+    fn per_item_429_counts_as_congestion_not_as_a_clean_bulk() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let _ = read_request(&mut stream);
+            respond_json(
+                &mut stream,
+                br#"{"errors":true,"items":[{"index":{"status":429,"error":{"type":"es_rejected_execution_exception","reason":"rejected"}}}]}"#,
+            );
+        });
+        // Patience zero: this test pins the ADMISSION response to a per-item
+        // 429, not the re-offer loop (which has its own tests below).
+        let es = client(address, 4).with_throttle_patience(Duration::ZERO);
+        let outcome = es.bulk(BULK.to_vec()).unwrap();
+        assert_eq!(outcome.server_errors, 1);
+        assert_eq!(
+            es.bulk_concurrency_limit(),
+            2,
+            "an item-level 429 must shrink the window too"
+        );
+        server.join().unwrap();
+    }
+
+    /// The window is a real gate, not a counter: once it is full, the next
+    /// bulk waits for a slot instead of being sent anyway.
+    #[test]
+    fn a_full_window_blocks_the_next_bulk_until_a_slot_frees() {
+        let admission = Arc::new(super::BulkAdmission::new(2, false));
+        let first = admission.acquire().unwrap();
+        let _second = admission.acquire().unwrap();
+
+        let (tx, rx) = mpsc::channel();
+        let waiter = {
+            let admission = Arc::clone(&admission);
+            std::thread::spawn(move || {
+                let _permit = admission.acquire().unwrap();
+                tx.send(()).unwrap();
+            })
+        };
+        assert!(
+            rx.recv_timeout(Duration::from_millis(300)).is_err(),
+            "a third bulk must not be admitted into a 2-wide window"
+        );
+        drop(first);
+        rx.recv_timeout(Duration::from_secs(5))
+            .expect("freeing a slot must admit the waiting bulk");
+        waiter.join().unwrap();
+    }
+
+    /// A permit that is never returned used to park the next bulk forever
+    /// (`Condvar::wait` with no timeout). The 56% autoindex stall was a
+    /// client with no open connections and a frozen bar. The wait now fails
+    /// and names the resume.
+    #[test]
+    fn a_leaked_bulk_slot_fails_the_next_acquire_instead_of_hanging() {
+        let admission = Arc::new(
+            super::BulkAdmission::new(1, false).with_wait_budget(Duration::from_millis(80)),
+        );
+        let held = admission.acquire().unwrap();
+        // Drop must not run: that is the leak.
+        std::mem::forget(held);
+
+        let (tx, rx) = mpsc::channel();
+        let waiter = {
+            let admission = Arc::clone(&admission);
+            std::thread::spawn(move || {
+                let message = match admission.acquire() {
+                    Err(err) => format!("{err:#}"),
+                    Ok(_) => "acquired a slot that was leaked".to_string(),
+                };
+                tx.send(message).unwrap();
+            })
+        };
+        let message = rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("a leaked slot must fail the waiter within the budget, not hang");
+        assert!(message.contains("bulk slot"), "{message}");
+        assert!(message.contains("in_flight=1"), "{message}");
+        assert!(message.contains("limit=1"), "{message}");
+        assert!(
+            message.contains("Re-run the same command to resume"),
+            "{message}"
+        );
+        waiter.join().unwrap();
+    }
+
+    /// Every worker in flight sees the same congestion; they must count it
+    /// once, or a momentary stall collapses the window to 1.
+    #[test]
+    fn concurrent_reports_of_one_stall_shrink_the_window_once() {
+        let admission = super::BulkAdmission::new(16, false);
+        for _ in 0..8 {
+            admission.on_congestion();
+        }
+        assert_eq!(admission.limit(), 8);
+        assert_eq!(admission.congestion_events(), 1);
+    }
+
+    /// A client that was never given a window has no gate at all: probes and
+    /// one-shot callers must not serialise behind an admission limit.
+    #[test]
+    fn the_window_is_off_unless_a_run_asks_for_one() {
+        let admission = super::BulkAdmission::off();
+        assert_eq!(admission.limit(), 0);
+        let _a = admission.acquire().unwrap();
+        let _b = admission.acquire().unwrap();
+        admission.on_congestion();
+        assert_eq!(admission.congestion_events(), 0);
+    }
+
+    // ─── authentication failures ────────────────────────────────────────
+    //
+    // A real user hit HTTP 401 on the very first request of an `autoindex`
+    // run, saw ~15 lines of healthy-looking progress, and was then told the
+    // server "requires a ARGOS server that exposes a resumable embedding
+    // identity". They concluded the server lacked a feature and turned auth
+    // off. Every test below exists to keep that specific failure impossible:
+    // the run must stop at the first round trip, and the message must name
+    // the credential, not a capability.
+
+    /// Serve one request and answer with `status_line`, asserting the client
+    /// asked for `path`. Returns the bound address to point a client at.
+    fn one_shot(
+        path: &'static str,
+        status_line: &'static str,
+    ) -> (std::net::SocketAddr, std::thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let request = read_request(&mut stream);
+            let request = String::from_utf8_lossy(&request);
+            assert!(
+                request.starts_with(&format!("GET {path} HTTP/1.1")),
+                "{request}"
+            );
+            respond_status(
+                &mut stream,
+                status_line,
+                br#"{"error":{"type":"security_exception","reason":"missing or invalid API key in Authorization header"},"status":401}"#,
+            );
+        });
+        (address, server)
+    }
+
+    /// Every escape route the user has must be in the text, or the message is
+    /// the same dead end with different words.
+    fn assert_names_every_way_out(error: &str, base: &str) {
+        for expected in [
+            "--api-key",
+            "ARGOS_API_KEY",
+            "<data_dir>/admin.key",
+            "--insecure",
+            base,
+        ] {
+            assert!(
+                error.contains(expected),
+                "recovery message must name {expected}: {error}"
+            );
+        }
+    }
+
+    /// `ping` used to be `Ok(resp.json().unwrap_or(Value::Null))` — a 401 was
+    /// indistinguishable from a healthy server, which is what deferred the
+    /// failure by fifteen lines of output. It must now fail closed, at the
+    /// first round trip, on both refusal codes.
+    #[test]
+    fn ping_fails_closed_on_401_and_403_and_says_how_to_recover() {
+        for (status_line, code, api_key, subject) in [
+            (
+                "401 Unauthorized",
+                "401",
+                None,
+                "requires authentication and no API key was supplied",
+            ),
+            (
+                "403 Forbidden",
+                "403",
+                Some("a-rejected-key".to_string()),
+                "rejected the API key we sent",
+            ),
+        ] {
+            let (address, server) = one_shot("/", status_line);
+            let base = format!("http://{address}");
+            let es = Es::new(&base, api_key).unwrap();
+            let error = format!("{:#}", es.ping().unwrap_err());
+            assert!(
+                error.contains(subject),
+                "message must distinguish sent-and-rejected from never-sent: {error}"
+            );
+            assert!(
+                error.contains(code),
+                "the HTTP status belongs in it: {error}"
+            );
+            assert_names_every_way_out(&error, &base);
+            // The old capability sentence is what sent the reporter looking at
+            // the wrong thing; a credential failure must never mention it.
+            assert!(!error.contains("resumable embedding identity"), "{error}");
+            server.join().unwrap();
+        }
+    }
+
+    /// The fail-closed branch must be exactly two status codes wide: a healthy
+    /// server still gets its banner parsed and the run still starts.
+    #[test]
+    fn ping_still_returns_the_banner_from_a_server_that_answers() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let _ = read_request(&mut stream);
+            respond_json(
+                &mut stream,
+                br#"{"tagline":"ARGOS","version":{"number":"1.0"}}"#,
+            );
+        });
+        let es = Es::new(&format!("http://{address}"), Some("key".to_string())).unwrap();
+        let banner = es.ping().unwrap();
+        assert_eq!(banner.pointer("/tagline").unwrap(), "ARGOS");
+        server.join().unwrap();
+    }
+
+    /// Defence in depth for a `--url` target that answers `GET /` anonymously
+    /// and guards the identity endpoint: the 401 must be reported as a missing
+    /// credential, never as the server lacking a resumable identity. This is
+    /// the exact sentence the original report pasted.
+    #[test]
+    fn the_identity_probe_reports_a_401_as_auth_not_as_a_missing_capability() {
+        for (status_line, code, api_key, subject) in [
+            (
+                "401 Unauthorized",
+                "401",
+                None,
+                "requires authentication and no API key was supplied",
+            ),
+            (
+                "403 Forbidden",
+                "403",
+                Some("a-rejected-key".to_string()),
+                "rejected the API key we sent",
+            ),
+        ] {
+            let (address, server) = one_shot("/v1/embedding/identity", status_line);
+            let base = format!("http://{address}");
+            let es = Es::new(&base, api_key).unwrap();
+            let error = format!("{:#}", es.embedding_execution_identity().unwrap_err());
+            assert!(
+                !error.contains("resumable embedding identity"),
+                "the reported misleading message must be gone: {error}"
+            );
+            assert!(error.contains(subject), "{error}");
+            assert!(error.contains(code), "{error}");
+            assert_names_every_way_out(&error, &base);
+            server.join().unwrap();
+        }
+    }
+
+    /// …and the capability wording is still the right answer for a failure
+    /// that really is about the server, so the auth branch has to be narrow.
+    #[test]
+    fn the_identity_probe_still_blames_the_capability_for_a_non_auth_failure() {
+        for status_line in ["404 Not Found", "500 Internal Server Error"] {
+            let (address, server) = one_shot("/v1/embedding/identity", status_line);
+            let es = Es::new(&format!("http://{address}"), None).unwrap();
+            let error = format!("{:#}", es.embedding_execution_identity().unwrap_err());
+            assert!(
+                error.contains("resumable embedding identity"),
+                "{status_line}: {error}"
+            );
+            assert!(!error.contains("--insecure"), "{status_line}: {error}");
+            server.join().unwrap();
+        }
+    }
+
+    // ── per-item 429: the memory breaker's shape ─────────────────────────
+
+    fn request_body(request: &[u8]) -> &[u8] {
+        let offset = request.windows(4).position(|w| w == b"\r\n\r\n").unwrap() + 4;
+        &request[offset..]
+    }
+
+    const BREAKER: &str = "[parent] real memory circuit breaker tripped: rss=15580MB >= \
+                           watermark=15564MB (94% of limit=16384MB); writes rejected to \
+                           prevent an out-of-memory kill";
+
+    fn item(id: &str, status: u32, error: Option<&str>) -> String {
+        match error {
+            Some(reason) => format!(
+                r#"{{"index":{{"_index":"i","_id":"{id}","status":{status},"error":{{"type":"engine_exception","reason":"{reason}"}}}}}}"#
+            ),
+            None => format!(r#"{{"index":{{"_index":"i","_id":"{id}","status":{status}}}}}"#),
+        }
+    }
+
+    fn items_response(items: &[String], errors: bool) -> Vec<u8> {
+        format!(r#"{{"errors":{errors},"items":[{}]}}"#, items.join(",")).into_bytes()
+    }
+
+    fn pair(id: &str) -> Vec<u8> {
+        format!("{{\"index\":{{\"_index\":\"i\",\"_id\":\"{id}\"}}}}\n{{\"v\":\"{id}\"}}\n")
+            .into_bytes()
+    }
+
+    /// The requests a mock server saw, one body per connection.
+    type SeenRequests = Arc<Mutex<Vec<Vec<u8>>>>;
+
+    /// Serve `responses`, one per connection, recording each request.
+    fn serve_bodies(
+        listener: TcpListener,
+        responses: Vec<Vec<u8>>,
+    ) -> (std::thread::JoinHandle<()>, SeenRequests) {
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let seen = requests.clone();
+        let handle = std::thread::spawn(move || {
+            for body in responses {
+                let (mut stream, _) = listener.accept().unwrap();
+                seen.lock().unwrap().push(read_request(&mut stream));
+                respond_json(&mut stream, &body);
+            }
+        });
+        (handle, requests)
+    }
+
+    #[test]
+    fn per_item_breaker_rejections_are_re_offered_until_the_server_takes_them() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let (server, requests) = serve_bodies(
+            listener,
+            vec![
+                // a taken, b and c rejected by the breaker
+                items_response(
+                    &[
+                        item("a", 201, None),
+                        item("b", 429, Some(BREAKER)),
+                        item("c", 429, Some(BREAKER)),
+                    ],
+                    true,
+                ),
+                // b taken this time, c still rejected
+                items_response(&[item("b", 201, None), item("c", 429, Some(BREAKER))], true),
+                // c taken
+                items_response(&[item("c", 201, None)], false),
+            ],
+        );
+        let body = [pair("a"), pair("b"), pair("c")].concat();
+        let outcome = client(address, 4).bulk(body).unwrap();
+        server.join().unwrap();
+        assert_eq!(outcome.server_errors, 0, "{:?}", outcome.first_server_error);
+        assert_eq!(outcome.item_errors, 0);
+        let requests = requests.lock().unwrap();
+        assert_eq!(requests.len(), 3);
+        assert_eq!(request_body(&requests[1]), [pair("b"), pair("c")].concat());
+        assert_eq!(request_body(&requests[2]), pair("c"));
+    }
+
+    #[test]
+    fn per_item_429_gives_up_after_patience_with_the_servers_own_reason() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let (server, requests) = serve_bodies(
+            listener,
+            vec![items_response(
+                &[item("a", 201, None), item("b", 429, Some(BREAKER))],
+                true,
+            )],
+        );
+        let es = client(address, 4).with_throttle_patience(Duration::ZERO);
+        let outcome = es.bulk([pair("a"), pair("b")].concat()).unwrap();
+        server.join().unwrap();
+        assert_eq!(
+            requests.lock().unwrap().len(),
+            1,
+            "patience exhausted: no retry"
+        );
+        assert_eq!(outcome.server_errors, 1);
+        assert!(
+            outcome
+                .first_server_error
+                .as_deref()
+                .unwrap()
+                .contains("circuit breaker"),
+            "{:?}",
+            outcome.first_server_error
+        );
+    }
+
+    #[test]
+    fn a_bad_record_is_settled_once_while_throttled_records_are_re_offered() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let (server, requests) = serve_bodies(
+            listener,
+            vec![
+                items_response(
+                    &[
+                        item("a", 400, Some("mapper_parsing_exception")),
+                        item("b", 429, Some(BREAKER)),
+                    ],
+                    true,
+                ),
+                items_response(&[item("b", 201, None)], false),
+            ],
+        );
+        let outcome = client(address, 4)
+            .bulk([pair("a"), pair("b")].concat())
+            .unwrap();
+        server.join().unwrap();
+        assert_eq!(requests.lock().unwrap().len(), 2);
+        assert_eq!(
+            request_body(&requests.lock().unwrap()[1]),
+            pair("b"),
+            "only b is re-offered"
+        );
+        assert_eq!(outcome.server_errors, 0);
+        assert_eq!(outcome.item_errors, 1, "the 400 is reported exactly once");
+        assert!(outcome
+            .first_error
+            .unwrap()
+            .contains("mapper_parsing_exception"));
+    }
+
+    #[test]
+    fn a_per_item_5xx_beside_a_429_is_not_waited_on() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let (server, requests) = serve_bodies(
+            listener,
+            vec![items_response(
+                &[
+                    item("a", 503, Some("unavailable")),
+                    item("b", 429, Some(BREAKER)),
+                ],
+                true,
+            )],
+        );
+        let outcome = client(address, 4)
+            .bulk([pair("a"), pair("b")].concat())
+            .unwrap();
+        server.join().unwrap();
+        assert_eq!(requests.lock().unwrap().len(), 1);
+        assert_eq!(outcome.server_errors, 2);
+    }
+
+    /// Answer every connection with `body` until `stop` is set. The
+    /// zero-progress tests need a server that outlasts the short budget.
+    fn serve_until(
+        listener: TcpListener,
+        body: Vec<u8>,
+        stop: Arc<AtomicBool>,
+    ) -> std::thread::JoinHandle<()> {
+        listener.set_nonblocking(true).unwrap();
+        std::thread::spawn(move || loop {
+            match listener.accept() {
+                Ok((mut stream, _)) => {
+                    stream.set_nonblocking(false).unwrap();
+                    let _ = read_request(&mut stream);
+                    respond_json(&mut stream, &body);
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    if stop.load(Ordering::SeqCst) {
+                        return;
+                    }
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+                Err(error) => panic!("accept: {error}"),
+            }
+        })
+    }
+
+    /// #2238: every item 429 from the parent breaker, forever. The run must
+    /// stop at the zero-progress budget and name `limits.max_process_memory_mb`,
+    /// not sit out the full ten-minute patience with the indexed count at 0.
+    #[test]
+    fn a_parent_breaker_that_accepts_nothing_stops_at_zero_progress_patience() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let stop = Arc::new(AtomicBool::new(false));
+        let server = serve_until(
+            listener,
+            items_response(
+                &[item("a", 429, Some(BREAKER)), item("b", 429, Some(BREAKER))],
+                true,
+            ),
+            Arc::clone(&stop),
+        );
+        let es = client(address, 4)
+            .with_throttle_patience(Duration::from_secs(2))
+            .with_zero_progress_patience(Duration::from_millis(50));
+        let started = Instant::now();
+        let outcome = es.bulk([pair("a"), pair("b")].concat()).unwrap();
+        let elapsed = started.elapsed();
+        stop.store(true, Ordering::SeqCst);
+        server.join().unwrap();
+        assert!(
+            elapsed < Duration::from_millis(500),
+            "zero accepts must not wait the 2s patience, took {elapsed:?}"
+        );
+        assert_eq!(
+            outcome.exhausted_after,
+            Some(Duration::from_millis(50)),
+            "{outcome:?}"
+        );
+        assert!(outcome.throttled_out >= 1, "{outcome:?}");
+        let backoffs = es.backoff_delays.lock().unwrap().len();
+        assert!(
+            (1..=10).contains(&backoffs),
+            "retried inside the short budget, did not spin: {backoffs} backoffs"
+        );
+        let hinted = super::memory_cap_hint(outcome.first_server_error.as_deref().unwrap());
+        assert!(hinted.contains("limits.max_process_memory_mb"), "{hinted}");
+    }
+
+    /// #944/#1250: once any item of the bulk has been accepted, a later run of
+    /// all-429 answers keeps the full patience. Fail-fast applies only to a
+    /// bulk the server has not taken a single item from.
+    #[test]
+    fn a_bulk_that_landed_an_item_keeps_the_full_patience() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let stop = Arc::new(AtomicBool::new(false));
+        let server_stop = Arc::clone(&stop);
+        let server = std::thread::spawn(move || {
+            let mut first = true;
+            loop {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        stream.set_nonblocking(false).unwrap();
+                        let _ = read_request(&mut stream);
+                        if first {
+                            first = false;
+                            respond_json(
+                                &mut stream,
+                                &items_response(
+                                    &[item("a", 201, None), item("b", 429, Some(BREAKER))],
+                                    true,
+                                ),
+                            );
+                        } else {
+                            items_answered(&mut stream, &[429]);
+                        }
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        if server_stop.load(Ordering::SeqCst) {
+                            return;
+                        }
+                        std::thread::sleep(Duration::from_millis(2));
+                    }
+                    Err(error) => panic!("accept: {error}"),
+                }
+            }
+        });
+        let es = client(address, 4)
+            .with_throttle_patience(Duration::from_millis(300))
+            .with_zero_progress_patience(Duration::from_millis(20));
+        let started = Instant::now();
+        let outcome = es.bulk([pair("a"), pair("b")].concat()).unwrap();
+        let elapsed = started.elapsed();
+        stop.store(true, Ordering::SeqCst);
+        server.join().unwrap();
+        assert!(
+            elapsed >= Duration::from_millis(250),
+            "an accepted item must keep the 300ms patience, stopped after {elapsed:?}"
+        );
+        assert!(
+            elapsed < Duration::from_secs(2),
+            "the full patience is 300ms, took {elapsed:?}"
+        );
+        assert_eq!(
+            outcome.exhausted_after,
+            Some(Duration::from_millis(300)),
+            "{outcome:?}"
+        );
+        assert!(outcome.throttled_out >= 1, "{outcome:?}");
+    }
+
+    #[test]
+    fn backpressure_exhausted_names_the_process_memory_cap_once() {
+        let error = super::backpressure_exhausted(4, Duration::from_secs(90), BREAKER);
+        let rendered = error.to_string();
+        assert!(rendered.contains("after 90s"), "{rendered}");
+        assert!(rendered.contains("circuit breaker"), "{rendered}");
+        assert!(
+            rendered.contains("limits.max_process_memory_mb"),
+            "{rendered}"
+        );
+        assert_eq!(
+            super::memory_cap_hint(&error.reason),
+            error.reason,
+            "a reason that already names the cap is not annotated twice"
+        );
+        assert_eq!(
+            super::memory_cap_hint("mapper_parsing_exception"),
+            "mapper_parsing_exception"
+        );
+    }
+
+    #[test]
+    fn bulk_item_selection_keeps_lines_byte_identical_and_knows_delete_has_no_source() {
+        let del = b"{\"delete\":{\"_index\":\"i\",\"_id\":\"x\"}}\n".to_vec();
+        let body = [pair("a"), del.clone(), pair("c")].concat();
+        let ranges = bulk_item_ranges(&body).unwrap();
+        assert_eq!(ranges.len(), 3);
+        assert_eq!(&body[ranges[1].clone()], del.as_slice());
+        assert_eq!(
+            select_bulk_items(&body, &[0, 2], 3).unwrap(),
+            [pair("a"), pair("c")].concat()
+        );
+        assert_eq!(select_bulk_items(&body, &[1], 3).unwrap(), del);
+        assert!(
+            select_bulk_items(&body, &[0], 2).is_none(),
+            "response/request mismatch"
+        );
+        assert!(
+            select_bulk_items(&body, &[7], 3).is_none(),
+            "index past the end"
+        );
+        // Malformed: an index action with no source line.
+        assert!(bulk_item_ranges(b"{\"index\":{\"_id\":\"a\"}}\n").is_none());
+        // Multi-byte source lines cut only at the newline the writer put there.
+        let body = "{\"index\":{\"_id\":\"é\"}}\n{\"v\":\"設計 — café\"}\n".as_bytes();
+        assert_eq!(select_bulk_items(body, &[0], 1).unwrap(), body);
+        // A final line without its newline is still one item.
+        let body = b"{\"index\":{\"_id\":\"a\"}}\n{\"v\":1}";
+        assert_eq!(bulk_item_ranges(body).unwrap().len(), 1);
+    }
+
+    // ── HTTP-level 429: the breaker's other shape ────────────────────────
+
+    fn respond_429_bulk_body(stream: &mut std::net::TcpStream, body: &[u8]) {
+        respond_status(stream, "429 Too Many Requests", body);
+    }
+
+    #[test]
+    fn an_http_429_carrying_a_bulk_body_settles_taken_items_and_re_offers_the_rest() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let seen = requests.clone();
+        let server = std::thread::spawn(move || {
+            let (mut first, _) = listener.accept().unwrap();
+            seen.lock().unwrap().push(read_request(&mut first));
+            // The shape observed on the 1 GB run: status 429, body a full
+            // bulk response, a taken, b rejected by the breaker.
+            respond_429_bulk_body(
+                &mut first,
+                &items_response(&[item("a", 201, None), item("b", 429, Some(BREAKER))], true),
+            );
+            let (mut second, _) = listener.accept().unwrap();
+            seen.lock().unwrap().push(read_request(&mut second));
+            respond_json(&mut second, &items_response(&[item("b", 201, None)], false));
+        });
+        let outcome = client(address, 4)
+            .bulk([pair("a"), pair("b")].concat())
+            .unwrap();
+        server.join().unwrap();
+        assert_eq!(outcome.server_errors, 0, "{:?}", outcome.first_server_error);
+        let requests = requests.lock().unwrap();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(
+            request_body(&requests[1]),
+            pair("b"),
+            "a was taken; only b goes again"
+        );
+    }
+
+    #[test]
+    fn a_loading_run_re_asks_an_http_429_beyond_six_attempts_while_patience_lasts() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        // Nine throttled answers, then one clean one: the old six-attempt
+        // budget failed this at the seventh.
+        let mut plan = vec![false; 9];
+        plan.push(true);
+        let server = serve(listener, plan);
+        let es = client(address, 4);
+        es.bulk(BULK.to_vec()).expect("a run waits the server out");
+        assert!(es.bulk_congestion_events() >= 1);
+        assert_eq!(
+            es.backoff_delays.lock().unwrap().len(),
+            9,
+            "one backoff per throttled answer, none after the clean one"
+        );
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn a_loading_run_gives_up_an_http_429_when_patience_is_exhausted() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = serve(listener, vec![false]);
+        let es = client(address, 4).with_throttle_patience(Duration::ZERO);
+        let error = es.bulk(BULK.to_vec()).unwrap_err();
+        assert!(format!("{error:#}").contains("429"), "{error:#}");
+        assert!(
+            es.backoff_delays.lock().unwrap().is_empty(),
+            "no sleep after the last attempt"
+        );
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn a_one_shot_client_keeps_the_bounded_budget_on_http_429() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = serve(listener, vec![false; 6]);
+        let es = Es::with_bulk_policy(
+            &format!("http://{address}"),
+            None,
+            Duration::from_secs(5),
+            Duration::from_millis(10),
+            Duration::from_millis(20),
+        )
+        .unwrap();
+        let error = es.bulk(BULK.to_vec()).unwrap_err();
+        assert!(format!("{error:#}").contains("429"), "{error:#}");
+        assert_eq!(
+            es.backoff_delays.lock().unwrap().len(),
+            5,
+            "six attempts, five backoffs — a probe does not wait ten minutes"
+        );
+        server.join().unwrap();
+    }
+
+    /// A plain HTTP 429 (no bulk `items`) from the parent breaker is the same
+    /// zero-progress loop: stop at the short budget and name the cap. A probe
+    /// (admission off) still stops after six attempts — covered above.
+    #[test]
+    fn a_plain_parent_breaker_429_names_the_cap_and_stops_short() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let stop = Arc::new(AtomicBool::new(false));
+        let server_stop = Arc::clone(&stop);
+        listener.set_nonblocking(true).unwrap();
+        let server = std::thread::spawn(move || loop {
+            match listener.accept() {
+                Ok((mut stream, _)) => {
+                    stream.set_nonblocking(false).unwrap();
+                    let _ = read_request(&mut stream);
+                    let body = br#"{"error":{"type":"circuit_breaking_exception","reason":"[parent] real memory circuit breaker tripped: rss=9MB >= watermark=8MB"},"status":429}"#;
+                    respond_status(&mut stream, "429 Too Many Requests", body);
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    if server_stop.load(Ordering::SeqCst) {
+                        return;
+                    }
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+                Err(error) => panic!("accept: {error}"),
+            }
+        });
+        let es = client(address, 4)
+            .with_throttle_patience(Duration::from_secs(2))
+            .with_zero_progress_patience(Duration::from_millis(40));
+        let started = Instant::now();
+        let error = es.bulk(BULK.to_vec()).unwrap_err();
+        let elapsed = started.elapsed();
+        stop.store(true, Ordering::SeqCst);
+        server.join().unwrap();
+        let rendered = format!("{error:#}");
+        assert!(
+            rendered.contains("limits.max_process_memory_mb"),
+            "{rendered}"
+        );
+        assert!(
+            elapsed < Duration::from_millis(500),
+            "a parent breaker that accepts nothing must not wait 2s, took {elapsed:?}"
+        );
+        let backoffs = es.backoff_delays.lock().unwrap().len();
+        assert!(
+            (1..=8).contains(&backoffs),
+            "retried inside the short budget: {backoffs} backoffs"
+        );
+    }
+
+    // ── #955: a request is bounded in actions and bytes, and a request the
+    //    server still calls too large is halved instead of ending the run ──
+
+    fn delete_action(id: &str) -> Vec<u8> {
+        format!("{{\"delete\":{{\"_index\":\"i\",\"_id\":\"{id}\"}}}}\n").into_bytes()
+    }
+
+    /// Answer a `_bulk` with one item per status, the way the engine does:
+    /// `201` for an accepted action, the breaker's reason for a `429`.
+    fn items_answered(stream: &mut std::net::TcpStream, statuses: &[u16]) {
+        let items: Vec<String> = statuses
+            .iter()
+            .enumerate()
+            .map(|(i, status)| {
+                let id = i.to_string();
+                if *status < 300 {
+                    item(&id, u32::from(*status), None)
+                } else {
+                    item(&id, u32::from(*status), Some(BREAKER))
+                }
+            })
+            .collect();
+        let errors = statuses.iter().any(|status| *status >= 300);
+        respond_json(stream, &items_response(&items, errors));
+    }
+
+    /// One request body a [`LimitedBulkServer`] received, in arrival order,
+    /// with whether it was applied (`true`) or refused as too large.
+    type AnsweredBulk = (Vec<u8>, bool);
+
+    /// A `_bulk` endpoint with the engine's two request-size limits, answering
+    /// the way the engine does: a body above `max_bytes` gets HTTP 413
+    /// (`limits.max_body_bytes`); a body of more than `2 * max_actions` lines
+    /// gets HTTP 200 carrying ONE item of status 413 — the literal end of the
+    /// 48,533-file run (`argos-engine/src/bulk.rs`, which counts lines, as this
+    /// does). Anything else is applied: `201` per action. Runs until `stop`.
+    struct LimitedBulkServer {
+        address: std::net::SocketAddr,
+        requests: Arc<Mutex<Vec<AnsweredBulk>>>,
+        stop: Arc<std::sync::atomic::AtomicBool>,
+        join: Option<std::thread::JoinHandle<()>>,
+    }
+
+    impl LimitedBulkServer {
+        fn start(max_actions: usize, max_bytes: usize) -> Self {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            listener.set_nonblocking(true).unwrap();
+            let address = listener.local_addr().unwrap();
+            let requests = Arc::new(Mutex::new(Vec::new()));
+            let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let (server_requests, server_stop) = (requests.clone(), stop.clone());
+            let join = std::thread::spawn(move || loop {
+                let mut stream = match listener.accept() {
+                    Ok((stream, _)) => stream,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        if server_stop.load(std::sync::atomic::Ordering::SeqCst) {
+                            return;
+                        }
+                        std::thread::sleep(Duration::from_millis(2));
+                        continue;
+                    }
+                    Err(error) => panic!("accept: {error}"),
+                };
+                stream.set_nonblocking(false).unwrap();
+                let request = read_request(&mut stream);
+                let body = request_body(&request).to_vec();
+                let lines = body
+                    .split(|byte| *byte == b'\n')
+                    .filter(|line| !line.is_empty())
+                    .count();
+                if body.len() > max_bytes {
+                    server_requests.lock().unwrap().push((body, false));
+                    respond_status(
+                        &mut stream,
+                        "413 Payload Too Large",
+                        br#"{"error":{"type":"content_too_long_exception","reason":"request body exceeds limits.max_body_bytes"},"status":413}"#,
+                    );
+                } else if lines > max_actions * 2 {
+                    server_requests.lock().unwrap().push((body, false));
+                    let answer = format!(
+                        r#"{{"took":0,"errors":true,"items":[{{"index":{{"_index":"","_id":"","status":413,"error":{{"type":"engine_exception","reason":"bulk request contains {lines} lines (~{} actions); exceeds max_actions_per_bulk of {max_actions}","status":413}}}}}}]}}"#,
+                        lines / 2
+                    );
+                    respond_json(&mut stream, answer.as_bytes());
+                } else {
+                    let actions = super::count_bulk_actions(&body).unwrap();
+                    server_requests.lock().unwrap().push((body, true));
+                    items_answered(&mut stream, &vec![201; actions]);
+                }
+            });
+            Self {
+                address,
+                requests,
+                stop,
+                join: Some(join),
+            }
+        }
+
+        /// Bodies the server applied, concatenated in arrival order.
+        fn applied(&self) -> Vec<u8> {
+            self.requests
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|(_, applied)| *applied)
+                .flat_map(|(body, _)| body.iter().copied())
+                .collect()
+        }
+
+        fn refused(&self) -> usize {
+            self.requests
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|(_, applied)| !*applied)
+                .count()
+        }
+    }
+
+    impl Drop for LimitedBulkServer {
+        fn drop(&mut self) {
+            self.stop.store(true, std::sync::atomic::Ordering::SeqCst);
+            if let Some(join) = self.join.take() {
+                join.join().unwrap();
+            }
+        }
+    }
+
+    /// The literal end of the full-corpus run, scaled down: the server takes
+    /// two actions a request, the body holds five pairs plus a delete. Before
+    /// #955 `Es::bulk` sent it whole and handed the single 413 item back as
+    /// one rejected record. Now nothing is lost, nothing is written twice, the
+    /// order holds, and the run remembers the bound.
+    #[test]
+    fn a_request_refused_for_its_action_count_is_halved_until_it_lands() {
+        let server = LimitedBulkServer::start(2, usize::MAX);
+        let es = client(server.address, 4);
+        let body = [
+            delete_action("d"),
+            pair("a"),
+            pair("b"),
+            pair("c"),
+            pair("e"),
+            pair("f"),
+        ]
+        .concat();
+        let outcome = es.bulk(body.clone()).unwrap();
+        assert_eq!(outcome.item_errors, 0, "{outcome:?}");
+        assert_eq!(outcome.server_errors, 0, "{outcome:?}");
+        assert_eq!(
+            server.applied(),
+            body,
+            "every action landed exactly once, in the order it was sent"
+        );
+        assert!(es.bulk_requests_split() >= 1);
+        assert_eq!(
+            es.bulk_congestion_events(),
+            0,
+            "a request that is too large is not congestion: the window must not shrink"
+        );
+
+        // The bound is learned: the next body is cut BEFORE it is offered.
+        let refused_before = server.refused();
+        let splits_before = es.bulk_requests_split();
+        let outcome = es.bulk(body.clone()).unwrap();
+        assert_eq!(outcome.item_errors, 0, "{outcome:?}");
+        assert_eq!(
+            server.refused(),
+            refused_before,
+            "the server was not asked the same question twice"
+        );
+        assert_eq!(es.bulk_requests_split(), splits_before);
+        assert_eq!(server.applied(), [body.clone(), body].concat());
+    }
+
+    /// The same for the byte dimension: an HTTP 413 on the request used to be
+    /// `bulk HTTP 413 Payload Too Large` and the end of the run.
+    #[test]
+    fn a_request_refused_with_http_413_is_halved_by_bytes() {
+        let body = [pair("a"), pair("b"), pair("c"), pair("e")].concat();
+        // Two pairs fit, three do not.
+        let server = LimitedBulkServer::start(usize::MAX / 4, pair("a").len() * 2 + 4);
+        let es = client(server.address, 4);
+        let outcome = es.bulk(body.clone()).unwrap();
+        assert_eq!(outcome.item_errors, 0, "{outcome:?}");
+        assert_eq!(server.applied(), body);
+        assert_eq!(es.bulk_requests_split(), 1);
+        let refused_before = server.refused();
+        es.bulk(body).unwrap();
+        assert_eq!(
+            server.refused(),
+            refused_before,
+            "the byte bound was learned from the first refusal"
+        );
+    }
+
+    /// ONE action the server calls too large cannot be cut. It stays what it
+    /// was: an error naming the record for HTTP 413, a rejected item for the
+    /// engine's per-item 413 — never a loop.
+    #[test]
+    fn one_action_the_server_refuses_as_too_large_is_not_halved() {
+        let server = LimitedBulkServer::start(usize::MAX / 4, 8);
+        let es = client(server.address, 4);
+        let error = es.bulk(pair("a")).unwrap_err().to_string();
+        assert!(
+            error.contains("HTTP 413") && error.contains("one action ("),
+            "{error}"
+        );
+        assert!(
+            !error.contains("  "),
+            "the message is one sentence, not a literal with its indentation baked in: {error}"
+        );
+        assert_eq!(server.refused(), 1, "asked once, not in a loop");
+        assert_eq!(es.bulk_requests_split(), 0);
+
+        let v: serde_json::Value = serde_json::from_str(
+            r#"{"errors":true,"items":[{"index":{"status":413,"error":{"type":"engine_exception","reason":"too large"}}}]}"#,
+        )
+        .unwrap();
+        assert!(
+            !super::is_whole_request_too_large(&v, Some(1)),
+            "one item answering one action is a statement about that record"
+        );
+        assert!(super::is_whole_request_too_large(&v, Some(2)));
+        assert!(
+            !super::is_whole_request_too_large(&v, None),
+            "a body that cannot be walked is never guessed at"
+        );
+    }
+
+    /// A body above the client's own ceiling never reaches the server whole,
+    /// whatever the server would have said. This is what bounds the catalog
+    /// write on a server with the default 50,000-action limit.
+    #[test]
+    fn a_body_above_the_action_ceiling_goes_out_as_consecutive_windows() {
+        let server = LimitedBulkServer::start(usize::MAX / 4, usize::MAX);
+        let es = client(server.address, 4).with_bulk_max_actions(2);
+        let body = [
+            delete_action("d"),
+            pair("a"),
+            pair("b"),
+            pair("c"),
+            pair("e"),
+        ]
+        .concat();
+        let outcome = es.bulk(body.clone()).unwrap();
+        assert_eq!(outcome.item_errors, 0, "{outcome:?}");
+        let requests = server.requests.lock().unwrap();
+        let sent: Vec<&[u8]> = requests.iter().map(|(body, _)| &body[..]).collect();
+        assert_eq!(
+            sent,
+            [
+                &[delete_action("d"), pair("a")].concat()[..],
+                &[pair("b"), pair("c")].concat()[..],
+                &pair("e")[..]
+            ],
+            "windows of two actions, in order, a delete counted as one action"
+        );
+        assert_eq!(
+            es.bulk_requests_split(),
+            0,
+            "cutting a body before it is offered is not a server refusal"
+        );
+    }
+
+    /// `bulk_windowed` is what the catalog writers call: bytes AND actions.
+    #[test]
+    fn bulk_windowed_bounds_a_body_nobody_windowed_by_bytes() {
+        let server = LimitedBulkServer::start(usize::MAX / 4, usize::MAX);
+        let es = client(server.address, 4);
+        let body = [
+            delete_action("d"),
+            pair("a"),
+            pair("b"),
+            pair("c"),
+            pair("e"),
+            pair("f"),
+        ]
+        .concat();
+        let window = pair("a").len() * 2;
+        let outcome = es.bulk_windowed(body.clone(), window).unwrap();
+        assert_eq!(outcome.item_errors, 0, "{outcome:?}");
+        assert_eq!(server.applied(), body, "deletes first, order kept");
+        let requests = server.requests.lock().unwrap();
+        assert!(requests.len() >= 3, "{}", requests.len());
+        assert!(
+            requests.iter().all(|(body, _)| body.len() <= window),
+            "no request is larger than the window"
+        );
+    }
+
+    #[test]
+    fn window_bulk_body_leaves_alone_what_already_fits_or_cannot_be_walked() {
+        let body = [pair("a"), delete_action("d"), pair("b")].concat();
+        assert!(super::window_bulk_body(&body, 3, body.len()).is_none());
+        assert!(
+            super::window_bulk_body(&body, 3, usize::MAX).is_none(),
+            "five lines hold three actions: the line count is only the cheap upper bound"
+        );
+        assert!(
+            super::window_bulk_body(b"not json\n{\"v\":1}\n{\"x\":1}\n", 1, usize::MAX).is_none(),
+            "a body that cannot be walked is sent as it is, exactly as before"
+        );
+        // One action larger than the byte bound travels alone.
+        let windows = super::window_bulk_body(&body, 3, 4).unwrap();
+        assert_eq!(windows, [pair("a"), delete_action("d"), pair("b")]);
+        // A producer that closes its window BEFORE the record that would pass
+        // the bound (`stream_ndjson_pairs`) builds bodies this never re-cuts.
+        let produced = [pair("a"), pair("b")].concat();
+        assert!(super::window_bulk_body(&produced, 10_000, produced.len()).is_none());
+    }
+
+    /// Back-pressure that outlasts the patience in one window ends the body:
+    /// the windows behind it would each wait out the same patience to learn
+    /// the same thing. They are counted as not landed, and the outcome says
+    /// the cause was back-pressure.
+    #[test]
+    fn patience_exhausted_in_one_window_does_not_send_the_windows_behind_it() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let bodies = Arc::new(Mutex::new(Vec::new()));
+        let server_bodies = bodies.clone();
+        listener.set_nonblocking(true).unwrap();
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let server_stop = stop.clone();
+        let server = std::thread::spawn(move || loop {
+            match listener.accept() {
+                Ok((mut stream, _)) => {
+                    stream.set_nonblocking(false).unwrap();
+                    let request = read_request(&mut stream);
+                    server_bodies
+                        .lock()
+                        .unwrap()
+                        .push(request_body(&request).to_vec());
+                    items_answered(&mut stream, &[429]);
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    if server_stop.load(std::sync::atomic::Ordering::SeqCst) {
+                        return;
+                    }
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+                Err(error) => panic!("accept: {error}"),
+            }
+        });
+        let es = client(address, 4)
+            .with_bulk_max_actions(1)
+            .with_throttle_patience(Duration::from_millis(30));
+        let outcome = es.bulk([pair("a"), pair("b"), pair("c")].concat()).unwrap();
+        stop.store(true, std::sync::atomic::Ordering::SeqCst);
+        server.join().unwrap();
+        assert_eq!(outcome.server_errors, 3, "{outcome:?}");
+        assert_eq!(outcome.item_errors, 3, "{outcome:?}");
+        assert_eq!(
+            outcome.throttled_out, 3,
+            "the sent window and the two unsent ones: {outcome:?}"
+        );
+        assert!(
+            bodies.lock().unwrap().iter().all(|body| *body == pair("a")),
+            "only the first window was ever offered"
+        );
+    }
+
+    /// The published docs quote how the back-pressure error line begins, so
+    /// giving the condition a type must not change a byte of it — and the type
+    /// has to survive `anyhow` context, or the terminal line never names it.
+    #[test]
+    fn backpressure_exhausted_renders_the_published_message_and_survives_context() {
+        use anyhow::Context;
+        let error = super::BackpressureExhausted {
+            items: 12,
+            patience: super::THROTTLE_PATIENCE,
+            reason: "{\"type\":\"engine_exception\"}".into(),
+        };
+        assert_eq!(
+            error.to_string(),
+            "the server kept rejecting 12 of a prepared bulk's items after 600s of \
+             back-pressure re-sends with nothing accepted: {\"type\":\"engine_exception\"}. \
+             Nothing from this bulk was journaled applied; rerun the same command once the \
+             server condition clears and the run resumes from its last committed operation"
+        );
+        let wrapped: anyhow::Result<()> =
+            Err(anyhow::Error::new(error.clone())).context("apply operation 7");
+        assert_eq!(
+            super::BackpressureExhausted::in_chain(&wrapped.unwrap_err()),
+            Some(&error)
+        );
+        assert!(super::BackpressureExhausted::in_chain(&anyhow::anyhow!("other")).is_none());
+    }
+
+    /// #944's counters have to survive on main's retry loop: `argos-done`
+    /// carries them and an end-to-end test asserts them.
+    #[test]
+    fn a_re_offered_bulk_is_counted_on_argos_done() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let (server, _requests) = serve_bodies(
+            listener,
+            vec![
+                items_response(&[item("a", 201, None), item("b", 429, Some(BREAKER))], true),
+                items_response(&[item("b", 201, None)], false),
+            ],
+        );
+        let es = client(address, 4);
+        let outcome = es.bulk([pair("a"), pair("b")].concat()).unwrap();
+        server.join().unwrap();
+        assert_eq!(outcome.server_errors, 0, "{outcome:?}");
+        assert_eq!(es.bulk_backpressure_retries(), 1);
+        assert_eq!(es.bulk_items_reissued(), 1);
+    }
+}
+
+#[cfg(test)]
+mod mapping_refusal_tests {
+    use super::{mapping_error, MappingRefused};
+    use reqwest::StatusCode;
+
+    /// #929: only a 400 is a statement about the ONE index being mapped. Every
+    /// other failure is about the endpoint or the caller's credentials, says
+    /// nothing about this dataset, and must keep aborting the run — routing
+    /// around a 503 would publish a corpus that lacks data for a transient
+    /// reason and call it complete.
+    #[test]
+    fn only_a_400_is_classified_as_a_refusal() {
+        let refused = mapping_error(
+            "/ax-logs/_mapping".into(),
+            StatusCode::BAD_REQUEST,
+            "{\"error\":\"nope\"}".into(),
+        );
+        let refusal = refused
+            .downcast_ref::<MappingRefused>()
+            .expect("a 400 is a refusal");
+        assert_eq!(refusal.path, "/ax-logs/_mapping");
+        assert_eq!(refusal.status, 400);
+        assert_eq!(refusal.detail, "{\"error\":\"nope\"}");
+
+        for status in [401u16, 403, 404, 408, 409, 413, 429, 500, 502, 503, 504] {
+            let error = mapping_error(
+                "/ax-logs/_mapping".into(),
+                StatusCode::from_u16(status).unwrap(),
+                "detail".into(),
+            );
+            assert!(
+                error.downcast_ref::<MappingRefused>().is_none(),
+                "HTTP {status} is an endpoint/credential failure, not a refusal of this dataset"
+            );
+        }
+    }
+
+    /// The refusal survives `with_context`, which is how every call site wraps
+    /// it — `downcast_ref` has to see through the context layers, or the
+    /// classification would silently never fire.
+    #[test]
+    fn the_refusal_is_still_recognisable_under_context() {
+        use anyhow::Context;
+        let wrapped: anyhow::Result<()> = Err(mapping_error(
+            "/ax-logs/_mapping".into(),
+            StatusCode::BAD_REQUEST,
+            "detail".into(),
+        ))
+        .with_context(|| "install generation mapping for ax-logs");
+        let error = wrapped.unwrap_err();
+        assert!(error.downcast_ref::<MappingRefused>().is_some());
+        assert_eq!(
+            format!("{error:#}"),
+            "install generation mapping for ax-logs: PUT /ax-logs/_mapping failed: \
+             400 Bad Request detail"
+        );
+    }
+
+    /// Log lines, test expectations and operator runbooks are keyed on the
+    /// message these calls produced before the type existed. Both arms render it
+    /// byte for byte.
+    #[test]
+    fn both_arms_render_the_message_earlier_releases_printed() {
+        for status in [StatusCode::BAD_REQUEST, StatusCode::SERVICE_UNAVAILABLE] {
+            let rendered = mapping_error("/ax/_mapping".into(), status, "body".into()).to_string();
+            assert_eq!(rendered, format!("PUT /ax/_mapping failed: {status} body"));
+        }
+    }
+
+    #[test]
+    fn sustained_429_episode_halves_once_and_congestion_avoidance_slows_climb_near_ceiling() {
+        let admission = super::BulkAdmission::new(32, false);
+        admission.on_congestion();
+        assert_eq!(admission.limit(), 16);
+        assert_eq!(admission.congestion_events(), 1);
+
+        // Simulate a 3 s parent-breaker trip where no bulk succeeds: backdate
+        // `last_shrink` past `SHRINK_COOLDOWN` (1 s) but within
+        // `EPISODE_MAX_COOLDOWN` (15 s). Repeated 429s must NOT cascade 16 → 8 → 4 → 2 → 1.
+        admission.inner.lock().unwrap().last_shrink =
+            Some(std::time::Instant::now() - std::time::Duration::from_secs(3));
+        admission.on_congestion();
+        assert_eq!(
+            admission.limit(),
+            16,
+            "sustained 429s within one breaker episode must not cascade-halve past the first cut"
+        );
+        assert_eq!(admission.congestion_events(), 1);
+
+        // Below ssthresh (24), each +1 step takes RECOVER_AFTER (8) clean bulks.
+        for expected in 17..=24 {
+            for _ in 0..super::RECOVER_AFTER {
+                admission.on_success();
+            }
+            assert_eq!(admission.limit(), expected);
+        }
+
+        // At ssthresh (24), congestion avoidance kicks in: climbing 24 → 25
+        // requires RECOVER_AFTER * 24 clean bulks, not just 8.
+        for _ in 0..super::RECOVER_AFTER {
+            admission.on_success();
+        }
+        assert_eq!(
+            admission.limit(),
+            24,
+            "at or above ssthresh, 8 clean bulks must not immediately raise concurrency"
+        );
+        for _ in 0..(super::RECOVER_AFTER * 23) {
+            admission.on_success();
+        }
+        assert_eq!(admission.limit(), 25);
+    }
+
+    /// #1250 data: the parent breaker's drain cycle measured ~12 s on the
+    /// reporter's box (`memory breaker engaged ... every ~12 seconds`), and
+    /// the 1 s cooldown let one such cycle collapse the window 32 → 1. The
+    /// episode cooldown must therefore outlast one cycle (15 s), still let a
+    /// genuinely longer stall keep shrinking, and reset on the first clean
+    /// bulk so the NEXT trip is answered immediately.
+    #[test]
+    fn episode_cooldown_outlasts_one_breaker_cycle_and_resets_on_success() {
+        use std::time::{Duration, Instant};
+        let admission = super::BulkAdmission::new(32, false);
+        admission.on_congestion();
+        assert_eq!(admission.limit(), 16);
+
+        // 12 s into the same trip, nothing has succeeded: still one halving.
+        admission.inner.lock().unwrap().last_shrink =
+            Some(Instant::now() - Duration::from_secs(12));
+        admission.on_congestion();
+        assert_eq!(admission.limit(), 16, "one ~12 s breaker cycle = one cut");
+        assert_eq!(super::EPISODE_MAX_COOLDOWN, Duration::from_secs(15));
+
+        // A stall that outlives the episode window keeps converging.
+        admission.inner.lock().unwrap().last_shrink =
+            Some(Instant::now() - Duration::from_secs(16));
+        admission.on_congestion();
+        assert_eq!(admission.limit(), 8);
+        assert_eq!(admission.congestion_events(), 2);
+        // ssthresh is 3/4 of the limit that tripped (16), above the new 8.
+        assert_eq!(admission.inner.lock().unwrap().ssthresh, 12);
+
+        // One clean bulk ends the episode; a new 429 past the 1 s
+        // de-duplication window is a NEW trip and halves at once.
+        admission.on_success();
+        admission.inner.lock().unwrap().last_shrink = Some(Instant::now() - Duration::from_secs(2));
+        admission.on_congestion();
+        assert_eq!(admission.limit(), 4);
+        assert_eq!(admission.congestion_events(), 3);
+    }
+}

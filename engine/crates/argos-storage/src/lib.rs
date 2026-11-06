@@ -1,0 +1,138 @@
+//! # argos-storage
+//!
+//! Storage engine for the argos search engine.
+//!
+//! ## Design principles
+//!
+//! - **2 files per segment** (not ES's 12-16): `.seg` (data) + `.sidx` (skip index).
+//! - **One durability system**: Write-Ahead Log (WAL) only — no dual translog/Lucene commit.
+//! - **Pluggable backends**: local filesystem, S3-compatible object storage with
+//!   ranged reads, and a local-directory test double for unit tests.
+//! - **`mmap` for segment reads**: data is served from OS page cache, not app heap.
+//! - **`ArcSwap<IndexSnapshot>`**: atomically swap active segment lists without locks.
+//! - **`DashMap` version map**: lock-free per-document version tracking.
+//!
+//! ## Module layout
+//!
+//! | Module            | Responsibility                                              |
+//! |-------------------|-------------------------------------------------------------|
+//! | [`backend`]       | [`StorageBackend`] trait, [`LocalFsBackend`], test double   |
+//! | [`s3`]            | Real S3-compatible backend (R2 / MinIO / S3) + op budget   |
+//! | [`wal`]           | Write-Ahead Log — append, sync, replay, generation rotate  |
+//! | [`segment`]       | `.seg` / `.sidx` format, [`SegmentWriter`] / [`SegmentReader`] |
+//! | [`version_map`]   | Lock-free doc-id → (seq_no, segment_id) map                |
+//! | [`index_store`]   | Per-index orchestration: WAL + segments + flush            |
+//! | [`merge`]         | Size-tiered merge, tombstone purge, rate-limited I/O       |
+
+pub mod backend;
+pub mod bundle;
+pub mod cache;
+pub mod doc_values;
+pub mod index_store;
+pub mod merge;
+pub mod s3;
+pub mod segment;
+pub mod stored_codec;
+pub mod version_map;
+pub mod wal;
+pub mod wal_fsync;
+
+// ── Public re-exports ────────────────────────────────────────────────────────
+
+pub use backend::{
+    FileMetadata, LocalFsBackend, ObjectStoreOps, ObjectStoreOpsSnapshot, OpBudget, OpClass,
+    SimulatedObjectStore, StorageBackend,
+};
+pub use cache::SegmentCache;
+pub use index_store::{
+    DrainedMemtable, FsckReport, FsckSectionReport, FsckSegmentReport, IndexSnapshot, IndexStore,
+    IndexStoreConfig, RawJsonDoc, StorageMode, ValidatedRawBatch,
+};
+pub use s3::{credentials_from_env, RetryPolicy, S3Backend, S3Config};
+// `MergeExecutor` is intentionally NOT re-exported here: it is a
+// `#[doc(hidden)]`, storage-crate-only test helper with real footguns
+// (Stored-only output + wrong-order repoint — see its doc comment). The
+// running engine merges via its own path (`Index::merge_pass_locked`). Only
+// the merge *policy* is public, because the engine shares it.
+pub use merge::{MergePolicy, SizeTieredMergePolicy};
+pub use segment::{SectionType, SegmentId, SegmentMeta, SegmentReader, SegmentWriter};
+pub use version_map::VersionMap;
+pub use wal::{WalEntry, WalReader, WalWriter};
+
+// ── Crate-wide type aliases ──────────────────────────────────────────────────
+
+/// Sequence number — monotonically increasing, globally unique within an index.
+pub type SeqNo = u64;
+
+/// Result alias using the storage crate's own error type.
+pub type Result<T> = std::result::Result<T, StorageError>;
+
+// ── Error type ───────────────────────────────────────────────────────────────
+
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum StorageError {
+    #[error("I/O error: {0}")]
+    Io(#[from] std::io::Error),
+
+    #[error("Checksum mismatch (expected {expected:#010x}, got {actual:#010x})")]
+    ChecksumMismatch { expected: u32, actual: u32 },
+
+    #[error("Invalid magic bytes: expected {expected:?}, got {actual:?}")]
+    InvalidMagic {
+        expected: &'static [u8],
+        actual: Vec<u8>,
+    },
+
+    #[error("Unsupported format version {0}")]
+    UnsupportedVersion(u16),
+
+    #[error("Segment {0} not found")]
+    SegmentNotFound(String),
+
+    #[error("WAL is corrupt at offset {0}: {1}")]
+    WalCorrupt(u64, String),
+
+    #[error("Version conflict: doc {doc_id} expected seq {expected}, found {actual}")]
+    VersionConflict {
+        doc_id: String,
+        expected: SeqNo,
+        actual: SeqNo,
+    },
+
+    #[error("Backend error: {0}")]
+    Backend(String),
+
+    #[error("Serialization error: {0}")]
+    Serialization(#[from] serde_json::Error),
+
+    #[error(
+        "invalid raw JSON for document [{doc_id}] at one-based batch position {position}: \
+         {reason}. Fix: replace that document body with exactly one complete UTF-8 JSON value, \
+         then retry the batch. Related help: `argos index --help` and https://argos.org/llms.txt"
+    )]
+    RawBatchValidation {
+        doc_id: String,
+        position: usize,
+        reason: String,
+    },
+
+    #[error("Merge aborted: {0}")]
+    MergeAborted(String),
+
+    /// The on-disk data directory could not be safely opened — either its
+    /// `snapshot.json` manifest is present but unparseable, or its format
+    /// marker records a newer format version than this binary supports.
+    ///
+    /// This is a REFUSE-TO-OPEN error on purpose: silently treating an
+    /// unreadable manifest as "no segments" turns every segment on disk
+    /// into an orphan, which the on-open GC then deletes — total, silent
+    /// data loss. Refusing lets an operator investigate (restore a backup,
+    /// run the right binary) with the data still intact on disk.
+    #[error("Incompatible or corrupt data directory: {0}")]
+    IncompatibleDataDir(String),
+
+    #[error(transparent)]
+    Other(#[from] anyhow::Error),
+}

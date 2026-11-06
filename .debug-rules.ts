@@ -1,0 +1,10 @@
+import { loadRules, applyRules } from "/home/toxic/pens/geode/products/lapidary/bin/lapidary.ts";
+const ENG = "/home/toxic/pens/agentic-moment/products/argos/engine";
+const { rules, excludes, globalInclude, globalIgnore } = loadRules([`${ENG}/.argos-rename.lapidary`]);
+console.log("rules loaded:", rules.length);
+console.log(rules.slice(0, 5).map((r: any) => `${r.kind}: ${r.from} => ${r.to}`).join("\n"));
+console.log("excludes:", [...excludes]);
+const sample = "fn main() { let u = env::var(\"XERJ_URL\"); let s = \"xerj_search\"; let c = \"xerj-common\"; }";
+const applied = applyRules(sample, rules, excludes, "crates/xerj-common/src/lib.rs", [], []);
+console.log("sample edits:", applied.edits, "map:", JSON.stringify(applied.map));
+console.log("sample after:", applied.content ?? sample);

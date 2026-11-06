@@ -1,6 +1,6 @@
 # Per-passage (chunk) embeddings for `semantic_text` — regression lock.
 #
-# XERJ's ingest-time chunk-embedding pipeline splits a long `semantic_text`
+# ARGOS's ingest-time chunk-embedding pipeline splits a long `semantic_text`
 # value into overlapping passages, embeds EACH passage, and persists the
 # per-passage vectors. A `semantic` query then scores a document by its
 # best-matching passage (max-sim) instead of a single pooled whole-document

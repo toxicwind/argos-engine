@@ -1,0 +1,58 @@
+# engine-workspace xerj -> argos rename (2026-11-06)
+# repo passed as engine/engine (the Rust workspace root): crates live at crates/**.
+
+includePaths: ["crates/**", "Cargo.toml", "build.rs", "src/**"]
+
+# ---- identity ---------------------------------------------------------------
+word: xerj => argos
+word: Xerj => Argos
+word: XERJ => ARGOS
+
+substr: xerj- => argos-
+substr: xerj_ => argos_
+substr: .xerj => .argos
+substr: /xerj => /argos
+substr: XERJ_ => ARGOS_
+substr: XERJ- => ARGOS-
+
+# ---- engine env contract ----------------------------------------------------
+substr: XERJ_URL => ARGOS_URL
+substr: XERJ_AUTH => ARGOS_AUTH
+substr: XERJ_API_KEY => ARGOS_API_KEY
+substr: XERJ_API => ARGOS_API
+
+# ---- data / hosts ------------------------------------------------------------
+substr: .xerj-data => .argos-data
+substr: xerj-data => argos-data
+substr: xerj.org => argos.io
+substr: hub.xerj.org => hub.argos.io
+
+# ---- MCP tool names ----------------------------------------------------------
+substr: xerj_search => argos_search
+substr: xerj_semantic_search => argos_semantic_search
+substr: xerj_vector_search => argos_vector_search
+substr: xerj_hybrid_search => argos_hybrid_search
+substr: xerj_memory_store => argos_memory_store
+substr: xerj_memory_recall => argos_memory_recall
+substr: xerj_memory_list => argos_memory_list
+substr: xerj_brain_overview => argos_brain_overview
+substr: xerj_brain_ego => argos_brain_ego
+substr: xerj_brain_link => argos_brain_link
+substr: xerj_brain_unlink => argos_brain_unlink
+substr: xerj_plan => argos_plan
+substr: xerj_def => argos_def
+substr: xerj_map => argos_map
+substr: xerj_code_search => argos_code_search
+substr: xerj_index_budget => argos_index_budget
+substr: xerj_autoindex_remove => argos_autoindex_remove
+substr: xerj_status => argos_status
+substr: xerj_batch_search => argos_batch_search
+substr: xerj_corpus_feedback => argos_corpus_feedback
+substr: xerj_field_report => argos_field_report
+substr: xerj_hub_find => argos_hub_find
+substr: xerj_hub_def => argos_hub_def
+substr: xerj_hub_ask => argos_hub_ask
+
+# ---- do NOT rename: upstream provenance -------------------------------------
+exclude: github.com/xerj-org
+exclude: xerj-org

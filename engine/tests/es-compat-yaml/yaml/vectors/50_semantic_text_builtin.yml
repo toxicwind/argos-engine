@@ -1,8 +1,8 @@
 # semantic_text built-in embedder — end-to-end regression.
 #
 # COMPAT_MATRIX / lexical-not-neural note:
-#   XERJ's `semantic_text` field auto-embeds text on ingest with a zero-config,
-#   deterministic BUILT-IN embedder (xerj_ai::local::local_embed) that hashes
+#   ARGOS's `semantic_text` field auto-embeds text on ingest with a zero-config,
+#   deterministic BUILT-IN embedder (argos_ai::local::local_embed) that hashes
 #   word unigrams + intra-word character trigrams into an L2-normalised vector.
 #   It captures LEXICAL / vocabulary overlap, NOT deep neural semantics. This is
 #   an intentional, disclosed limitation (see README.md "Vector & semantic search
@@ -17,7 +17,7 @@
 #   * `k` bounds the neighbour pool (hits.total.value = min(k, matches)).
 #   * `size` caps the returned hits independently of `k`.
 #
-# The three strings below mirror xerj-ai's `paraphrase_ranks_above_unrelated`
+# The three strings below mirror argos-ai's `paraphrase_ranks_above_unrelated`
 # unit test, which proves sim(query, doc-1) > sim(query, doc-2) at 384 dims.
 
 setup:

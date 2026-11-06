@@ -1,6 +1,6 @@
 //! Fuzz the two script tokenisers that live in the aggregation engine.
 //!
-//! `xerj_engine::painless::tokenize` is not the only Painless-subset scanner in
+//! `argos_engine::painless::tokenize` is not the only Painless-subset scanner in
 //! the tree. `aggs.rs` holds two more with the same byte-walk / `&str`-slice
 //! shape, reached from an ordinary `_search` body and nothing else:
 //!
@@ -41,7 +41,7 @@ fuzz_target!(|data: &[u8]| {
     ];
 
     // scripted_metric -> lex_script
-    let _ = xerj_engine::aggs::run_aggs(
+    let _ = argos_engine::aggs::run_aggs(
         &json!({ "m": { "scripted_metric": {
             "init_script": src,
             "map_script": src,
@@ -52,7 +52,7 @@ fuzz_target!(|data: &[u8]| {
     );
 
     // bucket_script (sibling pipeline agg) -> tokenize_script
-    let _ = xerj_engine::aggs::run_aggs(
+    let _ = argos_engine::aggs::run_aggs(
         &json!({
             "s": { "sum": { "field": "v" } },
             "bs": { "bucket_script": { "buckets_path": { "x": "s" }, "script": src } },
@@ -61,7 +61,7 @@ fuzz_target!(|data: &[u8]| {
     );
 
     // bucket_selector (parent pipeline agg) -> tokenize_script
-    let _ = xerj_engine::aggs::run_aggs(
+    let _ = argos_engine::aggs::run_aggs(
         &json!({ "by": {
             "terms": { "field": "k" },
             "aggs": {

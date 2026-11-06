@@ -1,4 +1,4 @@
-# XERJ 1.0.0-rc.6 — changelog
+# ARGOS 1.0.0-rc.6 — changelog
 
 ## New: kNN + aggregations in a single request
 

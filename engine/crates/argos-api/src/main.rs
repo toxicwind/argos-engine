@@ -1,0 +1,48 @@
+//! Standalone test binary for running just the argos engine API
+//! (native + ES-compat) without Argos Console attached.  Useful for ES-compat
+//! conformance testing and as the simplest possible invocation when
+//! you don't want the full bundled UI.
+//!
+//! Production deployments use the `argos` binary in argos-server, which
+//! merges this engine API with the bundled Argos Console UI/API on the same
+//! TCP listeners — see `engine/crates/argos-server/src/main.rs`.
+
+use argos_api::{build_es_compat_router, build_native_router, AppState};
+use argos_common::{metrics::Metrics, Config};
+use argos_engine::Engine;
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "argos_api=info,tower_http=debug".into()),
+        )
+        .init();
+
+    let config = Config::default();
+    let metrics = Metrics::new()?;
+    let engine = Engine::new(config.clone())?;
+    let state = AppState::new(config.clone(), engine, metrics);
+
+    let native_addr = config.rest_addr();
+    let es_addr = config.es_compat_addr();
+
+    tracing::info!("native API  → http://{native_addr}");
+    tracing::info!("ES-compat   → http://{es_addr}");
+
+    let native_router = build_native_router(state.clone());
+    let es_router = build_es_compat_router(state);
+
+    let native_listener = tokio::net::TcpListener::bind(&native_addr).await?;
+    let es_listener = tokio::net::TcpListener::bind(&es_addr).await?;
+
+    // TCP_NODELAY matches the production `argos` binary (argos-server) —
+    // see the comment there for the per-request latency rationale.
+    tokio::select! {
+        result = axum::serve(native_listener, native_router).tcp_nodelay(true) => { result?; }
+        result = axum::serve(es_listener, es_router).tcp_nodelay(true) => { result?; }
+    }
+
+    Ok(())
+}

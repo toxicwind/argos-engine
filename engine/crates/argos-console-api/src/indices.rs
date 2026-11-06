@@ -1,0 +1,286 @@
+//! System indices used by Argos Console.
+//!
+//! All Argos Console persistent state lives in hidden indices prefixed with `.argos_`.
+//! These are created on first boot if missing. Schema is intentionally
+//! minimal — only the fields we actually filter or sort on get a typed
+//! mapping; everything else is stored in `_source` and read back as-is.
+//!
+//! Hidden semantics: `_cat/indices` skips `.argos_*` by default. Admin
+//! tools that want them pass `?include_system=true`, or ES's
+//! `?expand_wildcards=open,hidden`. A concrete name or a pattern that
+//! starts with `.` still addresses them. `.argos-memory-*` brains are not
+//! system indices and stay in the default listing.
+
+use argos_common::types::{FieldConfig, FieldType, Schema};
+use argos_engine::Engine;
+
+use crate::error::{ConsoleApiError, ConsoleResult};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Index names
+// ─────────────────────────────────────────────────────────────────────────────
+
+pub const USERS: &str = ".argos_users";
+pub const PASSKEYS: &str = ".argos_passkeys";
+pub const MAGIC_LINKS: &str = ".argos_magic_links";
+pub const SESSIONS: &str = ".argos_sessions";
+pub const API_TOKENS: &str = ".argos_api_tokens";
+pub const IDP_CONFIG: &str = ".argos_idp_config";
+pub const CLUSTER_STATE: &str = ".argos_cluster_state";
+pub const CONNECTIONS: &str = ".argos_connections";
+pub const PREFS: &str = ".argos_prefs";
+pub const DASHBOARDS: &str = ".argos_dashboards";
+pub const VIEWS: &str = ".argos_views";
+pub const ALERT_RULES: &str = ".argos_alert_rules";
+pub const ALERT_FIRES: &str = ".argos_alert_fires";
+pub const AUDIT: &str = ".argos_audit";
+
+/// Every system index this crate owns. Iterated by `ensure_all`.
+pub const ALL: &[&str] = &[
+    USERS,
+    PASSKEYS,
+    MAGIC_LINKS,
+    SESSIONS,
+    API_TOKENS,
+    IDP_CONFIG,
+    CLUSTER_STATE,
+    CONNECTIONS,
+    PREFS,
+    DASHBOARDS,
+    VIEWS,
+    ALERT_RULES,
+    ALERT_FIRES,
+    AUDIT,
+];
+
+/// Predicate: is this index name owned by Argos Console? Used by `_cat/indices`
+/// to filter out system indices from the default listing.
+pub fn is_system_index(name: &str) -> bool {
+    name.starts_with(".argos_")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Schemas
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Build the schema for a Argos Console system index. Only fields we need to
+/// filter / sort / aggregate on are typed; the rest of the document is
+/// untyped JSON (stored in `_source`, read back as-is). This keeps the
+/// mappings small and makes schema evolution a non-event for fields we
+/// don't query on.
+fn schema_for(index: &str) -> Schema {
+    let mut s = Schema::empty();
+    let add = |s: &mut Schema, name: &str, ty: FieldType| {
+        let _ = s.add_field(FieldConfig::new(name, ty));
+    };
+
+    match index {
+        USERS => {
+            // Filter: status=active, role=admin, email=…; sort: created_at
+            add(&mut s, "email", FieldType::Keyword);
+            add(&mut s, "role", FieldType::Keyword);
+            add(&mut s, "status", FieldType::Keyword);
+            add(&mut s, "created_at", FieldType::Date);
+            add(&mut s, "last_seen_at", FieldType::Date);
+            add(&mut s, "display_name", FieldType::Keyword);
+        }
+        PASSKEYS => {
+            // Lookup: by user_id (login), by credential_id (assertion verify)
+            add(&mut s, "user_id", FieldType::Keyword);
+            add(&mut s, "credential_id", FieldType::Keyword);
+            add(&mut s, "name", FieldType::Keyword);
+            add(&mut s, "created_at", FieldType::Date);
+            add(&mut s, "last_used_at", FieldType::Date);
+        }
+        MAGIC_LINKS => {
+            // Lookup: by token_hash (= _id, but typed for completeness)
+            add(&mut s, "purpose", FieldType::Keyword);
+            add(&mut s, "user_id", FieldType::Keyword);
+            add(&mut s, "email", FieldType::Keyword);
+            add(&mut s, "role", FieldType::Keyword);
+            add(&mut s, "created_by", FieldType::Keyword);
+            add(&mut s, "created_at", FieldType::Date);
+            add(&mut s, "expires_at", FieldType::Date);
+            add(&mut s, "used_at", FieldType::Date);
+        }
+        SESSIONS => {
+            // Lookup: by session_id (= _id), reverse by user_id
+            add(&mut s, "user_id", FieldType::Keyword);
+            add(&mut s, "created_at", FieldType::Date);
+            add(&mut s, "expires_at", FieldType::Date);
+            add(&mut s, "last_seen_at", FieldType::Date);
+            add(&mut s, "ip", FieldType::Keyword);
+            add(&mut s, "ua", FieldType::Keyword);
+            add(&mut s, "idp", FieldType::Keyword);
+            add(&mut s, "revoked_at", FieldType::Date);
+        }
+        API_TOKENS => {
+            // Lookup: by token_hash (= _id), reverse by user_id; expire by exp
+            add(&mut s, "user_id", FieldType::Keyword);
+            add(&mut s, "name", FieldType::Keyword);
+            add(&mut s, "scopes", FieldType::Keyword);
+            add(&mut s, "created_at", FieldType::Date);
+            add(&mut s, "last_used_at", FieldType::Date);
+            add(&mut s, "revoked_at", FieldType::Date);
+        }
+        IDP_CONFIG => {
+            // One row per protocol; no filter fields needed beyond _id.
+            add(&mut s, "updated_at", FieldType::Date);
+            add(&mut s, "updated_by", FieldType::Keyword);
+        }
+        CLUSTER_STATE => {
+            // One row per node. Filter on role/term/leader.
+            add(&mut s, "role", FieldType::Keyword);
+            add(&mut s, "term", FieldType::Long);
+            add(&mut s, "commit_index", FieldType::Long);
+            add(&mut s, "last_applied", FieldType::Long);
+            add(&mut s, "updated_at", FieldType::Date);
+        }
+        CONNECTIONS => {
+            add(&mut s, "name", FieldType::Keyword);
+            add(&mut s, "kind", FieldType::Keyword);
+            add(&mut s, "default", FieldType::Boolean);
+            add(&mut s, "managed", FieldType::Boolean);
+            add(&mut s, "created_at", FieldType::Date);
+            add(&mut s, "created_by", FieldType::Keyword);
+            add(&mut s, "etag", FieldType::Keyword);
+        }
+        PREFS => {
+            // _id = user_id; payload is opaque key/value pairs.
+            add(&mut s, "updated_at", FieldType::Date);
+        }
+        DASHBOARDS => {
+            add(&mut s, "owner", FieldType::Keyword);
+            add(&mut s, "org_id", FieldType::Keyword);
+            add(&mut s, "visibility", FieldType::Keyword);
+            // Provenance marker for seeded built-ins; typed so admin tooling
+            // can filter managed vs user dashboards. Panel contents stay
+            // untyped in `_source` (see the panel-schema doc in dashboards.rs).
+            add(&mut s, "managed", FieldType::Boolean);
+            add(&mut s, "name", FieldType::Keyword);
+            add(&mut s, "section", FieldType::Keyword);
+            add(&mut s, "group", FieldType::Keyword);
+            add(&mut s, "version", FieldType::Long);
+            add(&mut s, "etag", FieldType::Keyword);
+            add(&mut s, "created_at", FieldType::Date);
+            add(&mut s, "updated_at", FieldType::Date);
+            add(&mut s, "deleted_at", FieldType::Date);
+        }
+        VIEWS => {
+            add(&mut s, "owner", FieldType::Keyword);
+            add(&mut s, "org_id", FieldType::Keyword);
+            add(&mut s, "dashboard_id", FieldType::Keyword);
+            add(&mut s, "name", FieldType::Keyword);
+            add(&mut s, "updated_at", FieldType::Date);
+        }
+        ALERT_RULES => {
+            // The rule body itself (`watch`, `type`, `etag`) is written by
+            // the engine-side watcher (argos-api `PUT /_watcher/watch/{id}`,
+            // #1062) — this crate owns the INDEX and its typed filter
+            // fields; argos-api deliberately does not depend on this crate,
+            // so both sides write/read through the shared Engine.
+            add(&mut s, "owner", FieldType::Keyword);
+            add(&mut s, "org_id", FieldType::Keyword);
+            add(&mut s, "name", FieldType::Keyword);
+            add(&mut s, "enabled", FieldType::Boolean);
+            add(&mut s, "etag", FieldType::Keyword);
+            add(&mut s, "updated_at", FieldType::Date);
+        }
+        ALERT_FIRES => {
+            // Written by the watcher evaluator (#1062). `p` is the RAW
+            // /_decide confidence (calibration is #1063), typed so the
+            // console can filter/sort by it; `calibrated` lives in `_source`
+            // (constant false today, so filtering on it is pointless).
+            add(&mut s, "rule_id", FieldType::Keyword);
+            add(&mut s, "level", FieldType::Keyword);
+            add(&mut s, "fired_at", FieldType::Date);
+            // The document whose decide vote fired this rule.
+            add(&mut s, "doc_id", FieldType::Keyword);
+            // Raw (uncalibrated, #1063) /_decide confidence of the vote.
+            add(&mut s, "p", FieldType::Double);
+            // Which decide tier answered: "history" | "local".
+            add(&mut s, "tier", FieldType::Keyword);
+        }
+        AUDIT => {
+            add(&mut s, "who", FieldType::Keyword);
+            add(&mut s, "when", FieldType::Date);
+            add(&mut s, "action", FieldType::Keyword);
+            add(&mut s, "resource", FieldType::Keyword);
+            add(&mut s, "resource_id", FieldType::Keyword);
+            add(&mut s, "ip", FieldType::Keyword);
+        }
+        _ => {} // Unknown name: empty schema, dynamic mapping picks it up.
+    }
+    s
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Auto-create
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Idempotently create every Argos Console system index, applying the schema
+/// from `schema_for`. Does nothing for indices that already exist.
+///
+/// Logs a single `info` line on first creation and returns the names
+/// that were newly created (so the bootstrap module can detect "fresh
+/// data dir" purely from the create-set being non-empty).
+pub fn ensure_all(engine: &Engine) -> ConsoleResult<Vec<&'static str>> {
+    let mut created = Vec::new();
+    for name in ALL {
+        if engine.get_index(name).is_ok() {
+            continue;
+        }
+        let schema = schema_for(name);
+        engine
+            .create_index(name, schema)
+            .map_err(|e| ConsoleApiError::Internal(format!("create {name}: {e}")))?;
+        tracing::info!(index = *name, "created argos-console system index");
+        created.push(*name);
+    }
+    Ok(created)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_advertised_index_has_a_schema() {
+        // schema_for never panics for any ALL entry, and every advertised
+        // index either has typed fields or an explicit empty branch.
+        for name in ALL {
+            let _ = schema_for(name);
+        }
+    }
+
+    #[test]
+    fn is_system_index_predicate() {
+        assert!(is_system_index(".argos_users"));
+        assert!(is_system_index(".argos_dashboards"));
+        assert!(!is_system_index("dashboards"));
+        assert!(!is_system_index(".kibana"));
+        assert!(!is_system_index(".audit"));
+    }
+
+    /// #1062: the alert indices are now READ and WRITTEN — rules by the
+    /// engine-side watcher (`PUT /_watcher/watch/{id}` in argos-api), fires
+    /// by its evaluator. This pins the typed fields the evaluator writes so
+    /// a schema edit there cannot drift from the writer silently.
+    #[test]
+    fn alert_indices_carry_the_watcher_fields() {
+        let fires = schema_for(ALERT_FIRES);
+        for field in ["rule_id", "level", "fired_at", "doc_id", "p", "tier"] {
+            assert!(
+                fires.fields.iter().any(|f| f.name == field),
+                "{ALERT_FIRES} must type {field} for the watcher evaluator"
+            );
+        }
+        let rules = schema_for(ALERT_RULES);
+        for field in ["name", "enabled", "etag", "updated_at"] {
+            assert!(
+                rules.fields.iter().any(|f| f.name == field),
+                "{ALERT_RULES} must type {field} for the watcher's rule documents"
+            );
+        }
+    }
+}

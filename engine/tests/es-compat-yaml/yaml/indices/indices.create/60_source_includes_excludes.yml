@@ -1,10 +1,10 @@
 ---
 # Mapping `_source.includes` / `_source.excludes`: the listed paths are left
 # out of the `_source` returned by every read, while the fields stay indexed
-# and searchable. XERJ-authored case (ES semantics: docs `mapping-source-field.html`).
+# and searchable. ARGOS-authored case (ES semantics: docs `mapping-source-field.html`).
 "mapping _source excludes are not returned but stay searchable":
   - skip:
-      awaits_fix: "XERJ ignores mapping _source.includes/excludes (fix follows in fix/es-mapping-source-filter)"
+      awaits_fix: "ARGOS ignores mapping _source.includes/excludes (fix follows in fix/es-mapping-source-filter)"
   - do:
       indices.create:
         index: test_source_excludes
@@ -44,7 +44,7 @@
 ---
 "mapping _source includes keep only the listed paths":
   - skip:
-      awaits_fix: "XERJ ignores mapping _source.includes/excludes (fix follows in fix/es-mapping-source-filter)"
+      awaits_fix: "ARGOS ignores mapping _source.includes/excludes (fix follows in fix/es-mapping-source-filter)"
   - do:
       indices.create:
         index: test_source_includes

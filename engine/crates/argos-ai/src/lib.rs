@@ -1,0 +1,48 @@
+//! # argos-ai
+//!
+//! AI-native features for the argos search engine.
+//!
+//! Provides:
+//! - [`embedder`] — Unified backend handle (lexical / proxy / Candle neural /
+//!   experimental ONNX) used by the engine
+//! - [`embed`]   — Embedding proxy: async HTTP client for OpenAI-compatible embedding APIs
+//! - [`local`]   — Built-in zero-config deterministic text embedder (feature hashing)
+//! - [`neural`]  — Built-in neural BERT sentence embedder via candle (feature `neural`)
+//! - [`decide`]  — Built-in zero-shot decision head: a ModernBERT-class candle
+//!   classifier answering noul/choice with no history index (feature `decide-local`)
+//! - `microbatch` — Length-aware batching shared by the in-process encoders,
+//!   so one long passage cannot pad a whole window up to its length
+//! - `onnx`      — Experimental MiniLM-compatible FP32 ONNX backend
+//!   (feature `onnx-experimental`; server feature + explicit runtime selection required)
+//! - [`chunker`] — Text chunking with sentence-aware splitting and overlap
+//!
+//! Agent memory does NOT live here. The real memory store is index-backed
+//! (`/_memory/*` in argos-api over ordinary ARGOS indices — durable, WAL-replayed,
+//! kNN/BM25-searchable). An earlier in-RAM `AgentMemory` (O(N²) dedup scan, no
+//! durability, process-lifetime only) was deleted once it reached zero callers:
+//! keeping it around shadowed the real API and invited accidental use.
+
+pub mod chunker;
+#[cfg(feature = "decide-local")]
+pub mod decide;
+pub mod embed;
+pub mod embedder;
+pub mod local;
+#[cfg(any(
+    feature = "neural",
+    feature = "onnx-experimental",
+    feature = "decide-local"
+))]
+pub mod microbatch;
+#[cfg(feature = "neural")]
+pub mod neural;
+#[cfg(feature = "onnx-experimental")]
+pub mod onnx;
+pub mod semantic_lexical;
+
+pub use chunker::{Chunk, TextChunker};
+pub use embed::{EmbeddingProxy, EmbeddingProxyConfig};
+pub use embedder::Embedder;
+pub use local::{local_embed, DEFAULT_DIMS};
+
+pub use argos_common::Result;

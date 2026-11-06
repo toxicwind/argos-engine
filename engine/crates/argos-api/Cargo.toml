@@ -1,0 +1,82 @@
+[package]
+name = "argos-api"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[features]
+# Built-in Candle neural embedder, for the `binary_bulk_throughput`
+# example (#903) and for anyone linking this crate directly. The shipped
+# binary turns it on through `argos-server`'s own `neural` feature.
+neural = ["argos-engine/neural"]
+# Local zero-shot decision head (issue #1057): tier 2 of the System One
+# decide ladder, answering /v1/systemone and /_decide when the history
+# index has no support. Mirrors how `neural` is gated — enabled by whoever
+# links this crate; since rc.80 the shipped binary turns it on through
+# `argos-server`'s default feature set (runtime stays opt-in via
+# `--decide-mode local`). Also arms the `judge` stage's model arm (issue
+# #1060): the same loader, the same model directory, the same loaded copy.
+decide-local = ["dep:argos-ai", "argos-ai/decide-local", "argos-rerank/judge-local"]
+onnx-experimental = ["argos-engine/onnx-experimental"]
+
+[dependencies]
+argos-common  = { path = "../argos-common" }
+argos-engine  = { path = "../argos-engine" }
+argos-query   = { path = "../argos-query" }
+argos-rerank = { path = "../argos-rerank" }
+# Corpus Hub hosted endpoints (`hub_api.rs`): `def::lookup_in` is the one `def`
+# function every surface calls, and `argos_autoindex::xc::code_root` is where its
+# state ledger lives. `argos-hub` dev-depends on this crate (its pack roundtrip
+# test boots a node); Cargo accepts a cycle that runs through a dev-dependency.
+argos-hub     = { path = "../argos-hub" }
+argos-autoindex = { path = "../argos-autoindex" }
+argos-wasm    = { path = "../argos-wasm" }
+# Shard routing: the ES document and search handlers forward to the
+# owner named by the Raft shard plan. The cluster crate does not depend
+# on this one.
+argos-cluster = { path = "../argos-cluster" }
+# Local decision head (feature `decide-local`); no other purpose, so the
+# dependency itself is optional.
+argos-ai      = { path = "../argos-ai", optional = true }
+# Note: this crate intentionally does NOT depend on argos-console-api.
+# Argos Console is a peer product mounted at the server level (`argos-server`)
+# via Router::merge. Engine API and Argos Console API are decoupled — the
+# engine doesn't know Argos Console exists, and Argos Console could be removed from
+# the binary build without changing a line of argos-api code.
+
+tokio        = { workspace = true }
+axum         = { workspace = true }
+tower        = { workspace = true, features = ["util"] }
+tower-http   = { workspace = true }
+serde        = { workspace = true }
+serde_json   = { workspace = true }
+tracing      = { workspace = true }
+thiserror    = { workspace = true }
+anyhow       = { workspace = true }
+uuid         = { workspace = true }
+chrono       = { workspace = true }
+bytes        = { workspace = true }
+prometheus   = { workspace = true }
+dashmap              = { workspace = true }
+tracing-subscriber   = { workspace = true }
+# Second-brain graph API: edge_id identity hashing (SECOND_BRAIN_SPEC §2.3).
+xxhash-rust          = { workspace = true }
+
+async-trait  = "0.1"
+libc         = "0.2"
+# Share links (`/_share`): the passcode a guest types is short and human-typed,
+# so unlike a minted API-key secret it needs a real password hash.
+argon2       = "0.5"
+# Share ids / passcodes are minted from the OS CSPRNG.
+rand         = { workspace = true }
+# Share ids are stored as a SHA-256 digest, never in the clear.
+sha2         = "0.10"
+
+[dev-dependencies]
+tempfile     = { workspace = true }
+# #2234: the HTTP refresh test holds one index inside `Index::refresh`.
+# The feature stays off the release graph (resolver v2, dev-dependency only).
+argos-engine  = { path = "../argos-engine", features = ["refresh-test-hook"] }
+tower        = { workspace = true, features = ["util"] }
+http-body-util = "0.1"

@@ -1,7 +1,7 @@
-# While action.destructive_requires_name is true (the XERJ default, and what
+# While action.destructive_requires_name is true (the ARGOS default, and what
 # this file sets), `*`, `_all` and a pattern are 400 and delete nothing.
 # The opt-out (`false` restores expansion) is the HTTP test
-# engine/crates/xerj-api/tests/destructive_requires_name.rs. Teardown stores
+# engine/crates/argos-api/tests/destructive_requires_name.rs. Teardown stores
 # null, not false, so the default is what the next file sees.
 ---
 setup:

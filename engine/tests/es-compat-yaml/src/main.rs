@@ -1,7 +1,7 @@
-//! ES-compat YAML test runner for XERJ.
+//! ES-compat YAML test runner for ARGOS.
 //!
 //! Parses Elasticsearch REST API YAML test files and replays them against
-//! a running XERJ instance on the ES-compat port (:9200). Reports
+//! a running ARGOS instance on the ES-compat port (:9200). Reports
 //! pass/fail per test case.
 //!
 //! The YAML format uses `---` to separate test sections. The first section
@@ -22,7 +22,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 #[derive(Parser)]
-#[command(name = "es-yaml-runner", about = "Run ES YAML REST tests against XERJ")]
+#[command(name = "es-yaml-runner", about = "Run ES YAML REST tests against ARGOS")]
 struct Cli {
     #[arg(long, default_value = "http://localhost:9200")]
     url: String,
@@ -95,7 +95,7 @@ fn main() {
     let lenient = catch_lenient::hits();
     if lenient > 0 {
         println!(
-            "{} cases ran catch-lenient (an expected error XERJ does not raise yet; see catch-lenient.txt)",
+            "{} cases ran catch-lenient (an expected error ARGOS does not raise yet; see catch-lenient.txt)",
             format!("{lenient}").yellow()
         );
     }
@@ -173,7 +173,7 @@ fn extract_setup_indices(steps: &[YamlValue]) -> Vec<String> {
 }
 
 fn cleanup_indices(client: &reqwest::blocking::Client, base_url: &str) {
-    // XERJ defaults `action.destructive_requires_name` to true, matching ES 8,
+    // ARGOS defaults `action.destructive_requires_name` to true, matching ES 8,
     // so a bare `DELETE /_all` is a 400 and would leak indices into the next
     // file. The suite wipe is an explicit opt-out: turn the guard off, delete,
     // then put the key back to null so the next file sees the default again.
@@ -538,7 +538,7 @@ fn execute_step(
     // false, empty string, numeric 0, the string "0". An empty array /
     // empty object counts as truthy in ES's runner (the field exists
     // and is a collection) — so we do too. An object with a single
-    // `{value: null}` — a common xerj pipeline-agg placeholder for
+    // `{value: null}` — a common argos pipeline-agg placeholder for
     // "no value computed" — is treated as null.
     fn is_truthy(val: &Value) -> bool {
         match val {
@@ -644,7 +644,7 @@ fn execute_step(
     // `skip` — skip test if version doesn't match, or the test is
     // explicitly awaiting a fix in the upstream project.
     // `skip: { features: [...] }` is runner-capability metadata (e.g.,
-    // "headers", "allowed_warnings") — not a reason to skip on XERJ.
+    // "headers", "allowed_warnings") — not a reason to skip on ARGOS.
     if let Some(skip_val) = map.get(YamlValue::String("skip".into())) {
         if let YamlValue::Mapping(skip_map) = skip_val {
             let has_version = skip_map.contains_key(YamlValue::String("version".into()));
@@ -657,7 +657,7 @@ fn execute_step(
                 return Err("skip directive (awaits_fix)".into());
             }
             // Note: `known_issues` describes upstream ES bugs — we attempt
-            // these tests anyway since xerj doesn't inherit ES's bug
+            // these tests anyway since argos doesn't inherit ES's bug
             // history. (Skipping them would hide regressions.)
             // `skip.cluster_features: [gte_vX.Y]` means "skip this test on
             // clusters that already have feature X.Y". We report ourselves
@@ -702,7 +702,7 @@ fn execute_step(
 }
 
 /// Check whether a `gte_vX.Y[.Z]` cluster feature predicate is satisfied
-/// by this runner. xerj reports ES 8.13.0 wire compatibility, so:
+/// by this runner. argos reports ES 8.13.0 wire compatibility, so:
 /// - any gte_v<major>.Y with major < 8 is satisfied
 /// - gte_v8.0..=8.13 is satisfied
 /// - gte_v8.14+ is NOT satisfied (known-issues targeting 8.14 fixes
@@ -784,7 +784,7 @@ fn execute_do(
 
         if let Some(b) = &body {
             let b = substitute_vars(b, vars);
-            if std::env::var("XERJ_DEBUG_REQ").is_ok() {
+            if std::env::var("ARGOS_DEBUG_REQ").is_ok() {
                 eprintln!("--- REQ {} {} ---\n{}\n--- END ---", method, url, b);
             }
             req = req.body(b);
@@ -794,7 +794,7 @@ fn execute_do(
         let status = resp.status();
 
         let resp_text = resp.text().unwrap_or_default();
-        if std::env::var("XERJ_DEBUG_RESP").is_ok() {
+        if std::env::var("ARGOS_DEBUG_RESP").is_ok() {
             eprintln!(
                 "--- RESP {} ---\n{}\n--- END ---",
                 status,
@@ -849,7 +849,7 @@ fn execute_do(
     Ok(())
 }
 
-/// The ratchet for `catch:` expectations XERJ does not meet yet.
+/// The ratchet for `catch:` expectations ARGOS does not meet yet.
 ///
 /// Until this existed the runner ignored `catch:` entirely: an expected
 /// error step passed whatever the server answered, so a case asserting
@@ -902,7 +902,7 @@ mod catch_lenient {
     pub fn tolerate(msg: &str) -> bool {
         let key = CURRENT.with(|c| c.borrow().clone());
         if list().contains(&key) {
-            if std::env::var("XERJ_DEBUG_CATCH").is_ok() {
+            if std::env::var("ARGOS_DEBUG_CATCH").is_ok() {
                 eprintln!("  catch-lenient {key}: {msg}");
             }
             HITS.with(|h| h.borrow_mut().insert(key));
@@ -1706,7 +1706,7 @@ fn get_param_ndjson(params: &serde_yaml::Mapping) -> Option<String> {
                 }
             }
         }
-        if std::env::var("XERJ_DEBUG_BULK").is_ok() {
+        if std::env::var("ARGOS_DEBUG_BULK").is_ok() {
             eprintln!("--- bulk ndjson ---\n{}\n--- end ---", ndjson);
         }
         Some(ndjson)

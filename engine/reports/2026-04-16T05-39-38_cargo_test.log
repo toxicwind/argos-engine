@@ -1,5 +1,5 @@
 warning: associated function `from_u8` is never used
-  --> crates/xerj-cluster/src/raft_log.rs:72:8
+  --> crates/argos-cluster/src/raft_log.rs:72:8
    |
 71 | impl EntryKind {
    | -------------- associated function in this implementation
@@ -8,10 +8,10 @@ warning: associated function `from_u8` is never used
    |
    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
 
-warning: `xerj-cluster` (lib) generated 1 warning
-warning: `xerj-cluster` (lib test) generated 1 warning (1 duplicate)
+warning: `argos-cluster` (lib) generated 1 warning
+warning: `argos-cluster` (lib test) generated 1 warning (1 duplicate)
 warning: unused import: `Write`
-  --> crates/xerj-logs/src/columnar.rs:10:29
+  --> crates/argos-logs/src/columnar.rs:10:29
    |
 10 | use std::io::{Cursor, Read, Write};
    |                             ^^^^^
@@ -19,13 +19,13 @@ warning: unused import: `Write`
    = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
 
 warning: unused imports: `ColumnType`, `ColumnValue`, and `Column`
-  --> crates/xerj-logs/src/ingest.rs:14:23
+  --> crates/argos-logs/src/ingest.rs:14:23
    |
 14 | use crate::columnar::{Column, ColumnType, ColumnValue};
    |                       ^^^^^^  ^^^^^^^^^^  ^^^^^^^^^^^
 
 warning: field `bucket` is never read
-   --> crates/xerj-logs/src/ingest.rs:166:5
+   --> crates/argos-logs/src/ingest.rs:166:5
     |
 165 | struct Memtable {
     |        -------- field in this struct
@@ -35,7 +35,7 @@ warning: field `bucket` is never read
     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
 
 warning: unused import: `rayon::prelude`
-  --> crates/xerj-vector/src/hnsw.rs:17:5
+  --> crates/argos-vector/src/hnsw.rs:17:5
    |
 17 | use rayon::prelude::*;
    |     ^^^^^^^^^^^^^^
@@ -43,7 +43,7 @@ warning: unused import: `rayon::prelude`
    = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
 
 warning: variable `curr_dist` is assigned to, but never used
-   --> crates/xerj-vector/src/hnsw.rs:166:13
+   --> crates/argos-vector/src/hnsw.rs:166:13
     |
 166 |         let mut curr_dist = {
     |             ^^^^^^^^^^^^^
@@ -52,7 +52,7 @@ warning: variable `curr_dist` is assigned to, but never used
     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
 
 warning: value assigned to `curr_dist` is never read
-   --> crates/xerj-vector/src/hnsw.rs:225:17
+   --> crates/argos-vector/src/hnsw.rs:225:17
     |
 225 |                 curr_dist = candidates[0].0;
     |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -61,7 +61,7 @@ warning: value assigned to `curr_dist` is never read
     = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
 
 warning: value assigned to `curr_dist` is never read
-   --> crates/xerj-vector/src/hnsw.rs:175:13
+   --> crates/argos-vector/src/hnsw.rs:175:13
     |
 175 |             curr_dist = new_dist;
     |             ^^^^^^^^^^^^^^^^^^^^
@@ -69,7 +69,7 @@ warning: value assigned to `curr_dist` is never read
     = help: maybe it is overwritten before being read?
 
 warning: field `id` is never read
-  --> crates/xerj-vector/src/hnsw.rs:61:5
+  --> crates/argos-vector/src/hnsw.rs:61:5
    |
 60 | struct Node {
    |        ---- field in this struct
@@ -80,7 +80,7 @@ warning: field `id` is never read
    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
 
 warning: unused import: `Write`
-  --> crates/xerj-storage/src/stored_codec.rs:58:29
+  --> crates/argos-storage/src/stored_codec.rs:58:29
    |
 58 | use std::io::{Cursor, Read, Write};
    |                             ^^^^^
@@ -88,13 +88,13 @@ warning: unused import: `Write`
    = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
 
 warning: unused import: `Read`
-  --> crates/xerj-storage/src/stored_codec.rs:58:23
+  --> crates/argos-storage/src/stored_codec.rs:58:23
    |
 58 | use std::io::{Cursor, Read, Write};
    |                       ^^^^
 
 warning: field `depth` is never read
-   --> crates/xerj-storage/src/backend.rs:384:9
+   --> crates/argos-storage/src/backend.rs:384:9
     |
 381 |     pub struct Entry {
     |                ----- field in this struct
@@ -105,62 +105,62 @@ warning: field `depth` is never read
     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
 
 warning: constant `CHKPT_LEN` is never used
-  --> crates/xerj-storage/src/wal.rs:63:7
+  --> crates/argos-storage/src/wal.rs:63:7
    |
 63 | const CHKPT_LEN: u64 = 28; // generation(8) + offset(8) + max_seq(8) + crc(4)
    |       ^^^^^^^^^
 
-warning: `xerj-logs` (lib) generated 3 warnings (run `cargo fix --lib -p xerj-logs` to apply 2 suggestions)
-warning: `xerj-vector` (lib) generated 5 warnings
-warning: `xerj-storage` (lib) generated 4 warnings (run `cargo fix --lib -p xerj-storage` to apply 1 suggestion)
-warning: `xerj-vector` (lib test) generated 5 warnings (5 duplicates)
-warning: `xerj-storage` (lib test) generated 4 warnings (4 duplicates)
-warning: `xerj-logs` (lib test) generated 3 warnings (3 duplicates)
+warning: `argos-logs` (lib) generated 3 warnings (run `cargo fix --lib -p argos-logs` to apply 2 suggestions)
+warning: `argos-vector` (lib) generated 5 warnings
+warning: `argos-storage` (lib) generated 4 warnings (run `cargo fix --lib -p argos-storage` to apply 1 suggestion)
+warning: `argos-vector` (lib test) generated 5 warnings (5 duplicates)
+warning: `argos-storage` (lib test) generated 4 warnings (4 duplicates)
+warning: `argos-logs` (lib test) generated 3 warnings (3 duplicates)
 warning: unused import: `Serialize`
-  --> crates/xerj-fts/src/index.rs:28:26
+  --> crates/argos-fts/src/index.rs:28:26
    |
 28 | use serde::{Deserialize, Serialize};
    |                          ^^^^^^^^^
    |
    = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
 
-warning: `xerj-fts` (lib) generated 1 warning (run `cargo fix --lib -p xerj-fts` to apply 1 suggestion)
-warning: `xerj-fts` (lib test) generated 1 warning (1 duplicate)
-   Compiling xerj-engine v0.1.0 (/home/claude/ai/zeebb.ai/engine/crates/xerj-engine)
+warning: `argos-fts` (lib) generated 1 warning (run `cargo fix --lib -p argos-fts` to apply 1 suggestion)
+warning: `argos-fts` (lib test) generated 1 warning (1 duplicate)
+   Compiling argos-engine v0.1.0 (/home/claude/ai/zeebb.ai/engine/crates/argos-engine)
 warning: unused import: `FtsIndexWriter`
-  --> crates/xerj-engine/src/index.rs:17:40
+  --> crates/argos-engine/src/index.rs:17:40
    |
-17 | use xerj_fts::index::{FtsIndexReader, FtsIndexWriter};
+17 | use argos_fts::index::{FtsIndexReader, FtsIndexWriter};
    |                                        ^^^^^^^^^^^^^^
    |
    = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
 
 warning: unused imports: `FastAggResult`, `run_agg_fast_filtered`, and `run_agg_fast`
-  --> crates/xerj-engine/src/index.rs:28:38
+  --> crates/argos-engine/src/index.rs:28:38
    |
 28 | use crate::aggs::{run_aggs_with_all, run_agg_fast, run_agg_fast_filtered, FastAggResult};
    |                                      ^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^
 
 warning: unused import: `crate::memtable::FtsMemtable`
-  --> crates/xerj-engine/src/index.rs:29:5
+  --> crates/argos-engine/src/index.rs:29:5
    |
 29 | use crate::memtable::FtsMemtable;
    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 warning: unused import: `SegmentId`
-    --> crates/xerj-engine/src/index.rs:1402:51
+    --> crates/argos-engine/src/index.rs:1402:51
      |
-1402 |         use xerj_storage::segment::{SectionType, SegmentId, SegmentReader, SegmentWriter};
+1402 |         use argos_storage::segment::{SectionType, SegmentId, SegmentReader, SegmentWriter};
      |                                                   ^^^^^^^^^
 
 warning: unused import: `rayon::prelude`
-  --> crates/xerj-engine/src/turbo_ingest.rs:31:5
+  --> crates/argos-engine/src/turbo_ingest.rs:31:5
    |
 31 | use rayon::prelude::*;
    |     ^^^^^^^^^^^^^^
 
 warning: value assigned to `fts_handled` is never read
-    --> crates/xerj-engine/src/index.rs:2766:33
+    --> crates/argos-engine/src/index.rs:2766:33
      |
 2766 | ...                   fts_handled = true;
      |                       ^^^^^^^^^^^^^^^^^^
@@ -169,7 +169,7 @@ warning: value assigned to `fts_handled` is never read
      = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
 
 warning: unused variable: `negative`
-    --> crates/xerj-engine/src/index.rs:6238:41
+    --> crates/argos-engine/src/index.rs:6238:41
      |
 6238 |         QueryNode::Boosting { positive, negative, .. } => {
      |                                         ^^^^^^^^ help: try ignoring the field: `negative: _`
@@ -177,7 +177,7 @@ warning: unused variable: `negative`
      = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
 
 warning: value assigned to `pos` is never read
-   --> crates/xerj-engine/src/sql.rs:344:65
+   --> crates/argos-engine/src/sql.rs:344:65
     |
 344 |             Some(Token::Num(n)) => { limit = Some(*n as usize); pos += 1; }
     |                                                                 ^^^^^^^^
@@ -185,7 +185,7 @@ warning: value assigned to `pos` is never read
     = help: maybe it is overwritten before being read?
 
 warning: function `execute_agg` is never used
-   --> crates/xerj-engine/src/aggs.rs:391:4
+   --> crates/argos-engine/src/aggs.rs:391:4
     |
 391 | fn execute_agg(name: &str, body: &Value, docs: &[Value]) -> Value {
     |    ^^^^^^^^^^^
@@ -193,13 +193,13 @@ warning: function `execute_agg` is never used
     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
 
 warning: function `execute_agg_with_all` is never used
-   --> crates/xerj-engine/src/aggs.rs:395:4
+   --> crates/argos-engine/src/aggs.rs:395:4
     |
 395 | fn execute_agg_with_all(name: &str, body: &Value, docs: &[Value], all_docs: &[Value]) -> Value {
     |    ^^^^^^^^^^^^^^^^^^^^
 
 warning: variant `Skip` is never constructed
-   --> crates/xerj-engine/src/bulk.rs:123:9
+   --> crates/argos-engine/src/bulk.rs:123:9
     |
 120 |     enum ParseOutcome {
     |          ------------ variant in this enum
@@ -208,67 +208,67 @@ warning: variant `Skip` is never constructed
     |         ^^^^
 
 warning: function `run_numeric_agg_with_segments_refs` is never used
-    --> crates/xerj-engine/src/index.rs:5508:4
+    --> crates/argos-engine/src/index.rs:5508:4
      |
 5508 | fn run_numeric_agg_with_segments_refs(
      |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 warning: function `run_value_count_with_segments_refs` is never used
-    --> crates/xerj-engine/src/index.rs:5573:4
+    --> crates/argos-engine/src/index.rs:5573:4
      |
 5573 | fn run_value_count_with_segments_refs(
      |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 warning: function `run_cardinality_with_segments_refs` is never used
-    --> crates/xerj-engine/src/index.rs:5605:4
+    --> crates/argos-engine/src/index.rs:5605:4
      |
 5605 | fn run_cardinality_with_segments_refs(
      |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 warning: function `run_terms_with_segments_refs` is never used
-    --> crates/xerj-engine/src/index.rs:5648:4
+    --> crates/argos-engine/src/index.rs:5648:4
      |
 5648 | fn run_terms_with_segments_refs(
      |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 warning: function `run_numeric_agg_with_segments` is never used
-    --> crates/xerj-engine/src/index.rs:5756:4
+    --> crates/argos-engine/src/index.rs:5756:4
      |
 5756 | fn run_numeric_agg_with_segments(
      |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 warning: function `run_value_count_with_segments` is never used
-    --> crates/xerj-engine/src/index.rs:5819:4
+    --> crates/argos-engine/src/index.rs:5819:4
      |
 5819 | fn run_value_count_with_segments(
      |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 warning: function `run_cardinality_with_segments` is never used
-    --> crates/xerj-engine/src/index.rs:5851:4
+    --> crates/argos-engine/src/index.rs:5851:4
      |
 5851 | fn run_cardinality_with_segments(
      |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 warning: function `run_terms_with_segments` is never used
-    --> crates/xerj-engine/src/index.rs:5901:4
+    --> crates/argos-engine/src/index.rs:5901:4
      |
 5901 | fn run_terms_with_segments(
      |    ^^^^^^^^^^^^^^^^^^^^^^^
 
 warning: function `hash_doc_id` is never used
-    --> crates/xerj-engine/src/index.rs:7282:4
+    --> crates/argos-engine/src/index.rs:7282:4
      |
 7282 | fn hash_doc_id(doc_id: &str) -> u32 {
      |    ^^^^^^^^^^^
 
 warning: constant `ANALYSIS_THRESHOLD` is never used
-  --> crates/xerj-engine/src/memtable.rs:90:7
+  --> crates/argos-engine/src/memtable.rs:90:7
    |
 90 | const ANALYSIS_THRESHOLD: usize = 1000;
    |       ^^^^^^^^^^^^^^^^^^
 
 warning: method `collect_sample` is never used
-   --> crates/xerj-engine/src/memtable.rs:188:8
+   --> crates/argos-engine/src/memtable.rs:188:8
     |
 173 | impl DocValues {
     | -------------- method in this implementation
@@ -277,7 +277,7 @@ warning: method `collect_sample` is never used
     |        ^^^^^^^^^^^^^^
 
 warning: field `parallel` is never read
-   --> crates/xerj-engine/src/turbo_ingest.rs:245:5
+   --> crates/argos-engine/src/turbo_ingest.rs:245:5
     |
 232 | pub struct TurboIngestPipeline {
     |            ------------------- field in this struct
@@ -286,7 +286,7 @@ warning: field `parallel` is never read
     |     ^^^^^^^^
 
 warning: calls to `std::mem::drop` with a reference instead of an owned value does nothing
-    --> crates/xerj-engine/src/index.rs:1156:9
+    --> crates/argos-engine/src/index.rs:1156:9
      |
 1156 |         drop(mem);
      |         ^^^^^---^
@@ -301,7 +301,7 @@ help: use `let _ = ...` to ignore the expression or result
      |
 
 warning: variable `MERGE_PARALLELISM` should have a snake case name
-    --> crates/xerj-engine/src/index.rs:1506:13
+    --> crates/argos-engine/src/index.rs:1506:13
      |
 1506 |         let MERGE_PARALLELISM: usize = merge_parallelism;
      |             ^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `merge_parallelism`
@@ -309,7 +309,7 @@ warning: variable `MERGE_PARALLELISM` should have a snake case name
      = note: `#[warn(non_snake_case)]` (part of `#[warn(nonstandard_style)]`) on by default
 
 warning: calls to `std::mem::drop` with a reference instead of an owned value does nothing
-    --> crates/xerj-engine/src/index.rs:3430:9
+    --> crates/argos-engine/src/index.rs:3430:9
      |
 3430 |         drop(mem);
      |         ^^^^^---^
@@ -322,30 +322,30 @@ help: use `let _ = ...` to ignore the expression or result
 3430 +         let _ = mem;
      |
 
-   Compiling xerj-api v0.1.0 (/home/claude/ai/zeebb.ai/engine/crates/xerj-api)
-warning: `xerj-engine` (lib) generated 26 warnings (24 duplicates)
+   Compiling argos-api v0.1.0 (/home/claude/ai/zeebb.ai/engine/crates/argos-api)
+warning: `argos-engine` (lib) generated 26 warnings (24 duplicates)
 warning: unused import: `SourceFilter`
-  --> crates/xerj-engine/tests/integration.rs:11:50
+  --> crates/argos-engine/tests/integration.rs:11:50
    |
-11 | use xerj_query::ast::{QueryNode, SearchRequest, SourceFilter};
+11 | use argos_query::ast::{QueryNode, SearchRequest, SourceFilter};
    |                                                  ^^^^^^^^^^^^
    |
    = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
 
 warning: unused import: `QueryNode`
-    --> crates/xerj-engine/tests/integration.rs:2379:28
+    --> crates/argos-engine/tests/integration.rs:2379:28
      |
-2379 |     use xerj_query::ast::{QueryNode, SourceFilter};
+2379 |     use argos_query::ast::{QueryNode, SourceFilter};
      |                            ^^^^^^^^^
 
 warning: unused import: `serde_json::Value`
-    --> crates/xerj-engine/tests/integration.rs:2416:9
+    --> crates/argos-engine/tests/integration.rs:2416:9
      |
 2416 |     use serde_json::Value;
      |         ^^^^^^^^^^^^^^^^^
 
 warning: unused variable: `engine`
-    --> crates/xerj-engine/tests/integration.rs:1603:9
+    --> crates/argos-engine/tests/integration.rs:1603:9
      |
 1603 |     let engine = make_engine(&dir);
      |         ^^^^^^ help: if this is intentional, prefix it with an underscore: `_engine`
@@ -353,7 +353,7 @@ warning: unused variable: `engine`
      = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
 
 warning: variable does not need to be mutable
-    --> crates/xerj-engine/tests/integration.rs:2399:9
+    --> crates/argos-engine/tests/integration.rs:2399:9
      |
 2399 |     let mut req = SearchRequest {
      |         ----^^^
@@ -362,11 +362,11 @@ warning: variable does not need to be mutable
      |
      = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
 
-warning: `xerj-engine` (lib test) generated 26 warnings (2 duplicates) (run `cargo fix --lib -p xerj-engine --tests` to apply 5 suggestions)
-warning: `xerj-engine` (test "integration") generated 5 warnings (run `cargo fix --test "integration" -p xerj-engine` to apply 5 suggestions)
-   Compiling xerj-server v0.1.0 (/home/claude/ai/zeebb.ai/engine/crates/xerj-server)
+warning: `argos-engine` (lib test) generated 26 warnings (2 duplicates) (run `cargo fix --lib -p argos-engine --tests` to apply 5 suggestions)
+warning: `argos-engine` (test "integration") generated 5 warnings (run `cargo fix --test "integration" -p argos-engine` to apply 5 suggestions)
+   Compiling argos-server v0.1.0 (/home/claude/ai/zeebb.ai/engine/crates/argos-server)
     Finished `test` profile [unoptimized + debuginfo] target(s) in 5.84s
-     Running unittests src/lib.rs (target/debug/deps/xerj_ai-794f756721cb77cc)
+     Running unittests src/lib.rs (target/debug/deps/argos_ai-794f756721cb77cc)
 
 running 16 tests
 test chunker::tests::chunk_indices_are_sequential ... ok
@@ -388,19 +388,19 @@ test embed::tests::embed_empty_batch_returns_empty ... ok
 
 test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
 
-     Running unittests src/lib.rs (target/debug/deps/xerj_api-341cdca583898203)
+     Running unittests src/lib.rs (target/debug/deps/argos_api-341cdca583898203)
 
 running 0 tests
 
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running unittests src/main.rs (target/debug/deps/xerj_api-06e4305b6744f2dc)
+     Running unittests src/main.rs (target/debug/deps/argos_api-06e4305b6744f2dc)
 
 running 0 tests
 
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running unittests src/lib.rs (target/debug/deps/xerj_cluster-4cb0610f6dba8daf)
+     Running unittests src/lib.rs (target/debug/deps/argos_cluster-4cb0610f6dba8daf)
 
 running 53 tests
 test coordinator::tests::test_coordinator_no_shards ... ok
@@ -512,7 +512,7 @@ test test_cluster_runner_election ... ok
 
 test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.51s
 
-     Running unittests src/lib.rs (target/debug/deps/xerj_common-d937a4ae1c32cdce)
+     Running unittests src/lib.rs (target/debug/deps/argos_common-d937a4ae1c32cdce)
 
 running 23 tests
 test config::tests::count_user_facing_settings ... ok
@@ -541,7 +541,7 @@ test types::tests::schema_field_add_dedup ... ok
 
 test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running unittests src/lib.rs (target/debug/deps/xerj_compress-cc1af660231453ba)
+     Running unittests src/lib.rs (target/debug/deps/argos_compress-cc1af660231453ba)
 
 running 41 tests
 test block::tests::empty_finish_produces_no_bytes ... ok
@@ -588,7 +588,7 @@ test field_codec::tests::test_apache_log_compression_ratios ... ok
 
 test result: ok. 41 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
 
-     Running unittests src/lib.rs (target/debug/deps/xerj_engine-f2cc638c1c9ffe0c)
+     Running unittests src/lib.rs (target/debug/deps/argos_engine-f2cc638c1c9ffe0c)
 
 running 22 tests
 test aggs::tests::test_min_max ... ok

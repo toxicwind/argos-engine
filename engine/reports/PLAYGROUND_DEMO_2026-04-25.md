@@ -1,16 +1,16 @@
-# Xerj Console — the Xerj playground UI
+# Argos Console — the Argos playground UI
 
-**Status (v0.7.0):** shipped, embedded in every xerj binary,
-served at `http://localhost:9200/_xerj-console/`. 36 files / ~520 KiB
+**Status (v0.7.0):** shipped, embedded in every argos binary,
+served at `http://localhost:9200/_argos-console/`. 36 files / ~520 KiB
 of HTML+CSS+JS bundled at compile time via
-`engine/crates/xerj-api/build.rs`.
+`engine/crates/argos-api/build.rs`.
 
-Xerj Console is a **typography-first observability dashboard** that
-runs against the Xerj engine today and is architected so a
+Argos Console is a **typography-first observability dashboard** that
+runs against the Argos engine today and is architected so a
 later release can swap in Kibana / OpenSearch / vanilla ES as
 the data backend without touching dashboard code. The UI gets
-its own product name (Xerj Console) so the brief / website can talk
-about it independently from the engine (Xerj).
+its own product name (Argos Console) so the brief / website can talk
+about it independently from the engine (Argos).
 
 ---
 
@@ -18,12 +18,12 @@ about it independently from the engine (Xerj).
 
 ```bash
 # 1. Download a 0.7.0 binary (or use the one you just built).
-curl -L -o xerj.tar.gz \
-  https://github.com/xerj-ai/xerj/releases/download/v0.7.0/xerj-0.7.0-x86_64-unknown-linux-gnu.tar.gz
-tar xzf xerj.tar.gz && cd xerj-0.7.0-x86_64-unknown-linux-gnu
+curl -L -o argos.tar.gz \
+  https://github.com/argos-ai/argos/releases/download/v0.7.0/argos-0.7.0-x86_64-unknown-linux-gnu.tar.gz
+tar xzf argos.tar.gz && cd argos-0.7.0-x86_64-unknown-linux-gnu
 
 # 2. Start the engine.
-./xerj --insecure --data-dir ./data
+./argos --insecure --data-dir ./data
 ```
 
 ```text
@@ -42,12 +42,12 @@ tar xzf xerj.tar.gz && cd xerj-0.7.0-x86_64-unknown-linux-gnu
  Data dir     ./data
  Started in   3ms
 
- Xerj Console UI    http://localhost:9200/_xerj-console/  (36 files bundled)
+ Argos Console UI    http://localhost:9200/_argos-console/  (36 files bundled)
 ```
 
 ```bash
 # 3. Open the UI.
-open http://localhost:9200/_xerj-console/
+open http://localhost:9200/_argos-console/
 ```
 
 That's it. No Kibana to install, no docker-compose to memorise,
@@ -57,7 +57,7 @@ no `xpack.security.enabled=false` — one binary, one URL.
 
 ## 2. What "typography-first" means
 
-The Xerj Console surface is one nav strip + one canvas, both rendered
+The Argos Console surface is one nav strip + one canvas, both rendered
 in `Big Shoulders Display` for headings and `JetBrains Mono` for
 data. **Every value is visible without hover**: there are no
 charts that demand a tooltip to read, no donut that you can't
@@ -65,7 +65,7 @@ sort, no card with a gradient background that costs you 200 ms
 of paint cycles for no information gain.
 
 ```text
-┌─ XERJ CONSOLE ──────────────────────────────────────────────────────── LIVE · Xerj · http://localhost:9200 ─┐
+┌─ ARGOS CONSOLE ──────────────────────────────────────────────────────── LIVE · Argos · http://localhost:9200 ─┐
 │ OBSERVE   SEARCH   AI   DATA   USERS   SETTINGS                                                       │
 ├───────────────────────────────────────────────────────────────────────────────────────────────────────┤
 │  LOGS · OVERVIEW · LAST 24H                                                                           │
@@ -80,12 +80,12 @@ of paint cycles for no information gain.
 ```
 
 The numbers above are mock; the layout is what every dashboard
-follows. Once xerj holds real logs, the same tile reads from
+follows. Once argos holds real logs, the same tile reads from
 `POST /logs-*/_search` with a `date_histogram` agg.
 
 ---
 
-## 3. The four dashboards wired live to Xerj today
+## 3. The four dashboards wired live to Argos today
 
 ### 3.1 SEARCH · DISCOVER
 
@@ -95,7 +95,7 @@ a structured `field:value` query; pick from 8 query types
 `hybrid`); see the actual ES-compat request body alongside the
 hits.
 
-**What the UI sends to Xerj:**
+**What the UI sends to Argos:**
 ```json
 POST /logs-prod/_search
 {
@@ -110,7 +110,7 @@ POST /logs-prod/_search
 }
 ```
 
-**What Xerj Console renders:**
+**What Argos Console renders:**
 
 ```text
 SEARCH · DISCOVER · index: logs-prod · type: match
@@ -154,12 +154,12 @@ POST /logs-prod/_search
 }
 ```
 
-xerj v0.7.0 ships the executor for both `hybrid` and `semantic`
+argos v0.7.0 ships the executor for both `hybrid` and `semantic`
 — the same query that crashed in v0.6.x now returns RRF-fused
 hits in one round trip. The engine plumbing is in
-`xerj-engine/src/index.rs::run_hybrid` /
+`argos-engine/src/index.rs::run_hybrid` /
 `run_semantic`; the UI surface is in
-`playground/src/data/backends/xerj.js::buildSearchBody`.
+`playground/src/data/backends/argos.js::buildSearchBody`.
 
 ---
 
@@ -174,10 +174,10 @@ GET /_nodes/stats
 GET /_cat/indices?format=json
 ```
 
-**Live response from a fresh xerj:**
+**Live response from a fresh argos:**
 ```json
 {
-  "cluster_name": "xerj",
+  "cluster_name": "argos",
   "status": "green",
   "active_primary_shards": 1,
   "number_of_nodes": 1,
@@ -185,10 +185,10 @@ GET /_cat/indices?format=json
 }
 ```
 
-**Xerj Console surface:**
+**Argos Console surface:**
 
 ```text
-SYSTEM · cluster=xerj · NODE 1 of 1
+SYSTEM · cluster=argos · NODE 1 of 1
 ─────────────────────────────────────────────────────────────────
 STATUS         green
 NODES          1
@@ -209,7 +209,7 @@ logs-prod         green   8       3.4kb    open
 ### 3.3 LOGS · OVERVIEW
 
 Time-series tile + per-level breakdown. The UI sends one
-`date_histogram` request to xerj and the response feeds both
+`date_histogram` request to argos and the response feeds both
 the timeline and the per-level facet.
 
 ```json
@@ -255,7 +255,7 @@ ai-kb          green   40           18.2kb    open
 | Dashboard          | Live adapter? | Mock OK? | Roadmap milestone     |
 |--------------------|--------------:|---------:|-----------------------|
 | ai-overview        | no            | yes      | v0.7.x — agg over `_search?aggs=…` |
-| agent-memory       | no            | yes      | v0.7   — wires to persistent `xerj-ai::memory_store` |
+| agent-memory       | no            | yes      | v0.7   — wires to persistent `argos-ai::memory_store` |
 | vector-index       | no            | yes      | v0.7   — `_admin/segments/fsck` + HNSW stats |
 | rag-quality        | no            | yes      | v0.8   — needs reranker hook |
 | ingest-pipeline    | no            | yes      | v0.8   — once pipeline processors execute |
@@ -265,7 +265,7 @@ ai-kb          green   40           18.2kb    open
 | settings           | partial       | yes      | v0.9   — Config diff against runtime |
 
 The status pill in the nav makes the difference visible at all
-times: `LIVE · Xerj · …` for live, `Xerj: MOCK FALLBACK` for
+times: `LIVE · Argos · …` for live, `Argos: MOCK FALLBACK` for
 a configured-but-unreachable backend, `MOCK DATA` if the user
 explicitly switches to the mock backend in settings.
 
@@ -275,7 +275,7 @@ explicitly switches to the mock backend in settings.
 
 Every dashboard reads from a single `query()` function in
 `playground/src/data/query.js`. `query()` looks up the active
-backend (`xerj` by default, persisted in localStorage) and
+backend (`argos` by default, persisted in localStorage) and
 dispatches to its `search(baseUrl, dashId, ctx, signal)` method.
 
 ```text
@@ -285,7 +285,7 @@ dispatches to its `search(baseUrl, dashId, ctx, signal)` method.
         data/query.js   ← one entry point, always
                 │
                 ▼
-    activeBackend()  →  src/data/backends/xerj.js     (live HTTP)
+    activeBackend()  →  src/data/backends/argos.js     (live HTTP)
                                        /mock.js        (in-memory)
                                        /…              (kibana, vanilla-es later)
 ```
@@ -299,7 +299,7 @@ export async function search(baseUrl, dashId, ctx, signal) { … }  // dashboard
 ```
 
 — and a one-line registration in `backends/index.js`. No
-dashboard touches HTTP directly; switching from Xerj to
+dashboard touches HTTP directly; switching from Argos to
 OpenSearch will be a settings flip, not a code change.
 
 ---
@@ -308,20 +308,20 @@ OpenSearch will be a settings flip, not a code change.
 
 | Commit  | Subject |
 |---------|---------|
-| `9c5ed70` | engine — bundle Xerj Console into the binary, mount at /_xerj-console on both ports |
-| `a867e6c` | playground — rename to Xerj Console + backend abstraction (Xerj live + Mock fallback) |
+| `9c5ed70` | engine — bundle Argos Console into the binary, mount at /_argos-console on both ports |
+| `a867e6c` | playground — rename to Argos Console + backend abstraction (Argos live + Mock fallback) |
 
 Verified:
 
-* `target/release/xerj --insecure` prints
-  `Xerj Console UI    http://localhost:9200/_xerj-console/  (36 files bundled)`.
-* `curl http://localhost:9200/_xerj-console/` returns the playground
+* `target/release/argos --insecure` prints
+  `Argos Console UI    http://localhost:9200/_argos-console/  (36 files bundled)`.
+* `curl http://localhost:9200/_argos-console/` returns the playground
   index HTML.
-* `curl http://localhost:9200/_xerj-console/src/data/query.js` returns
+* `curl http://localhost:9200/_argos-console/src/data/query.js` returns
   the wired query gateway.
 * The bundled-asset count is 36 files / ~520 KiB, embedded via
   `include_bytes!` from `build.rs`.
-* `strings target/release/xerj | grep "Xerj Console · typography"`
+* `strings target/release/argos | grep "Argos Console · typography"`
   matches — proof the bundle is in the binary, not loose on disk.
 
 ---
@@ -334,7 +334,7 @@ Verified:
 2. **Live `agent-memory`** — once the persistent memory store
    from v0.7-P1 is wired, the dashboard reads its segments and
    shows recall-by-recency curves.
-3. **Backend picker in Settings** — UI to switch between Xerj,
+3. **Backend picker in Settings** — UI to switch between Argos,
    ES, OpenSearch, Kibana with a baseURL field per backend. The
    abstraction is in place; the picker is one settings panel.
 4. **One-screen "Hybrid lab"** — type a query, see BM25 hits,

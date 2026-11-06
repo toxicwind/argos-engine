@@ -1,15 +1,15 @@
-SLA Battle Tests against xerj @ localhost:9800
+SLA Battle Tests against argos @ localhost:9800
 Date: Wed Apr 15 09:32:15 PM MDT 2026
 ---
-xerj Battle SLA Test Suite
+argos Battle SLA Test Suite
 Output → /home/claude/ai/zeebb.ai/engine/BATTLE_SLA_RESULTS_2026-04-15_21-32-15.md
 
 [21:32:15] 
 [21:32:15] === BUILD ===
-[21:32:15]   PASS: Binary found: /home/claude/ai/zeebb.ai/engine/target/release/xerj
+[21:32:15]   PASS: Binary found: /home/claude/ai/zeebb.ai/engine/target/release/argos
 [21:32:15] 
 [21:32:15] === SERVER STARTUP ===
-[21:32:15]   CMD : /home/claude/ai/zeebb.ai/engine/target/release/xerj --config /tmp/tmp.tEl8hU5y8b.toml --insecure
+[21:32:15]   CMD : /home/claude/ai/zeebb.ai/engine/target/release/argos --config /tmp/tmp.tEl8hU5y8b.toml --insecure
 [21:32:15]   INFO: PID 616773 — waiting for port 19200...
 
   ██████╗ ███████╗███████╗██████╗ ██████╗ 
@@ -53,7 +53,7 @@ Output → /home/claude/ai/zeebb.ai/engine/BATTLE_SLA_RESULTS_2026-04-15_21-32-1
 [21:32:16]   PASS: 1 000 docs indexed → 200
 [21:32:16]   INFO: RSS after 1 000 docs: 25728 kB (25 MiB)
 [21:32:16]   PASS: RSS 25 MiB < 512 MiB threshold
-[21:32:16]   INFO: Cost delta: xerj self-hosted on 2 GiB VM ≈ $20/month vs Elastic Cloud basic ≈ $95/month/node
+[21:32:16]   INFO: Cost delta: argos self-hosted on 2 GiB VM ≈ $20/month vs Elastic Cloud basic ≈ $95/month/node
 [21:32:16] 
 [21:32:16] === TEST 03 — JVM and Memory (feedback/03) ===
 [21:32:16] Scenario: Measure RSS at startup, after 1 K docs, after 10 K docs
@@ -154,10 +154,10 @@ Output → /home/claude/ai/zeebb.ai/engine/BATTLE_SLA_RESULTS_2026-04-15_21-32-1
 [21:38:14]   INFO: ES: requires PUT /index/_mapping + potential conflicts resolved only via reindex
 [21:38:14] 
 [21:38:15] === TEST 09 — Security (feedback/09) ===
-[21:38:15] Scenario: start xerj WITHOUT --insecure; verify unauthenticated requests are rejected
+[21:38:15] Scenario: start argos WITHOUT --insecure; verify unauthenticated requests are rejected
 [21:38:15] ES comparison: ES 7.x shipped with security OFF by default; 8.x finally enabled it
 [21:38:15] 
-[21:38:15]   CMD : /home/claude/ai/zeebb.ai/engine/target/release/xerj --config /tmp/tmp.HJOD54pWzE.toml  (secure mode — auth enabled, no --insecure)
+[21:38:15]   CMD : /home/claude/ai/zeebb.ai/engine/target/release/argos --config /tmp/tmp.HJOD54pWzE.toml  (secure mode — auth enabled, no --insecure)
 
   ██████╗ ███████╗███████╗██████╗ ██████╗ 
  ╚════██╗██╔════╝██╔════╝██╔══██╗██╔══██╗
@@ -186,10 +186,10 @@ Output → /home/claude/ai/zeebb.ai/engine/BATTLE_SLA_RESULTS_2026-04-15_21-32-1
 [21:38:29]   INFO: Verify against ES: curl http://localhost:9200/_cluster/health (should return 401 on ES 8.x)
 [21:38:29] 
 [21:38:29] === TEST 10 — Documentation and UX (feedback/10) ===
-[21:38:29] Scenario: count user-facing config settings in xerj.default.toml
+[21:38:29] Scenario: count user-facing config settings in argos.default.toml
 [21:38:29] ES comparison: elasticsearch.yml has 3000+ documented properties
 [21:38:29] 
-[21:38:29]   INFO: Total key=value lines in xerj.default.toml: 43
+[21:38:29]   INFO: Total key=value lines in argos.default.toml: 43
 [21:38:29]   PASS: Config has 43 settings (Elasticsearch has 3000+)
 [21:38:29]   INFO: Documentation comment lines: 206
 [21:38:29]   PASS: Every setting has inline documentation (206 comment lines)
@@ -211,7 +211,7 @@ Output → /home/claude/ai/zeebb.ai/engine/BATTLE_SLA_RESULTS_2026-04-15_21-32-1
 [21:38:30]   PASS: KNN latency 6ms < 500ms
 [21:38:30]   CMD : POST http://localhost:19200/vector-test/_analyze  {"analyzer":"standard","text":"Hello World"}
 [21:38:30]   PASS: _analyze returns 2 tokens for 'Hello World'
-[21:38:30]   INFO: xerj supports up to 16 384 dimensions — 4× ES's 4 096 limit
+[21:38:30]   INFO: argos supports up to 16 384 dimensions — 4× ES's 4 096 limit
 [21:38:30]   INFO: ES comparison: PUT /vector-test/_mapping requires explicit mapping before first doc
 [21:38:30] 
 [21:38:30] === TEST 12 — Log Analytics (feedback/12) ===
@@ -261,7 +261,7 @@ Output → /home/claude/ai/zeebb.ai/engine/BATTLE_SLA_RESULTS_2026-04-15_21-32-1
 [21:38:35]   CMD : POST http://localhost:19080/v1/indices/logs-test/explain-plan  {"query":{"match_all":{}}}
 [21:38:35]   PASS: explain-plan endpoint works (no Kibana needed)
 [21:38:35]   INFO: Kibana requires a paid Elastic subscription for production dashboards
-[21:38:35]   INFO: xerj: dashboard summary + SQL + explain-plan are all open, no extra software
+[21:38:35]   INFO: argos: dashboard summary + SQL + explain-plan are all open, no extra software
 [21:38:35] 
 [21:38:35] === SUMMARY ===
 

@@ -1,6 +1,6 @@
-# Code Review — xerj engine, 2026-04-25
+# Code Review — argos engine, 2026-04-25
 
-> A no-bullshit review of the xerj engine in the spirit of Linus
+> A no-bullshit review of the argos engine in the spirit of Linus
 > on the LKML. The codebase ships v0.5.9 today with 1305/1329
 > (98.19%) ES YAML pass rate and 1.55M docs/s ingest. It is also
 > carrying scars from a 671-commit "make-the-test-pass" sprint. If
@@ -12,17 +12,17 @@
 
 | Pri | What | Where | Cost to fix |
 |-----|------|-------|------------|
-| **P0** | `size` param has no cap → 2 GB allocation from one HTTP POST | `xerj-query/src/parser.rs:86` | 2 lines |
-| **P0** | Bool-query recursion has no depth limit → stack overflow DOS | `xerj-query/src/parser.rs` (parse_bool callsites) | 20 lines |
-| **P0** | `mget` accepts unbounded `docs[]` | `xerj-api/src/es_compat.rs:9373` | 5 lines |
-| **P0** | `terms` agg has no `shard_size` cap → OOM on high-cardinality fields | `xerj-engine/src/aggs.rs:5036` | 30 lines |
-| **P1** | HTTP body limit hardcoded 100 MB, not in Config | `xerj-api/src/router.rs:27` | wire to Config |
-| **P1** | `memtable_max_bytes` / `wal_max_size_bytes` defaults bypass Config | `xerj-storage/src/index_store.rs:155` | wire to Config |
-| **P1** | `MEMTABLE_SHARDS=16` is a compile-time const, not runtime | `xerj-storage/src/index_store.rs:176`, `xerj-engine/src/memtable.rs:321` | refactor + ABI break |
-| **P1** | Merge tier sizes hardcoded (5MB/5GB) | `xerj-storage/src/merge.rs:76–77` | wire to Config |
-| **P2** | KNN repeats full segment decode + JSON parse on every query | `xerj-engine/src/index.rs:2168` | segment cache, ~50 lines |
-| **P2** | KNN allocates full memtable doc list when K=10 | `xerj-engine/src/index.rs:2162` | streaming scan |
-| **P2** | Terms agg sorts entire bucket map then truncates | `xerj-engine/src/aggs.rs:7237` | TopK heap |
+| **P0** | `size` param has no cap → 2 GB allocation from one HTTP POST | `argos-query/src/parser.rs:86` | 2 lines |
+| **P0** | Bool-query recursion has no depth limit → stack overflow DOS | `argos-query/src/parser.rs` (parse_bool callsites) | 20 lines |
+| **P0** | `mget` accepts unbounded `docs[]` | `argos-api/src/es_compat.rs:9373` | 5 lines |
+| **P0** | `terms` agg has no `shard_size` cap → OOM on high-cardinality fields | `argos-engine/src/aggs.rs:5036` | 30 lines |
+| **P1** | HTTP body limit hardcoded 100 MB, not in Config | `argos-api/src/router.rs:27` | wire to Config |
+| **P1** | `memtable_max_bytes` / `wal_max_size_bytes` defaults bypass Config | `argos-storage/src/index_store.rs:155` | wire to Config |
+| **P1** | `MEMTABLE_SHARDS=16` is a compile-time const, not runtime | `argos-storage/src/index_store.rs:176`, `argos-engine/src/memtable.rs:321` | refactor + ABI break |
+| **P1** | Merge tier sizes hardcoded (5MB/5GB) | `argos-storage/src/merge.rs:76–77` | wire to Config |
+| **P2** | KNN repeats full segment decode + JSON parse on every query | `argos-engine/src/index.rs:2168` | segment cache, ~50 lines |
+| **P2** | KNN allocates full memtable doc list when K=10 | `argos-engine/src/index.rs:2162` | streaming scan |
+| **P2** | Terms agg sorts entire bucket map then truncates | `argos-engine/src/aggs.rs:7237` | TopK heap |
 
 ## I'm going to be direct about this
 
@@ -45,7 +45,7 @@ hard way; let's not.
 
 ### 1. `size=2_000_000_000` allocates two billion `Hit` structs
 
-`xerj-query/src/parser.rs:86`:
+`argos-query/src/parser.rs:86`:
 
 ```rust
 let size = match obj.get("size") {
@@ -55,7 +55,7 @@ let size = match obj.get("size") {
 ```
 
 That's it. No upper bound. The value flows into
-`xerj-query/src/executor.rs:194`:
+`argos-query/src/executor.rs:194`:
 
 ```rust
 let limit = from + size;
@@ -81,7 +81,7 @@ if from + size > MAX_RESULT_WINDOW { return invalid("from + size exceeds max_res
 
 ### 2. Nested `bool` query has no depth limit → stack overflow
 
-`xerj-query/src/parser.rs` — `parse_bool()` recurses into `parse_query()`
+`argos-query/src/parser.rs` — `parse_bool()` recurses into `parse_query()`
 which recurses back into `parse_bool()`. Default Linux stack is 8 MB; a
 debug build burns it at ~3000 levels of nesting. Release builds last
 longer but blow eventually.
@@ -107,7 +107,7 @@ ES's max is 20 by default; 100 is generous and still safe.
 
 ### 3. `mget` accepts `docs[]` of arbitrary length
 
-`xerj-api/src/es_compat.rs:9373`:
+`argos-api/src/es_compat.rs:9373`:
 
 ```rust
 let mut docs: Vec<Value> = Vec::with_capacity(body.docs.len());
@@ -127,7 +127,7 @@ if body.docs.len() > MAX_MGET_BATCH { return error_response("too many docs in mg
 
 ### 4. `terms` aggregation has no cardinality bound
 
-`xerj-engine/src/aggs.rs:5036` — terms agg accumulates into:
+`argos-engine/src/aggs.rs:5036` — terms agg accumulates into:
 
 ```rust
 let mut bucket_map: HashMap<Vec<String>, Vec<usize>> = HashMap::new();
@@ -149,11 +149,11 @@ discard the rest as they come in. ~30 lines.
 These are not panics, they are not OOM. They are operator-hostility.
 A serious database lets the operator tune memtable size, shard count,
 WAL buffer, body limit, merge thresholds. These are all baked into
-constants in xerj today. Anyone running this on a 4-core dev VM gets
+constants in argos today. Anyone running this on a 4-core dev VM gets
 the same memtable size as someone running it on a 96-core EPYC, and
 neither is right.
 
-### `body_limit_bytes` — `xerj-api/src/router.rs:27`
+### `body_limit_bytes` — `argos-api/src/router.rs:27`
 
 ```rust
 const DEFAULT_BODY_LIMIT_BYTES: usize = 100 * 1024 * 1024;
@@ -163,7 +163,7 @@ Hardcoded 100 MB request body limit. A bulk indexer that streams 200 MB
 NDJSON requests can't even submit them. There is no override. Move to
 `Config.api.body_limit_bytes`, default 100 MB, log on init.
 
-### Memtable + WAL — `xerj-storage/src/index_store.rs:155–156`
+### Memtable + WAL — `argos-storage/src/index_store.rs:155–156`
 
 ```rust
 memtable_max_bytes: 32 * 1024 * 1024,
@@ -171,10 +171,10 @@ wal_max_size_bytes: 128 * 1024 * 1024,
 ```
 
 These show up in `IndexStoreConfig::default()`. There IS a `StorageConfig`
-struct in `xerj-common`. It has these fields. They are not wired through.
+struct in `argos-common`. It has these fields. They are not wired through.
 The defaults always win in production. Pure plumbing fix.
 
-### `MEMTABLE_SHARDS` — `xerj-storage/src/index_store.rs:176` and `xerj-engine/src/memtable.rs:321`
+### `MEMTABLE_SHARDS` — `argos-storage/src/index_store.rs:176` and `argos-engine/src/memtable.rs:321`
 
 ```rust
 pub const MEMTABLE_SHARDS: usize = 16;
@@ -190,7 +190,7 @@ sizing and in `xxh3_64(doc_id) & 15` routing. Touching it means
 turning the static array into a `Box<[Mutex<...>]>` and replacing the
 `& 15` with `% n`. Probably 40–60 lines across both crates. Worth it.
 
-### Merge tier sizes — `xerj-storage/src/merge.rs:76–77`
+### Merge tier sizes — `argos-storage/src/merge.rs:76–77`
 
 ```rust
 tier_floor_bytes: 5 * 1024 * 1024,        // 5 MB
@@ -207,7 +207,7 @@ aggressive merging has no recourse.
 
 ### KNN re-decodes every segment on every query
 
-`xerj-engine/src/index.rs:2168–2196` is a loop over every segment that
+`argos-engine/src/index.rs:2168–2196` is a loop over every segment that
 calls `open_segment()`, decodes the entire stored section (often
 hundreds of MB), parses the JSON with simd_json, and discards the
 result at function exit. The DocValues cache at line 5317 already
@@ -223,9 +223,9 @@ time" to "scan once, then memory access."
 Two egregious cases in the same file:
 
 ```rust
-// xerj-engine/src/index.rs:1731
+// argos-engine/src/index.rs:1731
 match simd_json::serde::from_slice(&mut stored_bytes.to_vec())  // why?
-// xerj-engine/src/index.rs:2181
+// argos-engine/src/index.rs:2181
 if let Ok(docs) = simd_json::serde::from_slice::<Vec<Value>>(&mut stored_bytes.to_vec())
 ```
 
@@ -236,7 +236,7 @@ Two-character fix, big win.
 
 ### Terms agg sorts the whole bucket map
 
-`xerj-engine/src/aggs.rs:7237`:
+`argos-engine/src/aggs.rs:7237`:
 
 ```rust
 let mut sorted: Vec<(String, Vec<usize>)> = bucket_map.into_iter().collect();
@@ -258,7 +258,7 @@ pattern repeats at lines 7357, 7414. Refactor once, fix three places.
 
 ### `.unwrap()` after a guard ten lines up is bad form
 
-There are 600+ `.unwrap()` calls in `xerj-api/src/es_compat.rs` alone.
+There are 600+ `.unwrap()` calls in `argos-api/src/es_compat.rs` alone.
 Most of them are followed by a comment to the effect of "safe because
 of the check above." That works until someone else moves the check or
 inverts the condition. We get a panic in production from a Slack
@@ -269,7 +269,7 @@ have `?` for a reason.
 
 ### `.clone()` is not free, even on `String`
 
-`xerj-engine/src/turbo_ingest.rs:365`:
+`argos-engine/src/turbo_ingest.rs:365`:
 
 ```rust
 self.entries.push((doc_id.to_string(), source.to_vec()));
@@ -282,7 +282,7 @@ allocations, which matters at 1.5M docs/s.
 
 ### `match { ... _ => unreachable!() }` is a future panic
 
-`xerj-engine/src/index.rs:1456` and `xerj-engine/src/aggs.rs:1314`.
+`argos-engine/src/index.rs:1456` and `argos-engine/src/aggs.rs:1314`.
 When someone adds a new `QueryNode` variant or operator, the compiler
 won't tell us — `unreachable!()` will, at runtime, in production. Use
 exhaustive matches or return a typed error. The whole point of Rust's
@@ -303,10 +303,10 @@ I'm not just writing this to complain. The parts that are right:
 - **WAL writer is single-mutex** — the right call for monotonic
   `seq_no` generation. Hold time is short. Don't break this.
 - **Bulk parse path** with parallel NDJSON parsing in
-  `xerj-engine/src/bulk.rs` is well-engineered. The per-index
+  `argos-engine/src/bulk.rs` is well-engineered. The per-index
   serialization that follows it (Finding 18 in the perf audit) is the
   weak link, not the parser.
-- **DocValues cache** at `xerj-engine/src/index.rs:5317` is exactly
+- **DocValues cache** at `argos-engine/src/index.rs:5317` is exactly
   the right pattern for immutable-segment data. Use this template
   for the KNN segment cache.
 

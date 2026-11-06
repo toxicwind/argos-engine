@@ -1,24 +1,24 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/xerj-server",
-    "crates/xerj-common",
-    "crates/xerj-storage",
-    "crates/xerj-fts",
-    "crates/xerj-vector",
-    "crates/xerj-logs",
-    "crates/xerj-query",
-    "crates/xerj-rerank",
-    "crates/xerj-api",
-    "crates/xerj-ai",
-    "crates/xerj-compress",
-    "crates/xerj-engine",
-    "crates/xerj-mcp",
-    "crates/xerj-wasm",
-    "crates/xerj-cluster",
-    "crates/xerj-console-api",
-    "crates/xerj-autoindex",
-    "crates/xerj-hub",
+    "crates/argos-server",
+    "crates/argos-common",
+    "crates/argos-storage",
+    "crates/argos-fts",
+    "crates/argos-vector",
+    "crates/argos-logs",
+    "crates/argos-query",
+    "crates/argos-rerank",
+    "crates/argos-api",
+    "crates/argos-ai",
+    "crates/argos-compress",
+    "crates/argos-engine",
+    "crates/argos-mcp",
+    "crates/argos-wasm",
+    "crates/argos-cluster",
+    "crates/argos-console-api",
+    "crates/argos-autoindex",
+    "crates/argos-hub",
     "tests/es-compat-yaml",
 ]
 
@@ -26,7 +26,7 @@ members = [
 version = "1.0.0-rc.100"
 edition = "2021"
 license = "Apache-2.0"
-authors = ["xerj Contributors"]
+authors = ["argos Contributors"]
 
 [workspace.dependencies]
 # Async runtime
@@ -35,7 +35,7 @@ tokio = { version = "1", features = ["full"] }
 axum = { version = "0.7", features = ["macros"] }
 # `h2` is the HTTP/2 implementation under every listener (hyper for REST +
 # ES-compat, tonic for gRPC) and under `reqwest` on the client side. Nothing in
-# this workspace calls it directly outside the `xerj-server` regression test,
+# this workspace calls it directly outside the `argos-server` regression test,
 # but the floor is declared here on purpose: 0.4.16-0.4.18 size the small-DATA-
 # frame budget (the RUSTSEC-2026-0258 mitigation) at a fixed 25,600 bytes,
 # which a legitimate authenticated request chunked below ~200 bytes exhausts —
@@ -105,7 +105,7 @@ uuid = { version = "1", features = ["v4", "serde"] }
 # requirement, no second TLS implementation in the binary.
 #
 # `sigv4a` is also dropped from the default set: it only signs requests to
-# S3 multi-region access points, which XERJ does not address. Plain SigV4 is
+# S3 multi-region access points, which ARGOS does not address. Plain SigV4 is
 # what R2, MinIO and single-region S3 buckets accept.
 aws-sdk-s3 = { version = "1", default-features = false, features = [
     "rt-tokio",
@@ -226,8 +226,8 @@ strip = false
 # NEVER USE IT FOR: benchmarks, latency numbers, published measurements, or any
 #             artifact that leaves this machine. Those must be --release.
 #
-#   cargo build --profile quick -p xerj-server
-#   cargo test  --profile quick -p xerj-autoindex
+#   cargo build --profile quick -p argos-server
+#   cargo test  --profile quick -p argos-autoindex
 #
 [profile.quick]
 inherits = "release"

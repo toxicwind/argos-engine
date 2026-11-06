@@ -1,0 +1,96 @@
+//! # argos-api
+//!
+//! REST API layer for the argos search engine.
+//!
+//! Exposes **two** HTTP servers from the same binary:
+//!
+//! | Port | API | Description |
+//! |------|-----|-------------|
+//! | 8080 | Native | Clean 12-endpoint argos API |
+//! | 9200 | ES-compatible | Drop-in Elasticsearch 8.x replacement |
+//!
+//! ## Architecture
+//!
+//! ```text
+//! ┌──────────────────────────────────────────────────┐
+//! │                   argos-api                       │
+//! │                                                   │
+//! │  native.rs    ─── build_native_router(:8080)      │
+//! │  es_compat.rs ─── build_es_compat_router(:9200)   │
+//! │                          │                        │
+//! │                    AppState (Arc-shared)           │
+//! │                    ├─ Config                       │
+//! │                    ├─ DashMap<name, IndexHandle>   │
+//! │                    └─ Metrics                      │
+//! └──────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Quick start
+//!
+//! ```no_run
+//! use argos_api::{AppState, router::{build_native_router, build_es_compat_router}};
+//! use argos_common::{Config, metrics::Metrics};
+//! use argos_engine::Engine;
+//!
+//! #[tokio::main]
+//! async fn main() {
+//!     let config = Config::default();
+//!     let engine = Engine::new(config.clone()).unwrap();
+//!     let state = AppState::new(config, engine, Metrics::new().unwrap());
+//!
+//!     let native  = build_native_router(state.clone());
+//!     let es      = build_es_compat_router(state);
+//!
+//!     let native_listener  = tokio::net::TcpListener::bind("0.0.0.0:8080").await.unwrap();
+//!     let es_listener      = tokio::net::TcpListener::bind("0.0.0.0:9200").await.unwrap();
+//!
+//!     tokio::select! {
+//!         _ = axum::serve(native_listener, native) => {}
+//!         _ = axum::serve(es_listener, es)         => {}
+//!     }
+//! }
+//! ```
+//!
+//! **Note:** the `argos-api` binary above runs the engine API only.
+//! The `argos` binary in `argos-server` adds the Argos Console UI on the same
+//! ports via `Router::merge`. Engine API and Argos Console API are decoupled —
+//! argos-api itself does not depend on argos-console-api.
+
+// `ApiError` (~152 B) and axum's `Response` are the crate's standard error
+// types, returned pervasively; a handful of small-`Ok` helpers therefore trip
+// clippy 1.98's `result_large_err`. Boxing these core types is a separate,
+// crate-wide refactor, not a lint fix — suppress the lint here (cf. the
+// crate-level allows in argos-engine and argos-console-api).
+#![allow(clippy::result_large_err)]
+
+pub mod ask_api;
+pub mod audit_mw;
+pub mod auth;
+pub mod authz;
+pub mod binary_protocol;
+pub mod cat;
+pub mod cluster_shard;
+pub mod embed_warning;
+pub mod error;
+pub mod es_compat;
+pub mod extract;
+pub mod graph_api;
+pub mod hub_api;
+pub mod ism_api;
+pub mod judge_stage;
+pub mod memory_api;
+pub mod native;
+pub mod rerank_stage;
+pub mod responses;
+pub mod router;
+pub mod share;
+pub mod state;
+pub mod stub;
+pub mod systemone_api;
+pub mod wal_tap_api;
+
+// ── Convenience re-exports ────────────────────────────────────────────────────
+
+pub use error::ApiError;
+pub use router::{build_es_compat_router, build_es_compat_router_with_hub, build_native_router};
+pub use state::{AppState, IndexHandle, IndexSettings};

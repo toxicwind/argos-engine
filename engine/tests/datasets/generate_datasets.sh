@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# generate_datasets.sh — Generate realistic test datasets for xerj battle testing
+# generate_datasets.sh — Generate realistic test datasets for argos battle testing
 #
 # Produces four NDJSON files:
 #   access_logs.ndjson  — 10 000 web server access log events
@@ -308,7 +308,7 @@ BEGIN {
             stack = ""
         } else if (level == "ERROR") {
             msg = error_msgs[int(rand() * n_error) + 1]
-            stack = sprintf("at %s.handle(Request.java:142)\\n  at com.xerj.%s.Server.run(Server.java:88)", service, service)
+            stack = sprintf("at %s.handle(Request.java:142)\\n  at com.argos.%s.Server.run(Server.java:88)", service, service)
         } else {
             msg = fatal_msgs[int(rand() * n_fatal) + 1]
             stack = sprintf("FATAL in %s\\n  core dumped to /var/crash/%s.core", service, host)

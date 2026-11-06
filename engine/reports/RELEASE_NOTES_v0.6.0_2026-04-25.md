@@ -1,4 +1,4 @@
-# xerj v0.6.0 — release notes
+# argos v0.6.0 — release notes
 
 **Tag:** `v0.6.0`
 **Date:** 2026-04-25
@@ -20,7 +20,7 @@ the v0.5.9 high-water mark, no regressions across multiple runs.
   now get a `400 parse_exception` with the real reason instead of a
   `200 OK` with default `match_all` results. New extractor
   `OptionalJson<T>` migrated all 17 production handlers in
-  `xerj-api/src/es_compat.rs`.
+  `argos-api/src/es_compat.rs`.
 
 * **OOM/DOS hardening.** `from + size` capped at
   `limits.max_result_window` (default 10 000), `_mget` body capped
@@ -35,7 +35,7 @@ the v0.5.9 high-water mark, no regressions across multiple runs.
   knobs are now in `LimitsConfig`/`MergeConfig`:
   `max_body_bytes`, `max_result_window`, `max_mget_docs`,
   `max_buckets`, `tier_floor_mb`, `min_merge_count`,
-  `max_merge_count`. The `XERJ_MAX_MERGE_COUNT` env-var override
+  `max_merge_count`. The `ARGOS_MAX_MERGE_COUNT` env-var override
   was dropped — use `merge.max_merge_count` instead.
 
 * **KNN segment cache.** First brute-force kNN against a segment
@@ -102,20 +102,20 @@ the v0.5.9 high-water mark, no regressions across multiple runs.
 
 | Severity | Item | Where |
 |---|---|---|
-| P0 | `from + size` cap | `xerj-query/src/parser.rs` |
-| P0 | Bool-query depth cap (64) | `xerj-query/src/parser.rs::DepthGuard` |
-| P0 | `_mget` batch cap | `xerj-api/src/es_compat.rs::mget` |
-| P0 | Aggregation `max_buckets` cap | `xerj-engine/src/aggs.rs::MAX_BUCKETS` |
-| P1 | HTTP body limit → Config | `xerj-api/src/router.rs` |
-| P1 | Memtable / WAL sizes already wired (audit corrigendum) | `xerj-engine/src/index.rs::store_config_from` |
+| P0 | `from + size` cap | `argos-query/src/parser.rs` |
+| P0 | Bool-query depth cap (64) | `argos-query/src/parser.rs::DepthGuard` |
+| P0 | `_mget` batch cap | `argos-api/src/es_compat.rs::mget` |
+| P0 | Aggregation `max_buckets` cap | `argos-engine/src/aggs.rs::MAX_BUCKETS` |
+| P1 | HTTP body limit → Config | `argos-api/src/router.rs` |
+| P1 | Memtable / WAL sizes already wired (audit corrigendum) | `argos-engine/src/index.rs::store_config_from` |
 | P1 | `MEMTABLE_SHARDS` runtime config + latent-panic fix | `index_store.rs`, `memtable.rs`, `index.rs` |
-| P1 | Merge tier sizes → Config | `xerj-storage/src/merge.rs`, `xerj-common/src/config.rs::MergeConfig` |
-| P2 | KNN segment cache | `xerj-engine/src/index.rs::stored_values_for` |
-| P2 | Drop `to_vec()` on stored buffers (5 sites) | `xerj-engine/src/index.rs` |
-| P2 | TopK partial-sort for terms-style aggs | `xerj-engine/src/aggs.rs` (3 sites) |
-| P2 | Strict body extractor (no silent drop) | `xerj-api/src/extract.rs` (new), 17 callsites |
-| P2 | Bound `request_cache_seen` (FIFO) | `xerj-engine/src/index.rs::RequestCacheSeen` |
-| P2 | Drop `to_vec()` on bulk action/doc lines (3 sites) | `xerj-engine/src/bulk.rs` |
+| P1 | Merge tier sizes → Config | `argos-storage/src/merge.rs`, `argos-common/src/config.rs::MergeConfig` |
+| P2 | KNN segment cache | `argos-engine/src/index.rs::stored_values_for` |
+| P2 | Drop `to_vec()` on stored buffers (5 sites) | `argos-engine/src/index.rs` |
+| P2 | TopK partial-sort for terms-style aggs | `argos-engine/src/aggs.rs` (3 sites) |
+| P2 | Strict body extractor (no silent drop) | `argos-api/src/extract.rs` (new), 17 callsites |
+| P2 | Bound `request_cache_seen` (FIFO) | `argos-engine/src/index.rs::RequestCacheSeen` |
+| P2 | Drop `to_vec()` on bulk action/doc lines (3 sites) | `argos-engine/src/bulk.rs` |
 | P2 | Production-path panic audit (5 unwrap sites + 1 unreachable) | various |
 
 ## Known unfixed (still failing ES YAML)
@@ -149,7 +149,7 @@ Binary releases for 8 targets are produced by the
 * `x86_64-pc-windows-msvc`
 * `aarch64-pc-windows-msvc`
 
-Source: `cargo build --release -p xerj-server` from `engine/`.
+Source: `cargo build --release -p argos-server` from `engine/`.
 
 ## Upgrade notes
 
@@ -174,5 +174,5 @@ max_merge_count    = 16
 # `max_segment_mb` default raised 5120 → 8192 to match historical hardcoded behaviour
 ```
 
-If you previously set `XERJ_MAX_MERGE_COUNT`, move that value into
+If you previously set `ARGOS_MAX_MERGE_COUNT`, move that value into
 `merge.max_merge_count` — the env-var override is gone.

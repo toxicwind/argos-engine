@@ -1,6 +1,6 @@
 #!/bin/bash
 # ═══════════════════════════════════════════════════════════════════════
-# REAL BATTLE TEST — Elasticsearch 8.13 vs xerj 0.1.0
+# REAL BATTLE TEST — Elasticsearch 8.13 vs argos 0.1.0
 # Runs the SAME commands against both servers, compares results
 # ═══════════════════════════════════════════════════════════════════════
 set -uo pipefail
@@ -16,18 +16,18 @@ ts()   { date +%H:%M:%S.%N | cut -c1-12; }
 pass() { PASS=$((PASS+1)); TOTAL=$((TOTAL+1)); log "  [$(ts)] PASS: $1"; }
 fail() { FAIL=$((FAIL+1)); TOTAL=$((TOTAL+1)); log "  [$(ts)] FAIL: $1"; }
 
-# Compare a value between ES and xerj
+# Compare a value between ES and argos
 compare_time() {
   local name="$1" es_ms="$2" zb_ms="$3"
   if [ "$es_ms" -lt "$zb_ms" ]; then
     ES_WIN=$((ES_WIN+1))
-    log "  $name: ES=${es_ms}ms  xerj=${zb_ms}ms  → ES wins"
+    log "  $name: ES=${es_ms}ms  argos=${zb_ms}ms  → ES wins"
   elif [ "$zb_ms" -lt "$es_ms" ]; then
     ZB_WIN=$((ZB_WIN+1))
-    log "  $name: ES=${es_ms}ms  xerj=${zb_ms}ms  → xerj wins"
+    log "  $name: ES=${es_ms}ms  argos=${zb_ms}ms  → argos wins"
   else
     TIE=$((TIE+1))
-    log "  $name: ES=${es_ms}ms  xerj=${zb_ms}ms  → Tie"
+    log "  $name: ES=${es_ms}ms  argos=${zb_ms}ms  → Tie"
   fi
 }
 
@@ -41,14 +41,14 @@ time_curl() {
 # Check both servers are up
 check_servers() {
   curl -sf "$ES/" > /dev/null 2>&1 || { echo "ERROR: ES not running on $ES"; exit 1; }
-  curl -sf "$ZB/" > /dev/null 2>&1 || { echo "ERROR: xerj not running on $ZB"; exit 1; }
+  curl -sf "$ZB/" > /dev/null 2>&1 || { echo "ERROR: argos not running on $ZB"; exit 1; }
   log "Both servers confirmed running"
 }
 
 # ═══════════════════════════════════════════════════════════════
-log "# REAL BATTLE TEST — ES 8.13 vs xerj 0.1.0"
+log "# REAL BATTLE TEST — ES 8.13 vs argos 0.1.0"
 log "# $(date)"
-log "# ES: $ES | xerj: $ZB"
+log "# ES: $ES | argos: $ZB"
 log ""
 check_servers
 
@@ -201,7 +201,7 @@ log ""
 
 ES_HEALTH=$(curl -sf "$ES/_cluster/health" | python3 -c "import sys,json; print(json.load(sys.stdin)['status'])" 2>/dev/null)
 ZB_HEALTH=$(curl -sf "$ZB/_cluster/health" | python3 -c "import sys,json; print(json.load(sys.stdin)['status'])" 2>/dev/null)
-pass "ES health=$ES_HEALTH, xerj health=$ZB_HEALTH"
+pass "ES health=$ES_HEALTH, argos health=$ZB_HEALTH"
 
 log ""
 
@@ -231,12 +231,12 @@ log "## 12. MEMORY COMPARISON"
 log ""
 
 ES_PID=$(pgrep -f "org.elasticsearch" | head -1)
-ZB_PID=$(pgrep -f "target/release/xerj" | head -1)
+ZB_PID=$(pgrep -f "target/release/argos" | head -1)
 ES_RSS=$(($(ps -o rss= -p $ES_PID 2>/dev/null | tr -d ' ') / 1024))
 ZB_RSS=$(($(ps -o rss= -p $ZB_PID 2>/dev/null | tr -d ' ') / 1024))
 log "  ES RSS:    ${ES_RSS} MB"
-log "  xerj RSS: ${ZB_RSS} MB"
-log "  Ratio:     $((ES_RSS / (ZB_RSS + 1)))x less memory for xerj"
+log "  argos RSS: ${ZB_RSS} MB"
+log "  Ratio:     $((ES_RSS / (ZB_RSS + 1)))x less memory for argos"
 
 log ""
 
@@ -259,7 +259,7 @@ log "| Total tests | $TOTAL |"
 log "| Pass | $PASS |"
 log "| Fail | $FAIL |"
 log "| ES perf wins | $ES_WIN |"
-log "| xerj perf wins | $ZB_WIN |"
+log "| argos perf wins | $ZB_WIN |"
 log "| Perf ties | $TIE |"
 log ""
 log "Results saved to: $LOG"

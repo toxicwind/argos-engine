@@ -10,7 +10,7 @@ is included in this branch.
 - Upstream base: `16d6df0`
 - Probe source SHA-256:
   `86326cab5a4e2f7f2fb141d081855ac8ba790a3403f9103a973732a19c109953`
-- Probe: `crates/xerj-storage/examples/stored_projection_probe.rs`
+- Probe: `crates/argos-storage/examples/stored_projection_probe.rs`
 - Rust: `rustc 1.97.1 (8bab26f4f 2026-07-14)`, LLVM 22.1.6
 - Host: x86-64 Linux 6.12.95, 62.8 GiB RAM, no swap
 - Build: release profile; no workspace-wide build and no `cargo clean`
@@ -18,7 +18,7 @@ is included in this branch.
 Exact commands, from `engine/`:
 
 ```sh
-cargo build --release -j 32 -p xerj-storage --example stored_projection_probe
+cargo build --release -j 32 -p argos-storage --example stored_projection_probe
 probe=target/release/examples/stored_projection_probe
 fixture=/workspace/.tmp/stored-decode-probe/finance-stream-final.zbs2
 "$probe" generate "$fixture" 20000
@@ -107,10 +107,10 @@ measured.
 ## Verification
 
 ```text
-cargo test -p xerj-storage --lib
+cargo test -p argos-storage --lib
 122 passed; 0 failed; 0 ignored
 
-cargo clippy -p xerj-storage --all-targets -- -D warnings
+cargo clippy -p argos-storage --all-targets -- -D warnings
 passed
 
 cargo fmt --all --check

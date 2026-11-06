@@ -29,11 +29,11 @@ strace `-c -f` on the 20M ingest path showed:
    (nanosleep) instead of `tokio::time::sleep`.
 
 Files:
-- `engine/crates/xerj-engine/src/index.rs` — new `SyncFlushCoord`,
+- `engine/crates/argos-engine/src/index.rs` — new `SyncFlushCoord`,
   `index_batch_sync_raw`, `try_spawn_sync_flush`, field on `Index`
-- `engine/crates/xerj-engine/src/memtable.rs` — `shard_load(shard_idx)`
+- `engine/crates/argos-engine/src/memtable.rs` — `shard_load(shard_idx)`
   single-shard accessor
-- `engine/crates/xerj-server/src/main.rs` — rayon scanner loop rewritten;
+- `engine/crates/argos-server/src/main.rs` — rayon scanner loop rewritten;
   deleted `submit_batch` async helper and `rt_handle.block_on` crossings
 
 ## Results (20M nginx ingest, 32 workers, batch=10 000, ingest_shards=16 default)

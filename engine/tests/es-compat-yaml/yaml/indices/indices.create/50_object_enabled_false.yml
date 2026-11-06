@@ -1,10 +1,10 @@
 ---
 # `"enabled": false` on an object: the subtree is kept in `_source` but is
 # neither parsed into the mapping nor indexed, and a non-object value is
-# accepted. XERJ-authored case (ES semantics: docs `enabled.html`).
+# accepted. ARGOS-authored case (ES semantics: docs `enabled.html`).
 "enabled false object is stored but not mapped or indexed":
   - skip:
-      awaits_fix: "XERJ maps and indexes the contents of an enabled:false object (fix follows in fix/es-object-enabled-false)"
+      awaits_fix: "ARGOS maps and indexes the contents of an enabled:false object (fix follows in fix/es-object-enabled-false)"
   - do:
       indices.create:
         index: test_enabled_false
@@ -73,7 +73,7 @@
 ---
 "enabled false on the whole mapping stores documents without indexing them":
   - skip:
-      awaits_fix: "XERJ maps and indexes the contents of an enabled:false object (fix follows in fix/es-object-enabled-false)"
+      awaits_fix: "ARGOS maps and indexes the contents of an enabled:false object (fix follows in fix/es-object-enabled-false)"
   - do:
       indices.create:
         index: test_enabled_false_root

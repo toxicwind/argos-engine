@@ -1,0 +1,6342 @@
+[
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": ".cargo/audit.toml"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": ".cargo/audit.toml"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "CHANGELOG-rc6.md"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "Cargo.lock"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "Cargo.toml"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "Cargo.toml"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "Dockerfile"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "Dockerfile"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "README.md"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "README.md"
+  },
+  {
+    "from": "xerj-",
+    "to": "argos-",
+    "file": "README.md"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "README.md"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "README.md"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-ai/Cargo.toml"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-ai/examples/neural_throughput.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-ai/examples/neural_throughput.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-ai/examples/neural_throughput.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-ai/examples/onnx_experimental.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-ai/examples/onnx_experimental.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-ai/src/chunker.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-ai/src/decide.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-ai/src/embed.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-ai/src/embedder.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-ai/src/embedder.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-ai/src/embedder.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-ai/src/lib.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-ai/src/lib.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-ai/src/lib.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-ai/src/local.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-ai/src/neural.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-ai/src/neural.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-ai/src/neural.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-ai/src/onnx.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-ai/src/onnx.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-ai/src/onnx.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-api/Cargo.toml"
+  },
+  {
+    "from": "Xerj",
+    "to": "Argos",
+    "file": "crates/xerj-api/Cargo.toml"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/Cargo.toml"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-api/examples/binary_bulk_throughput.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/examples/binary_bulk_throughput.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-api/examples/binary_bulk_throughput.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-api/src/ask_api.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/src/ask_api.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-api/src/audit_mw.rs"
+  },
+  {
+    "from": "xerj-",
+    "to": "argos-",
+    "file": "crates/xerj-api/src/audit_mw.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/src/audit_mw.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-api/src/auth.rs"
+  },
+  {
+    "from": "Xerj",
+    "to": "Argos",
+    "file": "crates/xerj-api/src/auth.rs"
+  },
+  {
+    "from": "xerj-",
+    "to": "argos-",
+    "file": "crates/xerj-api/src/auth.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/src/auth.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-api/src/auth.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-api/src/authz.rs"
+  },
+  {
+    "from": "xerj-",
+    "to": "argos-",
+    "file": "crates/xerj-api/src/authz.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/src/authz.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-api/src/binary_protocol.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/src/binary_protocol.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/src/cat.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/src/cluster_shard.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-api/src/embed_warning.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-api/src/error.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/src/error.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-api/src/es_compat.rs"
+  },
+  {
+    "from": "Xerj",
+    "to": "Argos",
+    "file": "crates/xerj-api/src/es_compat.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-api/src/es_compat.rs"
+  },
+  {
+    "from": "xerj-",
+    "to": "argos-",
+    "file": "crates/xerj-api/src/es_compat.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/src/es_compat.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-api/src/es_compat.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-api/src/graph_api.rs"
+  },
+  {
+    "from": "xerj-",
+    "to": "argos-",
+    "file": "crates/xerj-api/src/graph_api.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/src/graph_api.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-api/src/hub_api.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/src/hub_api.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-api/src/ism_api.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/src/ism_api.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-api/src/judge_stage.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/src/judge_stage.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-api/src/judge_stage.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-api/src/lib.rs"
+  },
+  {
+    "from": "Xerj",
+    "to": "Argos",
+    "file": "crates/xerj-api/src/lib.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/src/lib.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-api/src/main.rs"
+  },
+  {
+    "from": "Xerj",
+    "to": "Argos",
+    "file": "crates/xerj-api/src/main.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/src/main.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-api/src/memory_api.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-api/src/memory_api.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/src/memory_api.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-api/src/native.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/src/native.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-api/src/rerank_stage.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-api/src/rerank_stage.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/src/rerank_stage.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-api/src/responses.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-api/src/responses.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/src/responses.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-api/src/router.rs"
+  },
+  {
+    "from": "Xerj",
+    "to": "Argos",
+    "file": "crates/xerj-api/src/router.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-api/src/router.rs"
+  },
+  {
+    "from": "xerj-",
+    "to": "argos-",
+    "file": "crates/xerj-api/src/router.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/src/router.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-api/src/share.rs"
+  },
+  {
+    "from": "xerj-",
+    "to": "argos-",
+    "file": "crates/xerj-api/src/share.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/src/share.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-api/src/state.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/src/state.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-api/src/state.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-api/src/stub.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-api/src/systemone_api.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-api/src/systemone_api.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/src/systemone_api.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-api/src/systemone_api.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-api/src/wal_tap_api.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/src/wal_tap_api.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/alias_filter_survives_restart.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/alias_is_a_valid_selector_for_maintenance_ops.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/alias_multi_index_reads.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/alias_write_routing.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/analysis_is_reported_as_in_force.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-api/tests/api_key_secrets_are_hashed_at_rest.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/api_key_secrets_are_hashed_at_rest.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/ask_endpoint.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/audit_records_writes_and_who.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-api/tests/autoindex_changed_file_drops_stale_symbols.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/autoindex_changed_file_drops_stale_symbols.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-api/tests/autoindex_html_inline_script.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/autoindex_html_inline_script.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-api/tests/body_named_index_bypasses.rs"
+  },
+  {
+    "from": "xerj-",
+    "to": "argos-",
+    "file": "crates/xerj-api/tests/body_named_index_bypasses.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/body_named_index_bypasses.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-api/tests/brain_is_a_security_boundary.rs"
+  },
+  {
+    "from": "xerj-",
+    "to": "argos-",
+    "file": "crates/xerj-api/tests/brain_is_a_security_boundary.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/brain_is_a_security_boundary.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/by_query_through_alias_touches_every_member.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/cache_clear_releases_memory.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-api/tests/cat_common_params_and_real_segments.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/cat_common_params_and_real_segments.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/cat_segments_through_alias_lists_every_member.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/close_frees_memory.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/cluster_metadata_replicates.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-api/tests/cluster_metadata_survives_restart.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-api/tests/cluster_metadata_survives_restart.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/cluster_metadata_survives_restart.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/cluster_settings_merge.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/collapse_inner_hits_no_companion_leak.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/collapse_inner_hits_seqno_is_real.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/collapse_inner_hits_under_source_includes.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/collapse_scroll_page_parity.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/collapse_scroll_snapshot_version_torn_read.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/collapse_scroll_source_false_repro.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-api/tests/corrupt_index_http.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/corrupt_index_http.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/count_agrees_with_search.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/count_honours_min_score.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/creation_date_is_persisted.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/decide_calibration.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/decide_flywheel.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/default_pipeline_survives_restart.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/delete_by_query_purges_entire_index.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/destructive_requires_name.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/enrich_execute_copies_entire_index.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/eql_through_alias_sees_every_member.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/explain_through_alias_finds_the_member.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-api/tests/fail_closed_config_http.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/fail_closed_config_http.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-api/tests/failed_index_is_visible_and_actionable.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-api/tests/failed_index_is_visible_and_actionable.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/failed_index_is_visible_and_actionable.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-api/tests/fields_pierce_default_source.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/fields_pierce_default_source.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/fields_pierce_explicit_source_includes.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-api/tests/file_card_excluded_from_count.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/file_card_excluded_from_count.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/filtered_alias_by_query_deletes_only_its_slice.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/filtered_alias_filter_applies_on_msearch.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-api/tests/flood_stage_allocation.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/flood_stage_allocation.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-api/tests/highlight_field_patterns.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/highlight_field_patterns.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/highlight_fields_array_form.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-api/tests/hub_api.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/hub_api.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-api/tests/hub_api.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/hybrid_bool_filter_applied.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/ilm_safety_rails.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/index_blocks_http.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-api/tests/index_false_is_honoured.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/index_false_is_honoured.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/index_name_date_math_is_total.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/index_pattern_mid_wildcard.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/index_segments_through_alias_lists_every_member.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-api/tests/index_template_applies_semantic_text.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/index_template_applies_semantic_text.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-api/tests/judge_stage_http.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/judge_stage_http.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-api/tests/knn_beside_query_with_aggs_stays_200.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/knn_beside_query_with_aggs_stays_200.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-api/tests/knn_on_missing_field_400s.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/knn_on_missing_field_400s.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-api/tests/live/share_security_live.py"
+  },
+  {
+    "from": "xerj-",
+    "to": "argos-",
+    "file": "crates/xerj-api/tests/live/share_security_live.py"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/live/share_security_live.py"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-api/tests/live/share_security_live.py"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-api/tests/llms_field_report_section.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/llms_field_report_section.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-api/tests/llms_field_report_section.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-api/tests/memtable_budget_autoindex.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/memtable_budget_autoindex.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/metrics_gauges_refresh_at_scrape_time.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/mget_through_alias_sees_every_member.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-api/tests/ml_datafeed_cannot_read_a_brain.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/ml_datafeed_cannot_read_a_brain.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/msearch_highlight.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-api/tests/msearch_reports_top_level_took.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/msearch_reports_top_level_took.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/msearch_wildcard_index.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/nested_vector_clause_in_bool_not_dropped.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-api/tests/non_numeric_value_on_numeric_field_400s.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/non_numeric_value_on_numeric_field_400s.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-api/tests/numeric_fields_enforce_their_type.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/numeric_fields_enforce_their_type.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/post_aliases_filter_is_stored_and_enforced.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-api/tests/proxy_semantic_autoindex_resumes.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/proxy_semantic_autoindex_resumes.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-api/tests/quantization_is_honoured_or_refused.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-api/tests/quantization_is_honoured_or_refused.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/quantization_is_honoured_or_refused.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-api/tests/readme_data_dir.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/refresh_reports_flush_failure.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-api/tests/reindex_preserves_generated_vectors.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/reindex_preserves_generated_vectors.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-api/tests/rerank_stage_http.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/rerank_stage_http.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-api/tests/savings_stat_is_honest.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/savings_stat_is_honest.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-api/tests/scoped_keys_get_intact_responses.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/scoped_keys_get_intact_responses.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/script_cpu_budget_http.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/script_limits_http.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/script_limits_remaining_surfaces_http.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/scroll_alias_multi_index_cap.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/scroll_multi_index_identity.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/scroll_seq_no_torn_read.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-api/tests/scroll_snapshot_cap_is_documented.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-api/tests/scroll_snapshot_cap_is_documented.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/scroll_snapshot_cap_is_documented.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/scroll_source_suppression_parity.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/search_scroll_firstpage_versioning.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/search_scroll_route_source_suppression.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/semantic_on_non_semantic_text_400s.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/semantic_text_highlight.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/share_links_review_findings.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/significant_text_profile_counts_every_doc.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-api/tests/snapshot_is_not_a_way_around_a_brain.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/snapshot_is_not_a_way_around_a_brain.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-api/tests/sort_on_unresolvable_field_http.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/sort_on_unresolvable_field_http.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/sq8_codebook_follows_the_corpus.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/sq8_codes_are_ingest_time_and_filter_independent.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/sq8_codes_follow_document_updates.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-api/tests/systemone_http.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-api/tests/systemone_http.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/systemone_http.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-api/tests/systemone_local_decide.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/systemone_local_decide.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-api/tests/systemone_local_decide.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/terms_order_path_resolution.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/update_by_query_updates_entire_index.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/validate_query_matches_search.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-api/tests/wal_tap_retention_floor_is_applied.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-api/tests/wal_tap_retention_floor_is_applied.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/Cargo.toml"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-autoindex/Cargo.toml"
+  },
+  {
+    "from": ".xerj",
+    "to": ".argos",
+    "file": "crates/xerj-autoindex/Cargo.toml"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/budget.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-autoindex/src/budget.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/catalog.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-autoindex/src/catalog.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/cli.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-autoindex/src/cli.rs"
+  },
+  {
+    "from": "xerj-",
+    "to": "argos-",
+    "file": "crates/xerj-autoindex/src/cli.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-autoindex/src/cli.rs"
+  },
+  {
+    "from": ".xerj",
+    "to": ".argos",
+    "file": "crates/xerj-autoindex/src/cli.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-autoindex/src/cli.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/content.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-autoindex/src/content.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/dataless.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/dataset.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-autoindex/src/dataset.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/def.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-autoindex/src/def.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-autoindex/src/def.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-autoindex/src/def.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/detect/cratecite.rs"
+  },
+  {
+    "from": "xerj-",
+    "to": "argos-",
+    "file": "crates/xerj-autoindex/src/detect/cratecite.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-autoindex/src/detect/cratecite.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/detect/e2e.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-autoindex/src/detect/e2e.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/detect/e2e_mail.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-autoindex/src/detect/e2e_mail.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/detect/mod.rs"
+  },
+  {
+    "from": "xerj-",
+    "to": "argos-",
+    "file": "crates/xerj-autoindex/src/detect/mod.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/detect/pathcite.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/esclient.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-autoindex/src/esclient.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-autoindex/src/esclient.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-autoindex/src/esclient.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/extract/bvh.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/extract/code.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-autoindex/src/extract/code.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-autoindex/src/extract/code.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/extract/eml.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/extract/json.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-autoindex/src/extract/json.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-autoindex/src/extract/jsonl.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/extract/mbox.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-autoindex/src/extract/mbox.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/extract/mod.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-autoindex/src/extract/mod.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/extract/pdf.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-autoindex/src/extract/pdf.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-autoindex/src/extract/pdf.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/extract/sqldump.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/extract/txt.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/extract/unity.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/extract/xls.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-autoindex/src/extract/xls.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-autoindex/src/extract/xls.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/extract/yaml_x.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/failure_resume_http_tests.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-autoindex/src/failure_resume_http_tests.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-autoindex/src/failure_resume_http_tests.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/feedback.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-autoindex/src/feedback.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-autoindex/src/feedback.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-autoindex/src/feedback.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/flood.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-autoindex/src/flood.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/gain.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-autoindex/src/gain.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-autoindex/src/gain.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-autoindex/src/gain.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/gate.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-autoindex/src/gate.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/harvest/identity.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-autoindex/src/harvest/identity.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/harvest/mod.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-autoindex/src/harvest/mod.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/harvest/pack.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/harvest/recipe.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-autoindex/src/harvest/recipe.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/harvest/sign.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/harvest/store.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-autoindex/src/harvest/suggest.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-autoindex/src/harvest/suggest.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/ignore_rules.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-autoindex/src/ignore_rules.rs"
+  },
+  {
+    "from": ".xerj",
+    "to": ".argos",
+    "file": "crates/xerj-autoindex/src/ignore_rules.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/incremental_reconcile_http_tests.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-autoindex/src/incremental_reconcile_http_tests.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/infer/mod.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/init.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-autoindex/src/init.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-autoindex/src/init.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-autoindex/src/init.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/label.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/label_http_tests.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-autoindex/src/label_http_tests.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/lib.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-autoindex/src/lib.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-autoindex/src/lib.rs"
+  },
+  {
+    "from": ".xerj",
+    "to": ".argos",
+    "file": "crates/xerj-autoindex/src/lib.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-autoindex/src/lib.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/memory_cli.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-autoindex/src/memory_cli.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-autoindex/src/memory_cli.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-autoindex/src/memory_cli.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/neural_cost.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/objsource.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-autoindex/src/objsource.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-autoindex/src/objsource.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/objsource_minio_tests.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-autoindex/src/objsource_minio_tests.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-autoindex/src/objsource_minio_tests.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-autoindex/src/objsource_minio_tests.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-autoindex/src/objsource_s3_tests.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-autoindex/src/objsource_s3_tests.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/objwatch/cost.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/objwatch/journal.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-autoindex/src/objwatch/journal.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/objwatch/mod.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-autoindex/src/objwatch/mod.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/objwatch/run.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/objwatch/s3.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/objwatch/tests.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/pool.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-autoindex/src/pool.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/progress.rs"
+  },
+  {
+    "from": "xerj-",
+    "to": "argos-",
+    "file": "crates/xerj-autoindex/src/progress.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-autoindex/src/progress.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-autoindex/src/progress.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/reconcile_plan.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/remove.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-autoindex/src/remove.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-autoindex/src/resources.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-autoindex/src/resources.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/search.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-autoindex/src/search.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-autoindex/src/search.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-autoindex/src/search.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/sessions.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-autoindex/src/sessions.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/sniff.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/source.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-autoindex/src/source.rs"
+  },
+  {
+    "from": ".xerj",
+    "to": ".argos",
+    "file": "crates/xerj-autoindex/src/source.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/staleness.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-autoindex/src/staleness.rs"
+  },
+  {
+    "from": ".xerj",
+    "to": ".argos",
+    "file": "crates/xerj-autoindex/src/staleness.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/state.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-autoindex/src/state.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/sync_executor.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-autoindex/src/sync_executor.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-autoindex/src/sync_executor.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/walk.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-autoindex/src/walk.rs"
+  },
+  {
+    "from": ".xerj",
+    "to": ".argos",
+    "file": "crates/xerj-autoindex/src/walk.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/watch.rs"
+  },
+  {
+    "from": ".xerj",
+    "to": ".argos",
+    "file": "crates/xerj-autoindex/src/watch.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/src/xc.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-autoindex/src/xc.rs"
+  },
+  {
+    "from": ".xerj",
+    "to": ".argos",
+    "file": "crates/xerj-autoindex/src/xc.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-autoindex/src/xc.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/tests/feedback_offline.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-autoindex/tests/feedback_offline.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-autoindex/tests/feedback_offline.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/tests/field_report_surfaces.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-autoindex/tests/field_report_surfaces.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-autoindex/tests/field_report_surfaces.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-autoindex/tests/field_report_surfaces.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-autoindex/tests/follow_symlinks_boundary.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-autoindex/tests/journal_lock_inheritance.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/tests/objwatch_minio.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-autoindex/tests/objwatch_minio.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-autoindex/tests/objwatch_minio.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/tests/objwatch_r2.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-autoindex/tests/objwatch_r2.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-autoindex/tests/objwatch_r2.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-autoindex/tests/pack_claims.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-autoindex/tests/pack_claims.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/tests/scan_pool_width.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-autoindex/tests/scan_pool_width.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/tests/sniff_printable_magic.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-autoindex/tests/sniff_printable_magic.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-autoindex/tests/xls_isolation.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-autoindex/tests/xls_isolation.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-autoindex/tests/xls_isolation.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-cluster/Cargo.toml"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-cluster/src/auth.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-cluster/src/auth.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-cluster/src/coordinator.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-cluster/src/lib.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-cluster/src/lib.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-cluster/src/raft_log.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-cluster/src/runner.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-cluster/src/shard.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-cluster/src/shard.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-cluster/src/transport.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-cluster/tests/log_catchup.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-cluster/tests/metadata_proposal.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-cluster/tests/persistent_raft_test.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-cluster/tests/region_tests.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-cluster/tests/replication_tests.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-cluster/tests/transport_auth_tests.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-cluster/tests/transport_tests.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-common/Cargo.toml"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-common/src/argv.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-common/src/code_query.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-common/src/code_query.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-common/src/config.rs"
+  },
+  {
+    "from": "Xerj",
+    "to": "Argos",
+    "file": "crates/xerj-common/src/config.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-common/src/config.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-common/src/config.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-common/src/config.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-common/src/corpus_feedback.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-common/src/corpus_feedback.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-common/src/corpus_feedback.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-common/src/error.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-common/src/error.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-common/src/feedback.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-common/src/feedback.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-common/src/feedback.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-common/src/feedback.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-common/src/field_coercion.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-common/src/field_coercion.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-common/src/field_coercion.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-common/src/field_report.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-common/src/field_report.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-common/src/field_report.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-common/src/fsio.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-common/src/fsio.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-common/src/home.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-common/src/hub.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-common/src/hub.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-common/src/hub.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-common/src/lib.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-common/src/lib.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-common/src/localauth.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-common/src/localauth.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-common/src/localauth.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-common/src/metrics.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-common/src/metrics.rs"
+  },
+  {
+    "from": "Xerj",
+    "to": "Argos",
+    "file": "crates/xerj-common/src/net.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-common/src/packed_f32.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-common/src/resource.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-common/src/resource.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-common/src/resource.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-common/src/schema.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-common/src/thread_spawn.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-common/src/types.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-common/src/types.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-common/src/xccode/fields.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-common/src/xccode/licence.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-common/src/xccode/manifest.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-common/src/xccode/mod.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-common/src/xccode/mod.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-common/src/xccode/passage.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-common/src/xccode/passage.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-common/src/xccode/pathgate.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-common/src/xccode/render.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-common/src/xccode/render.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-common/src/xccode/state.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-common/src/xccode/state.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-common/tests/macos_memory_probe.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-common/tests/memory_relief_spawn_at_watermark.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-common/tests/memory_relief_spawn_at_watermark.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-common/tests/windows_install_path.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-common/tests/windows_install_path.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-compress/Cargo.toml"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-compress/src/block.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-compress/src/codec.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-compress/src/dictionary.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-compress/src/field_codec.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-compress/src/field_codec.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-compress/src/lib.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-compress/src/lib.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-console-api/Cargo.toml"
+  },
+  {
+    "from": "Xerj",
+    "to": "Argos",
+    "file": "crates/xerj-console-api/Cargo.toml"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-console-api/build.rs"
+  },
+  {
+    "from": "Xerj",
+    "to": "Argos",
+    "file": "crates/xerj-console-api/build.rs"
+  },
+  {
+    "from": "xerj-",
+    "to": "argos-",
+    "file": "crates/xerj-console-api/build.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-console-api/build.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-console-api/build.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-console-api/src/auth/audit.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-console-api/src/auth/login.rs"
+  },
+  {
+    "from": "xerj-",
+    "to": "argos-",
+    "file": "crates/xerj-console-api/src/auth/magic.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-console-api/src/auth/magic.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-console-api/src/auth/mod.rs"
+  },
+  {
+    "from": "Xerj",
+    "to": "Argos",
+    "file": "crates/xerj-console-api/src/auth/mod.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-console-api/src/auth/rate_limit.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-console-api/src/auth/sessions.rs"
+  },
+  {
+    "from": "xerj-",
+    "to": "argos-",
+    "file": "crates/xerj-console-api/src/auth/sessions.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-console-api/src/auth/sessions.rs"
+  },
+  {
+    "from": "Xerj",
+    "to": "Argos",
+    "file": "crates/xerj-console-api/src/auth/store.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-console-api/src/auth/store.rs"
+  },
+  {
+    "from": "Xerj",
+    "to": "Argos",
+    "file": "crates/xerj-console-api/src/auth/webauthn_setup.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-console-api/src/auth/webauthn_setup.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-console-api/src/bootstrap.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-console-api/src/bootstrap.rs"
+  },
+  {
+    "from": "xerj-",
+    "to": "argos-",
+    "file": "crates/xerj-console-api/src/bootstrap.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-console-api/src/bootstrap.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-console-api/src/bootstrap.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-console-api/src/client_ip.rs"
+  },
+  {
+    "from": "Xerj",
+    "to": "Argos",
+    "file": "crates/xerj-console-api/src/cluster.rs"
+  },
+  {
+    "from": "xerj-",
+    "to": "argos-",
+    "file": "crates/xerj-console-api/src/cluster.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-console-api/src/dashboards.rs"
+  },
+  {
+    "from": "xerj-",
+    "to": "argos-",
+    "file": "crates/xerj-console-api/src/dashboards.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-console-api/src/dashboards.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-console-api/src/data_sources.rs"
+  },
+  {
+    "from": "Xerj",
+    "to": "Argos",
+    "file": "crates/xerj-console-api/src/data_sources.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-console-api/src/data_sources.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-console-api/src/error.rs"
+  },
+  {
+    "from": "Xerj",
+    "to": "Argos",
+    "file": "crates/xerj-console-api/src/error.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-console-api/src/error.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-console-api/src/graph.rs"
+  },
+  {
+    "from": "xerj-",
+    "to": "argos-",
+    "file": "crates/xerj-console-api/src/graph.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-console-api/src/graph.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-console-api/src/indices.rs"
+  },
+  {
+    "from": "Xerj",
+    "to": "Argos",
+    "file": "crates/xerj-console-api/src/indices.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-console-api/src/indices.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-console-api/src/knowledge.rs"
+  },
+  {
+    "from": "xerj-",
+    "to": "argos-",
+    "file": "crates/xerj-console-api/src/knowledge.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-console-api/src/knowledge.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-console-api/src/lib.rs"
+  },
+  {
+    "from": "Xerj",
+    "to": "Argos",
+    "file": "crates/xerj-console-api/src/lib.rs"
+  },
+  {
+    "from": "xerj-",
+    "to": "argos-",
+    "file": "crates/xerj-console-api/src/lib.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-console-api/src/lib.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-console-api/src/prefs.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-console-api/src/prefs.rs"
+  },
+  {
+    "from": "Xerj",
+    "to": "Argos",
+    "file": "crates/xerj-console-api/src/response.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-console-api/src/router.rs"
+  },
+  {
+    "from": "Xerj",
+    "to": "Argos",
+    "file": "crates/xerj-console-api/src/router.rs"
+  },
+  {
+    "from": "xerj-",
+    "to": "argos-",
+    "file": "crates/xerj-console-api/src/router.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-console-api/src/router.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-console-api/src/seed.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-console-api/src/seed.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-console-api/src/spa.rs"
+  },
+  {
+    "from": "Xerj",
+    "to": "Argos",
+    "file": "crates/xerj-console-api/src/spa.rs"
+  },
+  {
+    "from": "xerj-",
+    "to": "argos-",
+    "file": "crates/xerj-console-api/src/spa.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-console-api/src/spa.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-console-api/src/spa.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-console-api/src/state.rs"
+  },
+  {
+    "from": "Xerj",
+    "to": "Argos",
+    "file": "crates/xerj-console-api/src/state.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-console-api/src/state.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-console-api/src/state.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-console-api/src/time.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-console-api/src/views.rs"
+  },
+  {
+    "from": "xerj-",
+    "to": "argos-",
+    "file": "crates/xerj-console-api/src/views.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-console-api/src/views.rs"
+  },
+  {
+    "from": "xerj-",
+    "to": "argos-",
+    "file": "crates/xerj-console-api/tests/api_tokens_flow.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-console-api/tests/api_tokens_flow.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-console-api/tests/cluster_state_fence.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-console-api/tests/cluster_state_fence.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-console-api/tests/console_cannot_read_a_brain.rs"
+  },
+  {
+    "from": "xerj-",
+    "to": "argos-",
+    "file": "crates/xerj-console-api/tests/console_cannot_read_a_brain.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-console-api/tests/console_cannot_read_a_brain.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-console-api/tests/console_graph_read.rs"
+  },
+  {
+    "from": "xerj-",
+    "to": "argos-",
+    "file": "crates/xerj-console-api/tests/console_graph_read.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-console-api/tests/console_graph_read.rs"
+  },
+  {
+    "from": "xerj-",
+    "to": "argos-",
+    "file": "crates/xerj-console-api/tests/dashboards_seed_and_schema.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-console-api/tests/dashboards_seed_and_schema.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-console-api/tests/knowledge_surface.rs"
+  },
+  {
+    "from": "xerj-",
+    "to": "argos-",
+    "file": "crates/xerj-console-api/tests/knowledge_surface.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-console-api/tests/knowledge_surface.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-console-api/tests/phase1_boot_and_cluster_info.rs"
+  },
+  {
+    "from": "Xerj",
+    "to": "Argos",
+    "file": "crates/xerj-console-api/tests/phase1_boot_and_cluster_info.rs"
+  },
+  {
+    "from": "xerj-",
+    "to": "argos-",
+    "file": "crates/xerj-console-api/tests/phase1_boot_and_cluster_info.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-console-api/tests/phase1_boot_and_cluster_info.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-console-api/tests/phase2_auth_flow.rs"
+  },
+  {
+    "from": "xerj-",
+    "to": "argos-",
+    "file": "crates/xerj-console-api/tests/phase2_auth_flow.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-console-api/tests/phase2_auth_flow.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-console-api/tests/phase3_user_state.rs"
+  },
+  {
+    "from": "Xerj",
+    "to": "Argos",
+    "file": "crates/xerj-console-api/tests/phase3_user_state.rs"
+  },
+  {
+    "from": "xerj-",
+    "to": "argos-",
+    "file": "crates/xerj-console-api/tests/phase3_user_state.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-console-api/tests/phase3_user_state.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-console-api/tests/reader_proxy.rs"
+  },
+  {
+    "from": "xerj-",
+    "to": "argos-",
+    "file": "crates/xerj-console-api/tests/reader_proxy.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-console-api/tests/reader_proxy.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-console-api/tests/router_precedence.rs"
+  },
+  {
+    "from": "xerj-",
+    "to": "argos-",
+    "file": "crates/xerj-console-api/tests/router_precedence.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-console-api/tests/router_precedence.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-console-api/tests/spa_assets.rs"
+  },
+  {
+    "from": "Xerj",
+    "to": "Argos",
+    "file": "crates/xerj-console-api/tests/spa_assets.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-console-api/tests/spa_assets.rs"
+  },
+  {
+    "from": "xerj-",
+    "to": "argos-",
+    "file": "crates/xerj-console-api/tests/spa_assets.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-console-api/tests/spa_assets.rs"
+  },
+  {
+    "from": "xerj-",
+    "to": "argos-",
+    "file": "crates/xerj-console-api/tests/trusted_proxy_client_identity.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-console-api/tests/trusted_proxy_client_identity.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-engine/Cargo.toml"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-engine/benches/search_bench.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/benches/search_bench.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-engine/examples/alloc_count.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/examples/alloc_count.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-engine/src/aggs.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-engine/src/aggs.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/src/aggs.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-engine/src/audit.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/src/audit.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/src/bounded_ingest_resources_tests.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-engine/src/bulk.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/src/bulk.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-engine/src/bulk.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/src/cluster_apply.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-engine/src/cluster_state.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-engine/src/code_blocks.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-engine/src/code_blocks.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-engine/src/code_blocks.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-engine/src/engine.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-engine/src/engine.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/src/engine.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-engine/src/engine.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-engine/src/fast_aggs.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-engine/src/fast_aggs.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/src/fast_aggs.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-engine/src/fast_aggs.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-engine/src/governor.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-engine/src/governor.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/src/governor.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-engine/src/governor.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-engine/src/graph.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/src/graph.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-engine/src/index.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-engine/src/index.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/src/index.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-engine/src/index.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-engine/src/index_guard.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/src/index_guard.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-engine/src/ingest_memory.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/src/ingest_memory.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-engine/src/ingest_memory.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-engine/src/lib.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/src/lib.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-engine/src/lib.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-engine/src/lifecycle.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-engine/src/lifecycle.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/src/lifecycle.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-engine/src/memtable.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-engine/src/memtable.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/src/memtable.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-engine/src/merge_budget.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-engine/src/node_lock.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/src/node_lock.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-engine/src/painless.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/src/painless.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-engine/src/pools.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-engine/src/pools.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/src/pools.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-engine/src/pools.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-engine/src/rbac.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/src/rbac.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-engine/src/secret_hash.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/src/segment_cache_estimates.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/src/slow_query.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-engine/src/sql.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/src/sql.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-engine/src/vector_column.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/src/vector_column.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/src/wal_shard_settings_tests.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-engine/src/wal_tap.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-engine/src/wal_tap.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/src/wal_tap.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-engine/src/wal_tap.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/src/write_publication.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/agg_bucket_cap.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/agg_bucket_cap_terms.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/agg_corpus_hydration_deadlock.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/agg_memory_budget.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/agg_script_tokenisers_are_total.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-engine/tests/aggs_filter_query_parity.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/aggs_filter_query_parity.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/aggs_range_multi_valued.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-engine/tests/battle_test.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/battle_test.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-engine/tests/battle_test.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/bm25_stats_are_index_wide.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/bool_filter_is_non_scoring.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/bool_keyword_term_scoring.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-engine/tests/bool_single_clause_is_score_neutral.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-engine/tests/bool_single_clause_is_score_neutral.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/bool_single_clause_is_score_neutral.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/bulk_escaped_id.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-engine/tests/chaos_tests.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/chaos_tests.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/close_releases_index.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-engine/tests/cluster_state_compatibility.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/cluster_state_compatibility.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-engine/tests/corrupt_index_metadata.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/corrupt_index_metadata.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/count_matches_search_on_text_term.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/dis_max_memtable_scoring.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-engine/tests/docs_capability_lists.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-engine/tests/docs_capability_lists.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/docs_capability_lists.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-engine/tests/docs_do_not_promise_the_next_release.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/drain_releases_memory.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/dynamic_text_terms_flush_parity.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-engine/tests/engine_worker_config_is_honoured.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-engine/tests/engine_worker_config_is_honoured.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/engine_worker_config_is_honoured.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-engine/tests/es_compat_tests.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/es_compat_tests.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-engine/tests/exists_filter_conjunction.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/exists_filter_conjunction.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/failed_index_recovery.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/fast_aggs_exists_and_deletes.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/fast_aggs_keyword_predicates.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-engine/tests/fast_aggs_keyword_predicates.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/fast_aggs_mixed_segment_suppression.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/fast_aggs_multifield_suffix.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-engine/tests/fast_aggs_multifield_suffix.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/fast_aggs_nested_object.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-engine/tests/fixtures/cluster_state/MANIFEST.json"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-engine/tests/fixtures/cluster_state/REPRODUCE.txt"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-engine/tests/fixtures/cluster_state/REPRODUCE.txt"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-engine/tests/fuzzy_keyword_case_sensitive.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/fuzzy_keyword_case_sensitive.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-engine/tests/fuzzy_prefix_length.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/fuzzy_prefix_length.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-engine/tests/graph_expand.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/graph_expand.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/highlight_does_not_change_ranking.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/histogram_extended_bounds.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/hybrid_fused_order_is_stable.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/hybrid_knn_query_scored_under_deletes.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-engine/tests/integration.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-engine/tests/integration.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/integration.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-engine/tests/integration.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-engine/tests/keyword_match_is_mapping_aware.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/keyword_match_is_mapping_aware.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/keyword_match_mapping_aware_in_wrappers.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/match_analyzer_flush_parity.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-engine/tests/match_phrase_slop_transposition.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-engine/tests/match_phrase_slop_transposition.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/match_phrase_slop_transposition.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/matched_queries_schema_aware.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/memtable_budget_drain_unblocks_ingest.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/memtable_budget_resume_and_search.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-engine/tests/merge_replays_postings.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/merge_replays_postings.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-engine/tests/merge_replays_postings.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/msm_negative_combination.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/msm_spec_cache_distinct.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/multi_match_flush_parity.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-engine/tests/multi_match_phrase_positions.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/multi_match_phrase_positions.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/multi_match_scoring.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-engine/tests/multi_match_unmapped_field.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/multi_match_unmapped_field.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/multi_valued_keyword_terms.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/name_on_bool.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/name_on_prefix_wildcard.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/nested_score_mode.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-engine/tests/node_lock.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/node_lock.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/object_field_blob_flush_parity.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-engine/tests/object_storage_e2e.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/object_storage_e2e.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-engine/tests/object_storage_e2e.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/object_subfield_term_flush_parity.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-engine/tests/painless_cpu_budget.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/painless_cpu_budget.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/painless_script_limits.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-engine/tests/perf_benchmark.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/perf_benchmark.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/prefix_keyword_case_flush_parity.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-engine/tests/prefix_keyword_case_insensitive.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/prefix_keyword_case_insensitive.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-engine/tests/product_experience.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/product_experience.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/query_string_default_field.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/range_on_multi_valued_field.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/rc4_w2_storage_hardening.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-engine/tests/regexp_keyword_case_insensitive.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/regexp_keyword_case_insensitive.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/schema_throttle_value_shape_e2e.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/search_bounded_under_ghosts.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/search_context_ttl.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-engine/tests/security_tooling_claims.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/semantic_vectors_not_stored.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/semantic_vectors_opt_out_restores.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-engine/tests/semantic_vectors_opt_out_restores.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-engine/tests/shard_router_write_path.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/shard_router_write_path.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-engine/tests/sort_doc_is_arrival_order.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/sort_doc_is_arrival_order.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-engine/tests/sort_on_meta_fields.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/sort_on_meta_fields.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-engine/tests/sort_on_unresolvable_field.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/sort_on_unresolvable_field.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/term_on_keyword_array_flush_parity.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/terms_key_typing.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-engine/tests/text_doc_values_terms_flush_parity.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/text_doc_values_terms_flush_parity.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/text_exists_does_not_hydrate.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-engine/tests/tied_score_page_order.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/tied_score_page_order.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/tied_score_resorts.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/tombstone_only_segment_search.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/verify_window_terms_perf.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-engine/tests/verify_window_terms_perf.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-engine/tests/wal_tap_push.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/wal_tap_push.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-engine/tests/wildcard_keyword_case_sensitive.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-engine/tests/wildcard_keyword_case_sensitive.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-fts/Cargo.toml"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-fts/src/analyzer.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-fts/src/analyzer.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-fts/src/index.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-fts/src/index.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-fts/src/index.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-fts/src/index.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-fts/src/lib.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-fts/src/lib.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-fts/src/postings.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-fts/src/postings.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-fts/src/search.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-fts/src/search.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-fts/tests/finish_full_flushes.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-fts/tests/merge_postings_equivalence.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-hub/Cargo.toml"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-hub/src/ask.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-hub/src/ask.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-hub/src/ask.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-hub/src/build_catalogue.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-hub/src/build_catalogue.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-hub/src/catalogue.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-hub/src/catalogue.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-hub/src/catalogue.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-hub/src/cli.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-hub/src/cli.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-hub/src/cli.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-hub/src/cli.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-hub/src/def.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-hub/src/def.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-hub/src/def.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-hub/src/feedback.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-hub/src/feedback.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-hub/src/feedback.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-hub/src/flock.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-hub/src/lib.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-hub/src/lockfile.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-hub/src/lockfile.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-hub/src/lockfile.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-hub/src/node.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-hub/src/node.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-hub/src/node.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-hub/src/pack.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-hub/src/pack.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-hub/src/router.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-hub/src/sketch.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-hub/src/sync.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-hub/src/sync.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-hub/src/sync.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-hub/src/sync.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-hub/src/sync/tests.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-hub/src/sync/tests.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-hub/src/sync/tests.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-hub/src/test_support.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-hub/src/test_support.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-hub/tests/ask_flow.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-hub/tests/ask_flow.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-hub/tests/ask_flow.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-hub/tests/ed25519_sh_agrees.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-hub/tests/identity_routing.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-hub/tests/identity_routing.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-hub/tests/no_hub_key.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-hub/tests/no_hub_key.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-hub/tests/no_hub_key.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-hub/tests/node_loopback.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-hub/tests/node_loopback.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-hub/tests/pack_roundtrip.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-hub/tests/pack_roundtrip.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-hub/tests/pack_roundtrip.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-hub/tests/routing.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-hub/tests/routing.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-hub/tests/sync_e2e.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-hub/tests/sync_e2e.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-hub/tests/sync_e2e.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-logs/Cargo.toml"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-logs/src/columnar.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-logs/src/ingest.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-logs/src/lib.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-logs/src/lib.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-logs/src/query.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-logs/src/retention.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-mcp/Cargo.toml"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-mcp/Cargo.toml"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-mcp/Cargo.toml"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-mcp/src/batch.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-mcp/src/batch.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-mcp/src/batch_cli.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-mcp/src/batch_cli.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-mcp/src/batch_cli.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-mcp/src/def.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-mcp/src/def.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-mcp/src/def.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-mcp/src/hub.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-mcp/src/hub.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-mcp/src/hub.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-mcp/src/lib.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-mcp/src/lib.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-mcp/src/lib.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-mcp/src/lib.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-mcp/src/main.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-mcp/src/main.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-mcp/src/map.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-mcp/src/map.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-mcp/src/map.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-mcp/src/token_budget.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-mcp/src/token_budget.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-mcp/src/token_budget.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-mcp/tests/batch_search.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-mcp/tests/hub_tools.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-mcp/tests/hub_tools.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-mcp/tests/hub_tools.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-mcp/tests/local_def.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-mcp/tests/loopback_proxy.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-mcp/tests/loopback_proxy.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-mcp/tests/published_schema_drift.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-mcp/tests/published_schema_drift.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-mcp/tests/published_schema_drift.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-mcp/tests/published_schema_drift.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-mcp/tests/search_exact_phrase.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-mcp/tests/search_prefix.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-mcp/tests/token_budget_identity.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-query/Cargo.toml"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-query/src/ast.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-query/src/ast.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-query/src/ast.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-query/src/error.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-query/src/executor.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-query/src/executor.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-query/src/lib.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-query/src/lib.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-query/src/parser.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-query/src/parser.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-query/src/planner.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-query/src/sort.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-query/tests/span_clause_refusal.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-rerank/Cargo.toml"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-rerank/src/judge.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-rerank/src/judge.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-rerank/src/judge.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-rerank/src/lib.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-rerank/src/lib.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-rerank/src/lib.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-rerank/tests/egress_inventory.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-rerank/tests/egress_inventory.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-rerank/tests/egress_inventory.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-rerank/tests/egress_inventory.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-server/Cargo.toml"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-server/Cargo.toml"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-server/build.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-server/src/brain.rs"
+  },
+  {
+    "from": "xerj-",
+    "to": "argos-",
+    "file": "crates/xerj-server/src/brain.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-server/src/brain.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-server/src/brain.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-server/src/debug_profiling.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-server/src/debug_profiling.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-server/src/debug_profiling.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-server/src/grpc.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-server/src/grpc.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-server/src/grpc_hub.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-server/src/grpc_hub.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-server/src/grpc_hub.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-server/src/ingest_memory_trace.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-server/src/ingest_memory_trace.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-server/src/ingest_memory_trace.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-server/src/main.rs"
+  },
+  {
+    "from": "Xerj",
+    "to": "Argos",
+    "file": "crates/xerj-server/src/main.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-server/src/main.rs"
+  },
+  {
+    "from": "xerj-",
+    "to": "argos-",
+    "file": "crates/xerj-server/src/main.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-server/src/main.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-server/src/main.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-server/src/share.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-server/src/share.rs"
+  },
+  {
+    "from": "xerj-",
+    "to": "argos-",
+    "file": "crates/xerj-server/src/share.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-server/src/share.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-server/src/share.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-server/tests/autoindex_usage_error.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-server/tests/batch_search_cli.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-server/tests/batch_search_cli.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-server/tests/brain_cli.rs"
+  },
+  {
+    "from": "xerj-",
+    "to": "argos-",
+    "file": "crates/xerj-server/tests/brain_cli.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-server/tests/brain_cli.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-server/tests/brain_cli.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-server/tests/cleartext_bind_fail_closed.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-server/tests/cleartext_bind_fail_closed.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-server/tests/cleartext_bind_fail_closed.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-server/tests/cluster_metadata_survives_sigkill.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-server/tests/data_directory_startup.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-server/tests/ephemeral_port_console_link.rs"
+  },
+  {
+    "from": "xerj-",
+    "to": "argos-",
+    "file": "crates/xerj-server/tests/ephemeral_port_console_link.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-server/tests/feedback_invite.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-server/tests/feedback_invite.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-server/tests/grpc_h2c_fail_closed.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-server/tests/http2_small_data_frames.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-server/tests/http2_small_data_frames.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-server/tests/index_usage_error.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-server/tests/index_usage_error.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-server/tests/pdf_worker.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-server/tests/pdf_worker.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-server/tests/pdf_worker.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-server/tests/rerank_env_endpoint_refused_at_boot.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-server/tests/sessions_cli.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-server/tests/sessions_cli.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-server/tests/sigpipe.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-server/tests/taken_port_fails_startup.rs"
+  },
+  {
+    "from": "Xerj",
+    "to": "Argos",
+    "file": "crates/xerj-server/tests/taken_port_fails_startup.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-server/tests/taken_port_fails_startup.rs"
+  },
+  {
+    "from": "xerj-",
+    "to": "argos-",
+    "file": "crates/xerj-server/tests/taken_port_fails_startup.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-server/tests/tls_fail_closed.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-storage/Cargo.toml"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-storage/examples/stored_projection_probe.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-storage/examples/zz_cold_probe.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-storage/src/backend.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-storage/src/backend.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-storage/src/bundle.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-storage/src/cache.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-storage/src/index_store.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-storage/src/index_store.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-storage/src/index_store.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-storage/src/lib.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-storage/src/merge.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-storage/src/merge.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-storage/src/merge.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-storage/src/s3.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-storage/src/s3.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-storage/src/segment.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-storage/src/segment.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-storage/src/stored_codec.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-storage/src/stored_codec.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-storage/src/stored_codec.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-storage/src/stored_codec/derived_vectors.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-storage/src/stored_codec/derived_vectors.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-storage/src/stored_codec/derived_vectors.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-storage/src/version_map.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-storage/src/wal.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-storage/src/wal.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-storage/src/wal_fsync.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-storage/src/wal_fsync.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-storage/src/wal_fsync.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-storage/tests/s3_object_store.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-storage/tests/s3_object_store.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-storage/tests/s3_object_store.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-storage/tests/s3_object_store.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-storage/tests/zstd_format_compat.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-storage/tests/zstd_format_compat.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "crates/xerj-storage/tests/zstd_format_compat.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-vector/Cargo.toml"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-vector/examples/recall_probe.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-vector/examples/recall_probe.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-vector/examples/storage_view_search_bench.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-vector/src/hnsw.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-vector/src/lib.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-vector/src/lib.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-vector/src/quantizer.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-vector/src/search.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "crates/xerj-vector/src/sq8_codes.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-wasm/Cargo.toml"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-wasm/examples/example_custom_plugin.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-wasm/examples/example_custom_plugin.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-wasm/src/builtins.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-wasm/src/lib.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-wasm/src/pipeline.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "crates/xerj-wasm/tests/integration.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "crates/xerj-wasm/tests/integration.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "docker-compose.yml"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "docker-compose.yml"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "docs/xerj-console-backend/API_DESIGN_v1.md"
+  },
+  {
+    "from": "Xerj",
+    "to": "Argos",
+    "file": "docs/xerj-console-backend/API_DESIGN_v1.md"
+  },
+  {
+    "from": "xerj-",
+    "to": "argos-",
+    "file": "docs/xerj-console-backend/API_DESIGN_v1.md"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "docs/xerj-console-backend/API_DESIGN_v1.md"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "docs/xerj-console-backend/API_DESIGN_v1.md"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "fuzz/Cargo.toml"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "fuzz/README.md"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "fuzz/README.md"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "fuzz/fuzz_targets/agg_script.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "fuzz/fuzz_targets/date_math.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "fuzz/fuzz_targets/index_name_date_math.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "fuzz/fuzz_targets/index_name_date_math.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "fuzz/fuzz_targets/painless.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "fuzz/fuzz_targets/query_dsl.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "fuzz/fuzz_targets/query_dsl.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "fuzz/fuzz_targets/query_string.rs"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "fuzz/fuzz_targets/sql.rs"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "proto/xerj.proto"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "proto/xerj.proto"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "releases/v0.1.0/reports/CHAOS_TEST_RESULTS_2026-04-11_19-19-50.log"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "reports/2026-04-15T21-26-00_cargo_test_full.log"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "reports/2026-04-15T21-26-00_cargo_test_full.log"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "reports/2026-04-15T21-27-00_cargo_test_full.log"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "reports/2026-04-15T21-27-00_cargo_test_full.log"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "reports/2026-04-15T21-27-38_cargo_test_full.log"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "reports/2026-04-15T21-27-38_cargo_test_full.log"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "reports/2026-04-15T21-28-22_cargo_test_full.log"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "reports/2026-04-15T21-28-22_cargo_test_full.log"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "reports/2026-04-15T21-28-51_cargo_test_full.log"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "reports/2026-04-15T21-28-51_cargo_test_full.log"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "reports/2026-04-15T21-30-36_cargo_test_results.md"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "reports/2026-04-15T21-32-15_sla_battle_xerj.log"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "reports/2026-04-15T21-38-13_sla_battle_xerj.log"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "reports/2026-04-15T21-38-59_sla_battle_summary.md"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "reports/2026-04-15T21-43-26_es_api_compat.md"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "reports/2026-04-15T21-43-49_es_api_compat.md"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "reports/2026-04-15T22-47-33_cargo_test_all_fixed.log"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "reports/2026-04-15T22-47-33_cargo_test_all_fixed.log"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "reports/2026-04-15T23-07-40_cargo_test_ALL_PASS.log"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "reports/2026-04-15T23-07-40_cargo_test_ALL_PASS.log"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "reports/2026-04-15T23-26-13_es_api_compat.md"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "reports/2026-04-15T23-28-36_es_api_compat.md"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "reports/2026-04-15T23-29-37_es_api_compat.md"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "reports/2026-04-15T23-33-02_es_api_compat.md"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "reports/2026-04-15T23-36-17_es_api_compat.md"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "reports/2026-04-15T23-37-09_cargo_test.log"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "reports/2026-04-15T23-37-09_cargo_test.log"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "reports/2026-04-16T01-53-47_es_api_compat.md"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "reports/2026-04-16T02-10-43_es_api_compat.md"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "reports/2026-04-16T02-26-58_final_100pct.log"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "reports/2026-04-16T02-26-58_final_100pct.log"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "reports/2026-04-16T03-08-13_es_api_compat.md"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "reports/2026-04-16T05-39-38_cargo_test.log"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "reports/2026-04-16T05-39-38_cargo_test.log"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "reports/2026-04-16T08-10-37_es_api_compat.md"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "reports/2026-04-16T17-24-40_battle_drain_fix.md"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "reports/2026-04-16T17-25-04_battle_drain_fix.md"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "reports/2026-04-16T19-01-46_battle_serde_drain.md"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "reports/2026-04-16T19-01-46_battle_serde_drain.md"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "reports/2026-04-16T19-01-46_battle_serde_drain.md"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "reports/2026-04-17T22-44-24_M2_sharded_wal.md"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "reports/2026-04-17T22-44-24_M2_sharded_wal.md"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "reports/2026-04-17T23-00-16_M5_M7_raw_bytes.md"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "reports/2026-04-17T23-00-16_M5_M7_raw_bytes.md"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "reports/2026-04-18T08-50-00_sync_engine_refactor.md"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "reports/2026-04-18T14-00-00_micro_ops_and_race_fix.md"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "reports/2026-04-24T00-00-00_v1_readiness_audit.md"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "reports/2026-04-24T23-30-00_v1_readiness_post_merge.md"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "reports/2026-04-24T23-58-00_pov_test_battery.md"
+  },
+  {
+    "from": "Xerj",
+    "to": "Argos",
+    "file": "reports/2026-04-24T23-58-00_pov_test_battery.md"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "reports/2026-04-25T00-00-00_pov_battery_final.md"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "reports/2026-04-25T03-30-00_xerj_vs_elasticsearch_bench.md"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "reports/2026-04-25T03-30-00_xerj_vs_elasticsearch_bench.md"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "reports/2026-04-25T13-40-00_xerj_vs_elasticsearch_disk_parity.md"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "reports/2026-04-25T13-40-00_xerj_vs_elasticsearch_disk_parity.md"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "reports/2026-04-25T21-50-00_ingest_perf_regression_zstd19.md"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "reports/2026-04-25T21-50-00_ingest_perf_regression_zstd19.md"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "reports/2026-04-25T22-00-00_autotuner_design_notes.md"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "reports/2026-04-25T22-50-00_xerj_vs_elasticsearch_rerun.md"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "reports/2026-04-25T22-50-00_xerj_vs_elasticsearch_rerun.md"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "reports/2026-07-27_bounded_stored_projection.md"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "reports/CODE_REVIEW_LINUS_2026-04-25.md"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "reports/FEATURE_FAIRNESS_REVIEW_v0.6.0_2026-04-25.md"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "reports/PATH_TO_100_PCT_v0.6.0_to_v1.0.md"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "reports/PLAYGROUND_DEMO_2026-04-25.md"
+  },
+  {
+    "from": "Xerj",
+    "to": "Argos",
+    "file": "reports/PLAYGROUND_DEMO_2026-04-25.md"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "reports/PLAYGROUND_DEMO_2026-04-25.md"
+  },
+  {
+    "from": "xerj-",
+    "to": "argos-",
+    "file": "reports/PLAYGROUND_DEMO_2026-04-25.md"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "reports/RELEASE_NOTES_v0.6.0_2026-04-25.md"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "reports/RELEASE_NOTES_v0.6.0_2026-04-25.md"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "reports/RELEASE_NOTES_v0.6.2_2026-04-25.md"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "reports/RELEASE_NOTES_v0.8.0.md"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "reports/RELEASE_NOTES_v0.9.0.md"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "reports/RELEASE_NOTES_v1.0.0-rc.1.md"
+  },
+  {
+    "from": "Xerj",
+    "to": "Argos",
+    "file": "reports/RELEASE_NOTES_v1.0.0-rc.1.md"
+  },
+  {
+    "from": "xerj-",
+    "to": "argos-",
+    "file": "reports/RELEASE_NOTES_v1.0.0-rc.1.md"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "reports/SECURITY_DEPLOYMENT_MODEL.md"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "tests/battle_real.sh"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "tests/battle_sla.sh"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "tests/battle_sla.sh"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "tests/battle_sla.sh"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "tests/datasets/error_logs.ndjson"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "tests/datasets/generate_datasets.sh"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "tests/es-compat-yaml/catch-lenient.txt"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "tests/es-compat-yaml/src/main.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "tests/es-compat-yaml/src/main.rs"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "tests/es-compat-yaml/src/main.rs"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "tests/es-compat-yaml/yaml/indices/indices.create/31_dynamic_template_types.yml"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "tests/es-compat-yaml/yaml/indices/indices.create/40_null_value.yml"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "tests/es-compat-yaml/yaml/indices/indices.create/50_object_enabled_false.yml"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "tests/es-compat-yaml/yaml/indices/indices.create/60_index_template_semantic_text.yml"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "tests/es-compat-yaml/yaml/indices/indices.create/60_source_includes_excludes.yml"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "tests/es-compat-yaml/yaml/indices/indices.delete/10_basic.yml"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "tests/es-compat-yaml/yaml/indices/indices.delete/20_destructive_wildcard.yml"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "tests/es-compat-yaml/yaml/indices/indices.delete/20_destructive_wildcard.yml"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "tests/es-compat-yaml/yaml/search/610_parent_child_unsupported.yml"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "tests/es-compat-yaml/yaml/security/10_api_key.yml"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "tests/es-compat-yaml/yaml/smoke/smoke_test_multinode/10_basic.yml"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "tests/es-compat-yaml/yaml/smoke/smoke_test_multinode/10_basic.yml"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "tests/es-compat-yaml/yaml/vectors/50_semantic_text_builtin.yml"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "tests/es-compat-yaml/yaml/vectors/50_semantic_text_builtin.yml"
+  },
+  {
+    "from": "xerj_",
+    "to": "argos_",
+    "file": "tests/es-compat-yaml/yaml/vectors/50_semantic_text_builtin.yml"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "tests/es-compat-yaml/yaml/vectors/52_semantic_text_chunked.yml"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "tests/es-compat-yaml/yaml/vectors/90_hybrid_learned_rejected.yml"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "tests/es-compat-yaml/yaml/vectors/95_hybrid_aggs_unsupported.yml"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "tests/es_api_compat_test.py"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "tests/es_api_compat_test.py"
+  },
+  {
+    "from": "xerj",
+    "to": "argos",
+    "file": "xerj.default.toml"
+  },
+  {
+    "from": "XERJ",
+    "to": "ARGOS",
+    "file": "xerj.default.toml"
+  },
+  {
+    "from": "XERJ_",
+    "to": "ARGOS_",
+    "file": "xerj.default.toml"
+  }
+]

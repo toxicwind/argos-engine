@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # =============================================================================
-# xerj Battle SLA Test Suite
+# argos Battle SLA Test Suite
 # =============================================================================
 # Runs 14 REAL HTTP-level test scenarios — one per user-feedback category.
 # Every curl command is logged with timestamps so it can be replayed against
 # a live Elasticsearch cluster to produce an apples-to-apples comparison.
 #
 # Usage:
-#   cd /home/claude/ai/xerj.ai/engine
+#   cd /home/claude/ai/argos.ai/engine
 #   ./tests/battle_sla.sh
 #
 # Requirements: curl, python3, ps, awk, wc (all standard on Linux/macOS)
@@ -17,8 +17,8 @@ set -uo pipefail
 # ─── Paths ────────────────────────────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENGINE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-XERJ="$ENGINE_DIR/target/release/xerj"
-DEFAULT_TOML="$ENGINE_DIR/xerj.default.toml"
+ARGOS="$ENGINE_DIR/target/release/argos"
+DEFAULT_TOML="$ENGINE_DIR/argos.default.toml"
 
 # ─── Ports ────────────────────────────────────────────────────────────────────
 ES_PORT=19200        # main ES-compat listener (avoids clash with any running ES)
@@ -73,7 +73,7 @@ wait_for_port() {
   return 0
 }
 
-# ─── Write config TOML for a xerj instance ──────────────────────────────────
+# ─── Write config TOML for a argos instance ──────────────────────────────────
 write_config() {
   local cfg_file=$1 data_dir=$2 es_port=$3 native_port=$4 grpc_port=$5
   cat > "$cfg_file" <<TOML
@@ -99,7 +99,7 @@ DATA_DIR=$(mktemp -d)
 DATA_DIR2=$(mktemp -d)
 
 cat > "$LOG_FILE" <<HEADER
-# xerj Battle SLA Results — $TIMESTAMP
+# argos Battle SLA Results — $TIMESTAMP
 
 > **Reproducibility**: every \`curl\` command logged below can be run verbatim
 > against a live Elasticsearch 8.x cluster at \`http://localhost:9200\` to
@@ -109,7 +109,7 @@ cat > "$LOG_FILE" <<HEADER
 
 HEADER
 
-echo -e "${BOLD}xerj Battle SLA Test Suite${RESET}"
+echo -e "${BOLD}argos Battle SLA Test Suite${RESET}"
 echo "Output → $LOG_FILE"
 echo ""
 
@@ -117,27 +117,27 @@ echo ""
 # Build binary (if stale or missing)
 # =============================================================================
 hdr "BUILD"
-if [ ! -f "$XERJ" ]; then
+if [ ! -f "$ARGOS" ]; then
   info "Binary not found — building (this may take ~60s on first run)..."
-  cmd "cargo build --release -p xerj-server"
-  (cd "$ENGINE_DIR" && cargo build --release -p xerj-server 2>&1) | tail -5
+  cmd "cargo build --release -p argos-server"
+  (cd "$ENGINE_DIR" && cargo build --release -p argos-server 2>&1) | tail -5
 fi
-if [ ! -f "$XERJ" ]; then
+if [ ! -f "$ARGOS" ]; then
   fail "Binary still missing after build — aborting"
   exit 1
 fi
-pass "Binary found: $XERJ"
+pass "Binary found: $ARGOS"
 
 # =============================================================================
-# Start primary xerj instance (insecure, port 19200)
+# Start primary argos instance (insecure, port 19200)
 # =============================================================================
 hdr "SERVER STARTUP"
 
 CFG1=$(mktemp --suffix=.toml)
 write_config "$CFG1" "$DATA_DIR" $ES_PORT $NATIVE_PORT $GRPC_PORT
 
-cmd "$XERJ --config $CFG1 --insecure"
-XERJ_LOG=error "$XERJ" --config "$CFG1" --insecure 2>/dev/null &
+cmd "$ARGOS --config $CFG1 --insecure"
+ARGOS_LOG=error "$ARGOS" --config "$CFG1" --insecure 2>/dev/null &
 ZPID=$!
 info "PID $ZPID — waiting for port $ES_PORT..."
 
@@ -236,7 +236,7 @@ info "RSS after 1 000 docs: ${RSS_1K} kB (${RSS_1K_MB} MiB)"
   && pass "RSS ${RSS_1K_MB} MiB < 512 MiB threshold" \
   || fail "RSS ${RSS_1K_MB} MiB exceeds 512 MiB threshold"
 
-info "Cost delta: xerj self-hosted on 2 GiB VM ≈ \$20/month vs Elastic Cloud basic ≈ \$95/month/node"
+info "Cost delta: argos self-hosted on 2 GiB VM ≈ \$20/month vs Elastic Cloud basic ≈ \$95/month/node"
 
 # =============================================================================
 # TEST 03 — JVM and Memory
@@ -384,7 +384,7 @@ kill "$ZPID" 2>/dev/null; wait "$ZPID" 2>/dev/null || true
 sleep 0.5
 
 info "Restarting server (simulate upgrade)..."
-XERJ_LOG=error "$XERJ" --config "$CFG1" --insecure 2>/dev/null &
+ARGOS_LOG=error "$ARGOS" --config "$CFG1" --insecure 2>/dev/null &
 ZPID=$!
 if wait_for_port $ES_PORT 15; then
   pass "Server restarted successfully (PID $ZPID)"
@@ -552,7 +552,7 @@ info "ES: requires PUT /index/_mapping + potential conflicts resolved only via r
 # "Port 9200 open to the world by default"
 # =============================================================================
 hdr "TEST 09 — Security (feedback/09)"
-log "Scenario: start xerj WITHOUT --insecure; verify unauthenticated requests are rejected"
+log "Scenario: start argos WITHOUT --insecure; verify unauthenticated requests are rejected"
 log "ES comparison: ES 7.x shipped with security OFF by default; 8.x finally enabled it"
 log ""
 
@@ -575,8 +575,8 @@ admin_api_key = "test-battle-sla-key-12345"
 enabled = false
 TOML
 
-cmd "$XERJ --config $CFG2  (secure mode — auth enabled, no --insecure)"
-XERJ_LOG=error "$XERJ" --config "$CFG2" 2>/dev/null &
+cmd "$ARGOS --config $CFG2  (secure mode — auth enabled, no --insecure)"
+ARGOS_LOG=error "$ARGOS" --config "$CFG2" 2>/dev/null &
 ZPID2=$!
 SEC="http://localhost:$SEC_ES_PORT"
 
@@ -620,20 +620,20 @@ info "Verify against ES: curl http://localhost:9200/_cluster/health (should retu
 # "3,000+ config settings"
 # =============================================================================
 hdr "TEST 10 — Documentation and UX (feedback/10)"
-log "Scenario: count user-facing config settings in xerj.default.toml"
+log "Scenario: count user-facing config settings in argos.default.toml"
 log "ES comparison: elasticsearch.yml has 3000+ documented properties"
 log ""
 
 # The shipped file sets the commonly tuned subset; the engine's full surface is
 # 105 settings, every one optional — measured by `count_user_facing_settings`
-# (xerj-common/src/config.rs), which counts leaf keys of a serialised
+# (argos-common/src/config.rs), which counts leaf keys of a serialised
 # `Config::default()`. This bound is on the FILE, and it is deliberately not the
 # published headline: quoting a number nobody counted is what issue #207 was
 # filed about.
 USER_SETTINGS=$(grep -v "^#\|^$\|^\[" "$DEFAULT_TOML" | grep "=" | wc -l || echo 0)
-info "Key=value lines in xerj.default.toml: $USER_SETTINGS (of 105 settings in total)"
+info "Key=value lines in argos.default.toml: $USER_SETTINGS (of 105 settings in total)"
 [ "$USER_SETTINGS" -le 60 ] \
-  && pass "The shipped config sets $USER_SETTINGS keys; XERJ has 105 settings in total, all optional (Elasticsearch has 3000+)" \
+  && pass "The shipped config sets $USER_SETTINGS keys; ARGOS has 105 settings in total, all optional (Elasticsearch has 3000+)" \
   || fail "The shipped config sets $USER_SETTINGS keys (expected ≤ 60)"
 
 # Verify every setting has a comment above it
@@ -730,7 +730,7 @@ TOKEN_COUNT=$(echo "$ANALYZE_RESP" | python3 -c \
   && pass "_analyze returns $TOKEN_COUNT tokens for 'Hello World'" \
   || fail "_analyze returned $TOKEN_COUNT tokens (expected ≥ 1)"
 
-info "xerj supports up to 16 384 dimensions — 4× ES's 4 096 limit"
+info "argos supports up to 16 384 dimensions — 4× ES's 4 096 limit"
 info "ES comparison: PUT /vector-test/_mapping requires explicit mapping before first doc"
 
 # =============================================================================
@@ -895,7 +895,7 @@ PLAN_HTTP=$(curl -sf -o /dev/null -w "%{http_code}" \
   || fail "explain-plan → $PLAN_HTTP (expected 200)"
 
 info "Kibana requires a paid Elastic subscription for production dashboards"
-info "xerj: dashboard summary + SQL + explain-plan are all open, no extra software"
+info "argos: dashboard summary + SQL + explain-plan are all open, no extra software"
 
 # =============================================================================
 # Summary
@@ -952,7 +952,7 @@ log "─────────────────────────
   echo '# Replace 19200 with 9200 in every curl command.'
   echo '# Note: ES 8.x requires auth header:'
   echo '#   -H "Authorization: Basic $(echo -n elastic:password | base64)"'
-  echo '# ES will reject some requests that xerj serves without auth under --insecure.'
+  echo '# ES will reject some requests that argos serves without auth under --insecure.'
   echo '```'
   echo ""
   echo "Generated: $TIMESTAMP"

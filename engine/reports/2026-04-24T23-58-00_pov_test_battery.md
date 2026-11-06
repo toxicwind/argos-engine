@@ -40,7 +40,7 @@ the 5 s merge cadence. Each tick drops more docs from search.
 **Root cause**: `Box<RawValue>` deserialization uses serde_json's
 private newtype tag `$serde_json::private::RawValue`, which
 **simd_json's serde adapter does not recognise**. The merge code at
-`engine/crates/xerj-engine/src/index.rs:1932` was the only call
+`engine/crates/argos-engine/src/index.rs:1932` was the only call
 site in the engine that fed `Vec<Box<RawValue>>` through
 `simd_json::serde::from_slice` — every other call site used
 `Vec<Value>` and worked. Every merge attempt failed the deserialize,
@@ -90,9 +90,9 @@ three:
 - Index discovery should treat a populated `wal/` directory as a
   valid index marker and trigger WAL-replay-only recovery for it.
 
-`engine/crates/xerj-engine/src/engine.rs` (open path),
-`engine/crates/xerj-server/src/main.rs` (shutdown handler),
-and the `_flush` REST handler in `engine/crates/xerj-api/src/`.
+`engine/crates/argos-engine/src/engine.rs` (open path),
+`engine/crates/argos-server/src/main.rs` (shutdown handler),
+and the `_flush` REST handler in `engine/crates/argos-api/src/`.
 
 ### B-3 — bulk visibility regression on small batches
 
@@ -119,7 +119,7 @@ verify.
 ### Ingest
 
 100 K docs / 5 K-doc batches / sequential POSTs to `/_bulk` over
-loopback HTTP, single Xerj node, 32-core host:
+loopback HTTP, single Argos node, 32-core host:
 
 ```
 total: 1000 ms · rate: 100,000 docs/s
@@ -176,7 +176,7 @@ GET /_cat/indices
   green open perftest    606,000 docs
 
 GET /_cluster/state
-  master_node=xerj-node-1
+  master_node=argos-node-1
 ```
 
 Multi-node still blocked behind cluster Raft log persistence —
@@ -203,17 +203,17 @@ not** until B-2 and B-3 land.
 
 ```bash
 # Server
-cat > /tmp/xerj-pov.toml <<'EOF'
+cat > /tmp/argos-pov.toml <<'EOF'
 [server]
 rest_port      = 19301
 es_compat_port = 19300
-data_dir       = "/tmp/xerj-pov-data"
+data_dir       = "/tmp/argos-pov-data"
 bind_address   = "127.0.0.1"
 [auth]
 enabled = false
 EOF
-rm -rf /tmp/xerj-pov-data
-target/release/xerj --config /tmp/xerj-pov.toml --data-dir /tmp/xerj-pov-data &
+rm -rf /tmp/argos-pov-data
+target/release/argos --config /tmp/argos-pov.toml --data-dir /tmp/argos-pov-data &
 
 # Functional smoke
 /tmp/pov-functional.sh
@@ -234,8 +234,8 @@ curl -s -XPUT http://localhost:19300/durtest -H 'content-type: application/json'
      -d '{"mappings":{"properties":{"name":{"type":"text"}}}}'
 # Bulk 50 docs into durtest, then:
 curl -s -XPOST http://localhost:19300/durtest/_flush
-pkill -SIGTERM -f xerj && sleep 4
-target/release/xerj --config /tmp/xerj-pov.toml --data-dir /tmp/xerj-pov-data &
+pkill -SIGTERM -f argos && sleep 4
+target/release/argos --config /tmp/argos-pov.toml --data-dir /tmp/argos-pov-data &
 sleep 3
 curl -s http://localhost:19300/durtest/_count   # should be 50; will be 0 until B-2 fixed
 ```

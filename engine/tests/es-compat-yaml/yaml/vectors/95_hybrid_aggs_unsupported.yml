@@ -28,7 +28,7 @@ setup:
 "hybrid query with aggregations is rejected (400)":
 
   # Aggregations over a fused (RRF) result set have no exact semantics —
-  # XERJ fails loud with a 400 rather than silently dropping the aggs or
+  # ARGOS fails loud with a 400 rather than silently dropping the aggs or
   # returning under-counted doc_counts.
   - do:
       catch: bad_request

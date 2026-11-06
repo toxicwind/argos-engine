@@ -1,0 +1,130 @@
+[package]
+name = "argos-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "argos — the unified search engine for AI: full-text, vectors, hybrid retrieval, agent memory, and log analytics in one binary; zero-config folder onboarding via `argos autoindex`; Elasticsearch wire-compatible"
+
+[[bin]]
+name = "argos"
+path = "src/main.rs"
+
+[dependencies]
+argos-common  = { path = "../argos-common" }
+argos-engine  = { path = "../argos-engine" }
+argos-query   = { path = "../argos-query" }
+argos-api     = { path = "../argos-api" }
+argos-storage = { path = "../argos-storage" }
+argos-fts     = { path = "../argos-fts" }
+argos-vector  = { path = "../argos-vector" }
+argos-logs    = { path = "../argos-logs" }
+argos-ai      = { path = "../argos-ai" }
+argos-compress = { path = "../argos-compress" }
+argos-cluster  = { path = "../argos-cluster" }
+argos-console-api     = { path = "../argos-console-api" }
+argos-autoindex = { path = "../argos-autoindex" }
+# Corpus Hub v2 client: `argos hub …` and the `--def` code path.
+argos-hub     = { path = "../argos-hub" }
+# `argos mcp` — the MCP stdio server, in the one binary users install. Pulls in
+# only reqwest + serde_json, both already in this tree.
+argos-mcp     = { path = "../argos-mcp" }
+
+tokio.workspace = true
+axum.workspace = true
+# In-process TLS termination for the REST + ES-compat listeners.
+# `tls-rustls-no-provider` deliberately avoids axum-server's default
+# `tls-rustls` feature, which would force `rustls/aws-lc-rs` into the
+# build; we install the `ring` provider ourselves (ring is already in
+# the dependency tree via reqwest), keeping the crypto backend uniform
+# and cross-compile friendly.
+axum-server = { version = "0.7", default-features = false, features = ["tls-rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
+tracing.workspace = true
+tracing-subscriber.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+rcgen.workspace = true
+rand.workspace = true
+anyhow.workspace = true
+chrono.workspace = true
+memmap2 = { workspace = true }
+memchr = { workspace = true }
+rayon = { workspace = true }
+
+# gRPC server: the real XerjSearch service on :8081 (proto: ../../proto/argos.proto).
+tonic.workspace = true
+prost.workspace = true
+
+# Use jemalloc as the global allocator.  The default glibc malloc causes
+# pathological memory retention under heavy churn (ingest → flush → ingest)
+# because it never returns freed heap pages to the OS.  jemalloc is
+# fragmentation-friendly and actively madvise()'s freed ranges, which brings
+# RSS back down after each flush — critical under the 4 GB cgroup cap.
+[features]
+# The shipped binary is batteries-included: the built-in neural BERT
+# embedder (candle + MiniLM) is ON by default, so end users just add
+# `--embed-mode neural` at runtime and the model downloads and loads at
+# startup — a blocked Hub refuses to start, it does not fail every ingest.
+# No special build, no separate binary. Build with
+# `--no-default-features` for a slimmer binary without the neural backend
+# (the lexical + proxy backends still work).
+default = ["neural", "decide-local"]
+neural = ["argos-engine/neural"]
+onnx-experimental = ["argos-engine/onnx-experimental"]
+# Tier-2 local decide head (issue #1057), ON by default since rc.80: the
+# rc.80 gate measurement (PR #1088) caught the stock release binary arming
+# nothing for `--decide-mode local` — release.yml builds default features,
+# and this feature was off, so tier 2 existed only in from-source builds.
+# Default-on matches the batteries-included rule one comment up, costs no
+# new dependency (the candle/tokenizers crates it names are already in the
+# default build via `neural`) and adds no egress path (no hf-hub; the
+# published inventory is unchanged). The tier stays OPT-IN at runtime:
+# `--decide-mode local --decide-model-dir <path>` (or
+# ARGOS_DECIDE_MODE/ARGOS_DECIDE_MODEL_DIR); without it a node boots on the
+# history vote exactly as before. `--no-default-features` still drops it.
+decide-local = ["argos-api/decide-local"]
+# Diagnostic-only profiling. It is excluded from all shipped feature sets:
+# jemalloc profiling changes allocator fast paths and pprof installs SIGPROF.
+debug-profiling = [
+    "dep:jemalloc_pprof",
+    "dep:pprof",
+    "tikv-jemallocator/profiling",
+]
+
+[target.'cfg(not(target_env = "msvc"))'.dependencies]
+tikv-jemallocator = "0.6"
+tikv-jemalloc-ctl = { version = "0.6", features = ["stats"] }
+# `mallctl` itself, for the void `arena.<i>.purge` control that the ctl
+# crate's typed read/write helpers cannot call (see
+# `purge_all_jemalloc_arenas`). Already in the graph under
+# tikv-jemallocator and tikv-jemalloc-ctl, so this adds an edge, not a crate.
+tikv-jemalloc-sys = "0.6"
+libc = "0.2"
+
+[target.'cfg(all(target_os = "linux", not(target_env = "msvc")))'.dependencies]
+jemalloc_pprof = { version = "0.8", features = ["symbolize"], optional = true }
+pprof = { version = "0.15", features = ["prost-codec"], optional = true }
+
+[build-dependencies]
+# Compile ../../proto/argos.proto → Rust at build time. `protox` parses the
+# .proto in pure Rust (no host protoc); `tonic-build` turns the resulting
+# FileDescriptorSet into the client + server stubs via `compile_fds`.
+tonic-build = { workspace = true }
+protox = { workspace = true }
+
+[dev-dependencies]
+# HTTPS round-trip test against the in-process rustls listener.
+reqwest = { workspace = true }
+tempfile = { workspace = true }
+# `oneshot` against the ES router: the XerjHub test compares a gRPC `Def` with
+# the HTTP `/_hub/v1/def` route field by field.
+tower = { workspace = true }
+# HTTP/2 *as a client*, so `tests/http2_small_data_frames.rs` can choose the
+# DATA-frame size — the one thing no ordinary HTTP client exposes, and the
+# whole subject of #485. It also pins the workspace floor at the h2 release
+# whose small-frame budget scales with the connection window.
+h2 = { workspace = true }
+flate2 = "1"
+tokio-stream = "0.1"

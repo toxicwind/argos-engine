@@ -14,19 +14,19 @@ use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {
     // serde_json is a third-party parser with its own fuzzing; this harness
-    // is about what xerj does with the value once it is JSON.
+    // is about what argos does with the value once it is JSON.
     let Ok(value) = serde_json::from_slice::<serde_json::Value>(data) else {
         return;
     };
 
-    if let Ok(request) = xerj_query::parse_request(&value) {
+    if let Ok(request) = argos_query::parse_request(&value) {
         // The parser's depth and clause budgets are the only thing standing
         // between an untrusted body and unbounded recursion here.
-        let _ = xerj_query::rewrite(request.query);
+        let _ = argos_query::rewrite(request.query);
     }
 
     // `parse_query` is also called directly (binary protocol, percolate-style
     // paths), so exercise it on the same input rather than only through a
     // well-formed request envelope.
-    let _ = xerj_query::parse_query(&value);
+    let _ = argos_query::parse_query(&value);
 });

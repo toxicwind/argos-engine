@@ -1,0 +1,4333 @@
+//! argos configuration system.
+//!
+//! Configuration is intentionally minimal: **137 settings** versus
+//! Elasticsearch's 3000+. Every option is named, documented, and has a sensible
+//! production-ready default. The format is TOML, loaded from a single file.
+//!
+//! That number is measured, not asserted: `journey_zero_config` in
+//! `argos-engine/tests/product_experience.rs` counts the leaf keys of a default
+//! `Config` and fails when it drifts. It used to say 38 here, 56 twenty lines
+//! down and 60 in the test — three figures, none of them the truth, because the
+//! test re-added a hardcoded sum instead of counting anything (#207).
+//!
+//! ## Quick start
+//!
+//! ```no_run
+//! use argos_common::Config;
+//!
+//! // Use all defaults (works out of the box)
+//! let cfg = Config::default();
+//!
+//! // Or load from a file
+//! let cfg = Config::load("/etc/argos/argos.toml").unwrap();
+//! ```
+//!
+//! ## Example configuration file
+//!
+//! ```toml
+//! [server]
+//! rest_port = 8080
+//! data_dir  = "/var/lib/argos"
+//!
+//! [auth]
+//! enabled = true
+//!
+//! [vector]
+//! hnsw_m = 32
+//! ```
+
+use serde::{Deserialize, Serialize};
+use std::path::Path;
+
+use crate::calibration::CalibrationMethod;
+use crate::error::XerjError;
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Top-level Config
+// ═════════════════════════════════════════════════════════════════════════════
+
+/// Complete engine configuration.
+///
+/// Fields are grouped into sub-structs by concern. All fields implement
+/// `Default` so that an empty config file (or no file at all) is valid.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Config {
+    /// Network and data directory settings — 7 settings.
+    pub server: ServerConfig,
+    /// Authentication — 3 settings.
+    pub auth: AuthConfig,
+    /// CORS (cross-origin browser access) — 2 settings. Default restrictive.
+    pub cors: CorsConfig,
+    /// TLS — 4 settings.
+    pub tls: TlsConfig,
+    /// Write-ahead log, flush, and object-store backend — 12 settings.
+    pub storage: StorageConfig,
+    /// Segment merging — 8 settings.
+    pub merge: MergeConfig,
+    /// Data compression — 3 settings.
+    pub compression: CompressionConfig,
+    /// Full-text search — 1 setting.
+    pub fts: FtsConfig,
+    /// Vector search (HNSW) — 6 settings.
+    pub vector: VectorConfig,
+    /// Log (time-series) retention — 2 settings.
+    pub logs: LogsConfig,
+    /// External embedding service — 20 settings.
+    pub embedding: EmbeddingConfig,
+    /// Resource limits — 14 settings.
+    pub limits: LimitsConfig,
+    /// High-throughput turbo indexing — 3 settings.
+    pub indexing: IndexingConfig,
+    /// Engine parallelism and flush deadlines — 6 settings.
+    pub engine: EngineConfig,
+    /// Cluster / Raft settings — 5 settings.
+    pub cluster: ClusterConfig,
+    /// Point-in-time TTL + sweep cadence — 3 settings.
+    pub pit: PitConfig,
+    /// Scroll + async-search context TTLs and open-context caps — 7 settings.
+    pub search_context: SearchContextConfig,
+    /// Structured logging + access log — 2 settings.
+    pub logging: LoggingConfig,
+    /// Elasticsearch/OpenSearch wire-compatibility identity — 2 settings.
+    pub compat: CompatConfig,
+    /// ISM/ILM index-lifecycle-management background execution — 1 setting.
+    pub lifecycle: LifecycleConfig,
+    /// Single-node WAL tap: push a filtered index subset to an external
+    /// ES-compatible target — 10 settings. Off by default.
+    pub wal_tap: WalTapConfig,
+    /// Second-stage reranking provider — 3 settings. Inert until a key is set.
+    pub rerank: RerankProviderConfig,
+    /// Typed decisions answered from a labelled-history index by
+    /// nearest-neighbour vote — 9 settings. Inert until `decisions.index`
+    /// names an index that exists.
+    pub decisions: DecisionsConfig,
+    /// Corpus Hub hosted read-only endpoints (`/_hub/v1/…`) — 2 settings.
+    /// Inert until `hub.catalogue_path` names a catalogue file; the routes
+    /// need an API key unless `hub.public` is switched on.
+    pub hub: HubConfig,
+}
+
+// 24 sub-configs, 137 leaf settings in total. Do not maintain that sum by hand
+// — `journey_zero_config` in argos-engine/tests/product_experience.rs counts a
+// serialised `Config::default()` and fails if this comment and the module
+// header stop matching. `Default` is derived: every field is a sub-config that
+// implements `Default`, so the derive produces exactly the same all-defaults
+// value the manual impl used to build by hand.
+
+impl Config {
+    /// Every setting this build accepts but does not act on, across all
+    /// sections, in the [`MergeConfig::dormant_overrides`] shape — named only
+    /// when the operator moved one off its default. The server logs each one
+    /// at WARN on startup (the accepted-and-ignored class, #204).
+    pub fn dormant_overrides(&self) -> Vec<(&'static str, &'static str)> {
+        let mut out = self.storage.dormant_overrides();
+        out.extend(self.merge.dormant_overrides());
+        out.extend(self.compression.dormant_overrides());
+        out.extend(self.fts.dormant_overrides());
+        out.extend(self.vector.dormant_overrides());
+        out.extend(self.logs.dormant_overrides());
+        out.extend(self.indexing.dormant_overrides());
+        out
+    }
+
+    /// Load configuration from a TOML file.
+    ///
+    /// Missing keys fall back to their `Default` values, so a minimal config
+    /// only needs to override what differs from the defaults.
+    pub fn load(path: impl AsRef<Path>) -> Result<Self, XerjError> {
+        let path = path.as_ref();
+        let raw = std::fs::read_to_string(path).map_err(|e| {
+            XerjError::config(format!("cannot read config file {}: {}", path.display(), e))
+        })?;
+
+        let config: Config = toml::from_str(&raw)?;
+        config.validate()?;
+        Ok(config)
+    }
+
+    /// Load configuration from a TOML string (useful for testing).
+    ///
+    /// Named `from_toml_str` rather than `from_str` to avoid shadowing the
+    /// `std::str::FromStr::from_str` convention (clippy::should_implement_trait):
+    /// this parses TOML specifically and also runs cross-field validation.
+    pub fn from_toml_str(s: &str) -> Result<Self, XerjError> {
+        let config: Config = toml::from_str(s)?;
+        config.validate()?;
+        Ok(config)
+    }
+
+    /// Validate cross-field constraints.
+    ///
+    /// Individual field validation (range checks, enum values) is done via
+    /// serde; this method handles rules that span multiple fields.
+    pub fn validate(&self) -> Result<(), XerjError> {
+        // Server ports must be unique
+        let ports = [
+            self.server.rest_port,
+            self.server.grpc_port,
+            self.server.es_compat_port,
+        ];
+        let unique: std::collections::HashSet<_> = ports.iter().collect();
+        if unique.len() != ports.len() {
+            return Err(XerjError::config(
+                "rest_port, grpc_port, and es_compat_port must all be distinct",
+            ));
+        }
+
+        // Trusted proxies: a typo in a trust boundary must fail startup, not
+        // silently degrade. (A rejected entry that we merely skipped would
+        // leave the operator believing forwarding headers are honoured when
+        // they are not — or, worse, the reverse.)
+        crate::net::TrustedProxies::parse(&self.server.trusted_proxies)
+            .map_err(|why| XerjError::config(format!("server.trusted_proxies: {why}")))?;
+
+        // TLS: if enabled, paths must be supplied
+        if self.tls.enabled {
+            if self.tls.cert_path.is_empty() {
+                return Err(XerjError::config(
+                    "tls.cert_path is required when tls.enabled = true",
+                ));
+            }
+            if self.tls.key_path.is_empty() {
+                return Err(XerjError::config(
+                    "tls.key_path is required when tls.enabled = true",
+                ));
+            }
+        }
+
+        // Storage: WAL batch interval sanity (documented range: 1..=10000).
+        if self.storage.wal_batch_ms == 0 {
+            return Err(XerjError::config("storage.wal_batch_ms must be > 0"));
+        }
+        if self.storage.wal_batch_ms > 10_000 {
+            return Err(XerjError::config(
+                "storage.wal_batch_ms must be <= 10000 (10 s)",
+            ));
+        }
+
+        // Merge: min_segments must be >= 2
+        if self.merge.min_segments < 2 {
+            return Err(XerjError::config("merge.min_segments must be >= 2"));
+        }
+
+        // WAL tap: the target URL is a credential boundary, not just a URL.
+        // Refusing it at boot is the only way a `user:pass@host` in the config
+        // file never reaches the log line or the two endpoints that echo it.
+        if let Err(reason) = WalTapConfig::check_target_url(&self.wal_tap.target_url) {
+            return Err(XerjError::config(reason));
+        }
+        // …and the numeric knobs, with the same bounds `PUT /_xerj/wal_tap`
+        // enforces. Without this the file was the way *around* the API's
+        // validation: `PUT {"min_retained_generations": 100}` is a `400`
+        // because the knob costs `n × storage.wal_max_size_mb` per WAL shard
+        // per index, but `argos.toml` took it in silence and the node held 100
+        // rotated generations per shard forever. Same for
+        // `max_retry_backoff_secs`, where a value above `u64::MAX / 1000` used
+        // to reach an unchecked `* 1000` inside `WalTap::arm_backoff`.
+        //
+        // Same reasoning as `compression.block_size_docs` below: an
+        // out-of-range value is a typo the operator wants to hear about now,
+        // at boot, not as a disk-full page later.
+        if let Err(reason) = self.wal_tap.check_limits() {
+            return Err(XerjError::config(reason));
+        }
+
+        // Rerank: the endpoint is where document text gets POSTed, and it is
+        // echoed by `GET /_xerj/rerank`. Same two rules as the WAL tap target.
+        if let Err(reason) = RerankProviderConfig::check_endpoint(&self.rerank.endpoint) {
+            return Err(XerjError::config(reason));
+        }
+
+        // Hub: a public node validates every corpus name against the
+        // catalogue, so a public node with no catalogue answers 404 to
+        // everything while appearing to be up. Refuse that at boot.
+        if self.hub.public && self.hub.catalogue_path.trim().is_empty() {
+            return Err(XerjError::config(
+                "hub.public = true requires hub.catalogue_path: the public routes validate \
+                 every corpus name against the catalogue, and with none every request \
+                 would be a 404",
+            ));
+        }
+
+        // Compression: block_size_docs is documented as 16–4096 and was
+        // accepted at any value (#318 got `999999` past startup in silence).
+        // Range-check it even though the knob is dormant: an out-of-range
+        // value is a typo the operator wants to hear about now, and the check
+        // must not start passing quietly if the knob is ever wired.
+        if !CompressionConfig::BLOCK_SIZE_DOCS_RANGE.contains(&self.compression.block_size_docs) {
+            return Err(XerjError::config(format!(
+                "compression.block_size_docs must be in {}..={}, got {}",
+                CompressionConfig::BLOCK_SIZE_DOCS_RANGE.start(),
+                CompressionConfig::BLOCK_SIZE_DOCS_RANGE.end(),
+                self.compression.block_size_docs
+            )));
+        }
+
+        // Vector: hnsw_ef_construction >= hnsw_m
+        if self.vector.hnsw_ef_construction < self.vector.hnsw_m {
+            return Err(XerjError::config(
+                "vector.hnsw_ef_construction must be >= vector.hnsw_m",
+            ));
+        }
+
+        // Vector: max_dimensions must be power-of-two-friendly and > 0
+        if self.vector.max_dimensions == 0 {
+            return Err(XerjError::config("vector.max_dimensions must be > 0"));
+        }
+
+        // A zero HTTP timeout fails every embedding request before it is sent
+        // (the `wal_tap.request_timeout_secs` rule).
+        if self.embedding.timeout_ms == 0 {
+            return Err(XerjError::config("embedding.timeout_ms must be at least 1"));
+        }
+
+        if !(1..=i32::MAX as usize).contains(&self.limits.max_result_window) {
+            return Err(XerjError::config(
+                "limits.max_result_window must be in 1..=2147483647",
+            ));
+        }
+
+        if !(1..=4096).contains(&self.embedding.onnx_scheduling_window) {
+            return Err(XerjError::config(
+                "embedding.onnx_scheduling_window must be in 1..=4096",
+            ));
+        }
+        if !(1..=2).contains(&self.embedding.onnx_session_pool_size) {
+            return Err(XerjError::config(
+                "embedding.onnx_session_pool_size must be in 1..=2",
+            ));
+        }
+        if !(1..=64).contains(&self.embedding.neural_window_concurrency) {
+            return Err(XerjError::config(
+                "embedding.neural_window_concurrency must be in 1..=64",
+            ));
+        }
+
+        // ── Config honesty guards ────────────────────────────────────────────
+        // Some config knobs exist in the schema but are not wired into any code
+        // path in this build. Silently ignoring them is worse than failing: an
+        // operator who sets `storage.backend = "s3"` believes their data lands
+        // in S3, and one who sets `default_quantization = "scalar8"` believes
+        // vectors are compressed 4×. Neither is true. Fail loud at startup so
+        // the mismatch surfaces immediately instead of after data is written.
+
+        // Storage: `storage.backend = "s3"` is wired as of #965 — flush packs
+        // each segment family into ONE bundle object (ZBM1) plus a per-index
+        // `snapshot.json` catalogue, merges publish their output before
+        // retiring their inputs, retired segments' bundles are deleted, and a
+        // fresh node hydrates families from the bucket on demand. The
+        // remaining limits are real and recorded in docs/OBJECT_STORAGE.md
+        // ("What is not wired"): SINGLE-WRITER v1 (one node per index at a
+        // time — two writers would clobber each other's `snapshot.json`
+        // catalogue), the WAL stays local (unflushed acked writes do not
+        // follow the bucket), bundles are packed in memory (single-PUT
+        // object ceiling), and bucket orphans have no GC command yet.
+        //
+        // The one thing that stays a hard error: naming the backend without
+        // naming a bucket. An empty `s3_bucket` with `backend = "s3"` is a
+        // half-written config, and ARGOS never creates the bucket itself (one
+        // created by accident outlives the process and quietly accrues
+        // storage cost), so there is no default to fall back to.
+        if self.storage.backend == StorageBackendType::S3
+            && self.storage.s3_bucket.trim().is_empty()
+        {
+            return Err(XerjError::config(
+                "storage.backend = \"s3\" requires storage.s3_bucket to name an existing \
+                 bucket — ARGOS never creates one, so there is no default to fall back to. \
+                 The single-writer contract and the remaining limits are in \
+                 docs/OBJECT_STORAGE.md",
+            ));
+        }
+
+        // Merge: only the size-tiered policy is implemented. `run_merge_once`
+        // (argos-engine/src/index.rs) always builds a `SizeTieredMergePolicy`;
+        // nothing anywhere reads `merge.strategy`. Accepting `log_structured`
+        // would run size-tiered merging for an operator who chose a levelled
+        // policy for its read amplification — the same silent substitution the
+        // `storage.backend` guard above exists to prevent (#207).
+        if self.merge.strategy != MergeStrategy::SizeTiered {
+            return Err(XerjError::config(
+                "merge.strategy: the log_structured merge policy is not implemented in this \
+                 build; only \"size_tiered\" is supported",
+            ));
+        }
+
+        // Vector: `scalar8` (SQ8) quantization is wired into the kNN serving
+        // path (`Index::run_knn_brute_force` / `run_knn_sq8_codes_scan`): a
+        // `scalar8` dense_vector field scores candidates from
+        // 1-byte-per-dimension codes written at ingest into a slot-addressed
+        // store (#392), so it has the recall profile of SQ8 and the kNN
+        // scoring working set is the codes rather than the f32 `_source`
+        // vectors. `none` and `scalar8` are therefore accepted. `binary`
+        // (1-bit) has no implemented quantizer, so honouring it would silently
+        // store full-precision vectors while claiming a 32× saving — it stays
+        // rejected until a BinaryQuantizer lands.
+        if self.vector.default_quantization == VectorQuantization::Binary {
+            return Err(XerjError::config(
+                "vector.default_quantization: binary (1-bit) quantization is not implemented in \
+                 this build; only \"none\" and \"scalar8\" are supported",
+            ));
+        }
+
+        // Limits: concurrency must be > 0
+        if self.limits.max_concurrent_searches == 0 {
+            return Err(XerjError::config(
+                "limits.max_concurrent_searches must be > 0",
+            ));
+        }
+
+        // Decisions: a human_weight that is not a positive finite number would
+        // not scale a correction's vote — 0 erases it, a negative value
+        // inverts it, NaN compares false against everything — so the config
+        // refuses to boot instead of silently mis-weighting the one document
+        // class the operator marked as authoritative.
+        if !self.decisions.human_weight.is_finite() || self.decisions.human_weight <= 0.0 {
+            return Err(XerjError::config(format!(
+                "decisions.human_weight must be a positive number (got {}); it multiplies the \
+                 vote weight of history documents carrying human: true, and 1.0 disables the \
+                 boost",
+                self.decisions.human_weight
+            )));
+        }
+
+        // Decisions: escalate_below is a winning-vote-share floor in 0.0..=1.0
+        // (0.0 disables confidence escalation; #1094).
+        if !self.decisions.escalate_below.is_finite()
+            || !(0.0..=1.0).contains(&self.decisions.escalate_below)
+        {
+            return Err(XerjError::config(format!(
+                "decisions.escalate_below must be in 0.0..=1.0 (got {}); it is the winning \
+                 vote-share floor below which tier 1 escalates to the local decision tier, and \
+                 0.0 disables confidence escalation",
+                self.decisions.escalate_below
+            )));
+        }
+
+        self.engine.validate()?;
+
+        // Cluster: fail closed rather than expose an unauthenticated Raft
+        // control port (issue #75).
+        self.cluster.validate()?;
+
+        // The cluster port must not collide with this node's own data
+        // listeners (#1171). A collision makes the cluster transport's bind
+        // fail at boot and the node degrades to single-node while
+        // /_cluster/health stays green — refusing here turns that trap into
+        // a boot-time error. (Cross-process port collisions can only be
+        // caught at bind time; this check catches the self-inflicted class.)
+        if self.cluster.enabled {
+            let cluster_port = self.cluster.port;
+            let listeners = [
+                ("rest_port", self.server.rest_port),
+                ("grpc_port", self.server.grpc_port),
+                ("es_compat_port", self.server.es_compat_port),
+            ];
+            let collision = listeners.iter().find(|(_, p)| *p == cluster_port);
+            if let Some((name, _)) = collision {
+                return Err(XerjError::config(format!(
+                    "cluster.port ({cluster_port}) collides with server.{name} — the cluster \
+                     transport would fail to bind and the node would silently degrade to \
+                     single-node mode (issue #1171)"
+                )));
+            }
+        }
+
+        // Logging: format must be one of the two supported line formats.
+        let fmt = self.logging.format.as_str();
+        if !fmt.eq_ignore_ascii_case("text") && !fmt.eq_ignore_ascii_case("json") {
+            return Err(XerjError::config(format!(
+                "logging.format must be \"text\" or \"json\" (got {fmt:?})"
+            )));
+        }
+
+        Ok(())
+    }
+
+    /// Returns the effective bind address for the REST API.
+    pub fn rest_addr(&self) -> String {
+        format!("{}:{}", self.server.bind_address, self.server.rest_port)
+    }
+
+    /// Returns the effective bind address for the gRPC API.
+    pub fn grpc_addr(&self) -> String {
+        format!("{}:{}", self.server.bind_address, self.server.grpc_port)
+    }
+
+    /// Returns the effective bind address for the Elasticsearch-compatible API.
+    pub fn es_compat_addr(&self) -> String {
+        format!(
+            "{}:{}",
+            self.server.bind_address, self.server.es_compat_port
+        )
+    }
+
+    /// `server.bind_address` as an [`IpAddr`](std::net::IpAddr), or `None` if
+    /// it is not an IP literal.
+    ///
+    /// The single place the setting is interpreted, so every caller agrees on
+    /// what it means. Surrounding brackets are accepted and stripped: a v6
+    /// address is conventionally written `[::1]` next to a port, and an
+    /// operator who copies that form into the config should not get a
+    /// different answer than one who writes `::1`.
+    ///
+    /// Listeners must be composed with [`std::net::SocketAddr::new`] from this
+    /// rather than by formatting `"{bind}:{port}"` — `"::1:9200"` is not a
+    /// parseable socket address, which is how a `bind_address = "::1"` node
+    /// used to fail at bind time with `invalid socket address syntax` after
+    /// it had already created its data directory and printed a first-run link.
+    pub fn bind_ip(&self) -> Option<std::net::IpAddr> {
+        let raw = self.server.bind_address.trim();
+        let raw = raw
+            .strip_prefix('[')
+            .and_then(|r| r.strip_suffix(']'))
+            .unwrap_or(raw);
+        raw.parse::<std::net::IpAddr>().ok()
+    }
+
+    /// `server.bind_address` and `port` as a bindable socket address.
+    pub fn socket_addr(&self, port: u16) -> Option<std::net::SocketAddr> {
+        self.bind_ip().map(|ip| std::net::SocketAddr::new(ip, port))
+    }
+
+    /// Is `server.bind_address` confined to the local host?
+    ///
+    /// Only a loopback literal counts. `0.0.0.0` and `::` are *unspecified*,
+    /// not loopback — they bind every interface the host has, which is the
+    /// exposure this predicate exists to detect. An address that does not
+    /// parse is reported as not confined — it fails closed here, because a
+    /// predicate that guards an exposure must never answer "safe" about a
+    /// value it does not understand.
+    ///
+    /// That fail-closed answer is correct and is *not* a message: on its own
+    /// it would have the startup refusals tell an operator who wrote
+    /// `bind_address = "localhost"` that localhost "is not loopback", which is
+    /// false, and prescribe an opt-out that only defers the failure. So
+    /// `argos-server/src/main.rs` rejects a non-IP `bind_address` at step 3a
+    /// with [`Config::bind_ip`], before either exposure check runs; by the
+    /// time this predicate is consulted there, the address is known to parse.
+    pub fn bind_address_is_loopback(&self) -> bool {
+        self.bind_ip()
+            .map(crate::net::canonical_ip)
+            .is_some_and(|ip| ip.is_loopback())
+    }
+
+    /// Would starting now put a cleartext gRPC listener on a network-reachable
+    /// interface while the operator believes TLS covers the node? (issue #229)
+    ///
+    /// True only when all three hold: TLS is on, the bind address is not
+    /// confined to loopback, and the operator has not declared the exposure
+    /// intentional via `tls.allow_insecure_grpc_h2c`. The caller's job is to
+    /// refuse to start — see `argos-server/src/main.rs`.
+    ///
+    /// The shape is Elasticsearch's bootstrap-check idea (approach only, no
+    /// code: `BootstrapChecks.java:58-70` gates enforcement on the transport
+    /// being bound off-loopback and offers one explicit override). Two
+    /// deliberate departures: ES also exempts link-local, which is still
+    /// reachable by every other host on the link, so this does not; and the
+    /// override lives in the config file the setting it relaxes lives in,
+    /// rather than a JVM system property.
+    pub fn grpc_h2c_exposed_off_loopback(&self) -> bool {
+        self.tls.enabled && !self.tls.allow_insecure_grpc_h2c && !self.bind_address_is_loopback()
+    }
+
+    /// Would starting now publish *every* listener in cleartext on a
+    /// network-reachable interface? (issue #228)
+    ///
+    /// True when all three hold: TLS is off, the bind address is not confined
+    /// to loopback, and the operator has not declared the exposure intentional
+    /// via `server.allow_insecure_network_bind`. The caller's job is to refuse
+    /// to start — see `argos-server/src/main.rs`.
+    ///
+    /// This is the TLS-off half of the pair whose TLS-on half is
+    /// [`Config::grpc_h2c_exposed_off_loopback`] (#229), and the two are
+    /// mutually exclusive by construction: exactly one of them can fire for a
+    /// given `tls.enabled`. The exposure here is strictly larger — with TLS
+    /// off it is not one uncovered listener but all of them, carrying the
+    /// `Authorization: ApiKey` header of every request.
+    ///
+    /// Same shape as ES's bootstrap checks (approach only, no code — AGPL):
+    /// `BootstrapChecks.java:50-53` enforces "once a node has the transport
+    /// protocol bound to a non-loopback interface … we assume the node is
+    /// running in production", with one explicit override
+    /// (`es.enforce.bootstrap.checks`, `:59`). Departures: the override lives
+    /// in the config file beside the setting it relaxes rather than in a
+    /// system property, and link-local counts as exposed here (ES's
+    /// `enforceLimits`, `:194-197`, tests only `isLoopbackAddress`, but a
+    /// link-local address is still reachable by every other host on the link).
+    pub fn cleartext_exposed_off_loopback(&self) -> bool {
+        !self.tls.enabled
+            && !self.server.allow_insecure_network_bind
+            && !self.bind_address_is_loopback()
+    }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Sub-configs  (137 user-facing settings total; counted by
+// `journey_zero_config`, not by hand)
+// ═════════════════════════════════════════════════════════════════════════════
+
+/// Network and data-directory settings.
+///
+/// **8 settings.**
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ServerConfig {
+    /// Port for the native REST API (default: `8080`).
+    pub rest_port: u16,
+    /// Port for the gRPC API (default: `8081`).
+    pub grpc_port: u16,
+    /// Port for the Elasticsearch-compatible REST API (default: `9200`).
+    pub es_compat_port: u16,
+    /// Directory where index data is persisted (default: `"./data"`).
+    pub data_dir: String,
+    /// Address to bind all listeners (default: `"127.0.0.1"` — **loopback
+    /// only**; issue #228).
+    ///
+    /// A fresh node is reachable from the machine it runs on and nowhere
+    /// else. That is deliberate: TLS is off by default, so an out-of-the-box
+    /// node that bound every interface would put its admin API key and every
+    /// document body on the network in cleartext, and nothing about a working
+    /// `curl` would say so.
+    ///
+    /// Set this to expose the node — `"0.0.0.0"` for every interface, or a
+    /// specific private address. Doing so while `tls.enabled = false` refuses
+    /// to start unless [`ServerConfig::allow_insecure_network_bind`] says the
+    /// cleartext exposure is intended; see
+    /// [`Config::cleartext_exposed_off_loopback`].
+    pub bind_address: String,
+    /// Permit a network-reachable `bind_address` while TLS is off
+    /// (default: `false` — refuse; issue #228).
+    ///
+    /// Binding off-loopback with `tls.enabled = false` means every request —
+    /// including the `Authorization: ApiKey` header — crosses the network in
+    /// the clear. That is a legitimate configuration when something in front
+    /// of the node terminates TLS (reverse proxy, sidecar, service mesh,
+    /// ingress controller) or when the link itself is trusted, and it is what
+    /// a container image has to do because the container's network namespace
+    /// is the boundary. It is *not* something to arrive at by accident, so it
+    /// has to be stated rather than defaulted into.
+    ///
+    /// Irrelevant when `bind_address` is loopback (nothing off-host can reach
+    /// the listeners) or when `tls.enabled = true` (REST and ES-compat are
+    /// encrypted; the separate gRPC h2c exposure is governed by
+    /// [`TlsConfig::allow_insecure_grpc_h2c`], issue #229).
+    pub allow_insecure_network_bind: bool,
+    /// Reverse proxies whose `X-Forwarded-For` / `X-Real-IP` headers may be
+    /// believed (default: `[]` — **believe nobody**).
+    ///
+    /// Client identity (the per-IP auth rate-limit bucket and the audit-log
+    /// source address) is normally taken from the TCP peer address, which a
+    /// caller cannot forge. `X-Forwarded-For` is attacker-controlled and is
+    /// therefore ignored unless the *socket peer* matches an entry here.
+    ///
+    /// Entries are single addresses (`"10.0.0.7"`, `"::1"`) or CIDR blocks
+    /// (`"10.0.0.0/8"`, `"fd00::/8"`); invalid entries are rejected at
+    /// startup rather than silently ignored. Set this **only** to the
+    /// addresses of proxies you operate: anything listed here can claim to
+    /// be any client and so bypass per-IP throttling.
+    ///
+    /// With this set, the forwarded chain is read right-to-left and the
+    /// right-most address that is *not* itself a listed proxy is used — the
+    /// left end of the chain is written by the caller and cannot be trusted.
+    pub trusted_proxies: Vec<String>,
+    /// Multi-instance opt-in (default `false`). When `true`, a listener port
+    /// that is already in use makes the node bind the next free one, and a
+    /// `data_dir` held by another live process makes it use `<data_dir>-N`.
+    /// Off by default so a taken port stays a fatal startup error (#465).
+    #[serde(default)]
+    pub auto_port: bool,
+}
+
+impl Default for ServerConfig {
+    fn default() -> Self {
+        Self {
+            rest_port: 8080,
+            grpc_port: 8081,
+            es_compat_port: 9200,
+            data_dir: "./data".into(),
+            // Loopback, not `0.0.0.0` (issue #228). TLS is off by default, so
+            // the shipped default must not be one that publishes an API key
+            // in cleartext to every interface the host happens to have.
+            bind_address: "127.0.0.1".into(),
+            allow_insecure_network_bind: false,
+            trusted_proxies: Vec::new(),
+            auto_port: false,
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Elasticsearch/OpenSearch wire-compatibility identity — controls what the
+/// `version`/`distribution` block in `GET /` (and any other endpoint that
+/// reports the same block) says about argos to the calling client.
+///
+/// Three-tier resolution, most explicit wins:
+/// 1. `distribution`/`version` set here (via `--compat-distribution` /
+///    `ARGOS_COMPAT_DISTRIBUTION`, `--compat-version` / `ARGOS_COMPAT_VERSION`)
+///    — always wins, no per-request inspection at all. For a client that
+///    sends no `User-Agent`, or an unrecognized one, or an operator who just
+///    wants deterministic behavior without relying on request sniffing.
+/// 2. Left unset (default): argos inspects the request's `User-Agent` header
+///    and answers per-request — an OpenSearch client and an Elasticsearch
+///    client hitting the SAME running instance each see the block shaped
+///    for their own ecosystem.
+/// 3. Neither of the above resolves anything (no override, no recognizable
+///    `User-Agent`): unchanged pre-existing behavior — plain Elasticsearch.
+///
+/// **2 settings.**
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct CompatConfig {
+    /// Force the reported client distribution: `"elasticsearch"` or
+    /// `"opensearch"`. Empty (default) — resolve per-request from
+    /// `User-Agent` instead (falls back to `elasticsearch`-shaped output,
+    /// i.e. no `distribution` field, when nothing is detected either way).
+    pub distribution: String,
+    /// Force the reported `version.number`. Empty (default) — when the
+    /// caller is auto-detected as OpenSearch (see `distribution` above),
+    /// reports a fixed, empirically-verified compatible OpenSearch version
+    /// instead (NOT the client's own self-reported library version — tried
+    /// that first, a real OpenSearch Dashboards container rejected it, see
+    /// `es_compat::FALLBACK_OPENSEARCH_VERSION`'s doc comment for why).
+    pub version: String,
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Authentication settings.
+///
+/// **3 settings.**
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct AuthConfig {
+    /// Enable API-key authentication (default: `true`).
+    ///
+    /// When `true`, every request must carry an `Authorization: ApiKey <key>`
+    /// header. An admin key is auto-generated on first startup if `admin_api_key`
+    /// is left empty.
+    pub enabled: bool,
+    /// Static admin API key (default: `""` — auto-generated on first run).
+    ///
+    /// Leave empty in production; the engine writes the generated key to
+    /// `<data_dir>/admin.key` on startup.
+    pub admin_api_key: String,
+    /// Optional read-only metrics scrape token (default: `""` — disabled).
+    ///
+    /// When set AND auth is enabled, a caller presenting this exact token
+    /// (`Authorization: Bearer <token>` or `ApiKey <token>`) may scrape
+    /// `GET /v1/metrics` — and ONLY that endpoint — without the admin key.
+    /// This lets an operator hand Prometheus a low-privilege scrape credential
+    /// that can read metrics but cannot touch index data. The admin key still
+    /// works for `/v1/metrics`; when this is empty, metrics require the admin
+    /// key like any other endpoint (unchanged behavior).
+    pub metrics_token: String,
+}
+
+impl Default for AuthConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            admin_api_key: String::new(),
+            metrics_token: String::new(),
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Structured logging + access-log settings (RC4-W4 item 6).
+///
+/// **2 settings.**
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct LoggingConfig {
+    /// Log line format:
+    /// - `"text"` (default) — human-readable compact one-liners.
+    /// - `"json"` — one JSON object per line, for structured log shippers
+    ///   (Loki / Elastic / Datadog). Field names follow tracing's JSON schema.
+    ///
+    /// Validated at load time; any other value is rejected.
+    pub format: String,
+    /// Emit an INFO-level access log line per HTTP request (method, path,
+    /// status, latency) via the tower-http request-tracing layer.
+    ///
+    /// Default `false`: request tracing stays at DEBUG (silent under the
+    /// default `info` filter), preserving today's quiet startup. Turn on for
+    /// request-level observability without dropping the global filter to debug.
+    pub access_log: bool,
+}
+
+impl Default for LoggingConfig {
+    fn default() -> Self {
+        Self {
+            format: "text".into(),
+            access_log: false,
+        }
+    }
+}
+
+impl LoggingConfig {
+    /// True when JSON line format is requested (case-insensitive).
+    pub fn is_json(&self) -> bool {
+        self.format.eq_ignore_ascii_case("json")
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Cross-Origin Resource Sharing (CORS) settings.
+///
+/// **2 settings.**
+///
+/// DEFAULT RESTRICTIVE (RC4 item 5): out of the box the server emits **no**
+/// `Access-Control-Allow-Origin` header, so a browser blocks every cross-origin
+/// read. The pre-RC4 build hard-coded `Access-Control-Allow-Origin: *` /
+/// `-Methods: *` / `-Headers: *` with no knob — any web page on the internet
+/// could script authenticated reads/writes against a ARGOS node reachable from
+/// the victim's browser.
+///
+/// This restrictive default does **not** affect:
+/// - the bundled Argos Console (served same-origin from the same listener — CORS
+///   never applies to same-origin requests);
+/// - non-browser clients: `curl`, the shipped recipes, SDKs, and Kibana (which
+///   talks to ES server-side) all ignore CORS entirely.
+///
+/// To allow a browser SPA hosted on another origin, set
+/// `allowed_origins = ["https://app.example.com"]`. Set
+/// `allow_any_origin = true` **only** for local development to restore the old
+/// wide-open behavior.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct CorsConfig {
+    /// Explicit allow-list of browser `Origin`s permitted to make cross-origin
+    /// requests, e.g. `["https://app.example.com"]`. Empty by default
+    /// (restrictive). Each entry must be a full origin (scheme + host + optional
+    /// port); entries that don't parse as an HTTP header value are ignored.
+    pub allowed_origins: Vec<String>,
+    /// Escape hatch restoring the pre-RC4 wide-open policy
+    /// (`Access-Control-Allow-Origin: *`, any method, any header). Default
+    /// `false`. Enable **only** for local development — a public node with this
+    /// on is scriptable by any web page.
+    pub allow_any_origin: bool,
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// TLS settings.
+///
+/// **4 settings.**
+///
+/// Defaults are derived: TLS is disabled (`enabled: false`) with empty
+/// cert/key paths so the engine starts out of the box; enable it in
+/// production by setting `cert_path` + `key_path`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct TlsConfig {
+    /// Enable in-process TLS termination on the **REST and ES-compat**
+    /// listeners (default: `false` — enable in production).
+    ///
+    /// It does **not** cover the gRPC listener: `argos-server/src/grpc.rs`
+    /// builds tonic without its `tls` feature, so `server.grpc_port` speaks
+    /// cleartext HTTP/2 (h2c) whatever this is set to (issue #229). Enabling
+    /// TLS while binding off-loopback therefore refuses to start unless
+    /// [`TlsConfig::allow_insecure_grpc_h2c`] says the exposure is intended.
+    pub enabled: bool,
+    /// Path to the PEM-encoded certificate file.
+    pub cert_path: String,
+    /// Path to the PEM-encoded private key file.
+    pub key_path: String,
+    /// Permit the cleartext h2c gRPC listener on a network-reachable
+    /// interface while `enabled` is `true` (default: `false` — refuse).
+    ///
+    /// An operator who turns TLS on reasonably reads that as "every listener
+    /// is encrypted", and nothing on the wire corrects them: gRPC clients keep
+    /// working, so credentials and documents cross the network in the clear
+    /// with no symptom. Rather than downgrade silently, startup fails closed
+    /// and names this setting as the way to say the exposure is deliberate —
+    /// for example when a sidecar or service mesh terminates TLS in front of
+    /// `server.grpc_port`.
+    ///
+    /// Irrelevant when `enabled` is `false`: nothing then claims the gRPC
+    /// port is encrypted, and the startup banner already says the listeners
+    /// are plain TCP.
+    pub allow_insecure_grpc_h2c: bool,
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Write-ahead log, flush, and object-store settings.
+///
+/// **12 settings** (6 WAL/flush + 6 object-store).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct StorageConfig {
+    /// WAL fsync strategy: `"sync"`, `"batched"`, or `"async"` (default: `"batched"`).
+    ///
+    /// - `"sync"` — fsync before every acknowledgement.  On the bulk API
+    ///   this is one fsync per bulk request (group commit), matching ES's
+    ///   per-request translog fsync granularity. Safest, slowest.
+    /// - `"batched"` — writes reach the kernel immediately (process-crash
+    ///   durable) and are fsynced within `wal_batch_ms` of arriving, which
+    ///   bounds the power-loss window. Good balance.
+    ///
+    ///   Issue #334: the fsync is scheduled per WAL shard by a shared,
+    ///   bounded worker pool (`argos_storage::wal_fsync`) that is woken by
+    ///   the write itself.  It used to be a dedicated OS thread per index
+    ///   polling on a timer, which cost a thread and `1000 / wal_batch_ms`
+    ///   wakeups per second per index even when nothing was ever written.
+    ///   The guarantee is unchanged (arguably tighter: the deadline is now
+    ///   anchored to the write instead of to a free-running tick).
+    /// - `"async"` — never fsync; the OS decides when to write back.
+    ///   Fastest, least durable.
+    ///
+    /// RC4 W1 #9: `"sync"` was previously ignored on the bulk ingest paths
+    /// (fsync only via the undocumented `ARGOS_STRICT_SYNC` env var) and
+    /// the `wal_batch_ms` loop did not exist. Both are honored now.
+    pub wal_sync: WalSync,
+    /// How often to fsync the WAL when `wal_sync = "batched"` (default: `100` ms).
+    /// Range: 1..=10000.
+    pub wal_batch_ms: u64,
+    /// Maximum WAL file size before it is rolled over (default: `512` MiB).
+    pub wal_max_size_mb: u64,
+    /// Accumulated in-memory data size that triggers a segment flush (default: `256` MiB).
+    pub flush_size_mb: u64,
+    /// Maximum time between flushes regardless of buffer size (default: `30` s).
+    pub flush_interval_secs: u64,
+    /// #873: flush a NON-EMPTY memtable whose contents have not changed for
+    /// this many seconds, regardless of size (default: `300` s; `0` disables).
+    /// Without it a dataset below the size thresholds never reached a
+    /// segment: its documents stayed memtable-resident for the process
+    /// lifetime, pinned their WAL generations, and replayed on every boot —
+    /// measured at 100,001 docs held in RAM 30+ minutes after ingest on an
+    /// idle node. 300 s matches Elasticsearch's
+    /// `indices.memory.shard_inactive_time` default. Detection is a probe on
+    /// the periodic flusher (`flush_interval_secs`), so worst-case latency is
+    /// `flush_idle_secs + flush_interval_secs` and the write path pays
+    /// nothing.
+    pub flush_idle_secs: u64,
+
+    // ── Object-store backend (compute-storage separation) ─────────────────────
+    /// Storage backend: `"local"` or `"s3"` (default: `"local"`).
+    ///
+    /// When set to `"s3"` (with `s3_bucket` naming an existing bucket), each
+    /// flushed segment family is packed into ONE immutable bundle object
+    /// (issue #965's ZBM1 format) plus a per-index `snapshot.json` catalogue;
+    /// merges publish their output before retiring their inputs; a fresh node
+    /// hydrates segment families from the bucket on demand. Single-writer v1:
+    /// one node per index at a time — see docs/OBJECT_STORAGE.md for the
+    /// contract and the unwired remainder.
+    pub backend: StorageBackendType,
+    /// S3 bucket name (required when `backend = "s3"`; must already exist).
+    pub s3_bucket: String,
+    /// Key prefix prepended to every S3 object (default: `"argos/"`). Each
+    /// index gets its own namespace under it (`<prefix>indices/<name>/…`),
+    /// so one bucket can hold many indices without their catalogues
+    /// colliding.
+    pub s3_prefix: String,
+    /// AWS region for S3 requests (default: `"us-east-1"`). Cloudflare R2
+    /// wants the literal `"auto"`.
+    pub s3_region: String,
+    /// Optional S3-compatible endpoint override (default: `""` — AWS S3).
+    /// `"https://<account>.r2.cloudflarestages.com"` for Cloudflare R2,
+    /// `"http://127.0.0.1:9000"` for MinIO. When set, requests address the
+    /// bucket path-style (`<endpoint>/<bucket>/<key>`), which both R2 and
+    /// AWS accept and MinIO requires.
+    pub s3_endpoint: String,
+    /// Local NVMe cache directory for S3 segments (default: `"./cache"`).
+    ///
+    /// **Dormant as of #965**: segment families now materialize in
+    /// `data_dir/segments` (at flush time, and on read/boot when absent —
+    /// fetched from the bucket and CRC-verified), so this directory is not
+    /// consulted on the index path. The bounded-cache design that will
+    /// consume it again is recorded in docs/OBJECT_STORAGE.md ("What is not
+    /// wired"); until then the setting is accepted and validated, and the
+    /// path is used only by the dormant `SegmentCache` machinery.
+    pub local_cache_dir: String,
+}
+
+impl Default for StorageConfig {
+    fn default() -> Self {
+        Self {
+            wal_sync: WalSync::Batched,
+            wal_batch_ms: 100,
+            wal_max_size_mb: 1024,
+            flush_size_mb: 512,
+            flush_interval_secs: 30,
+            flush_idle_secs: 300,
+            backend: StorageBackendType::Local,
+            s3_bucket: String::new(),
+            s3_prefix: "argos/".into(),
+            s3_region: "us-east-1".into(),
+            s3_endpoint: String::new(),
+            local_cache_dir: "./cache".into(),
+        }
+    }
+}
+
+impl StorageConfig {
+    /// Storage settings this build accepts but does not act on, in the
+    /// [`MergeConfig::dormant_overrides`] shape. `local_cache_dir` has been
+    /// dormant since #965 (see its field docs) without being reported.
+    pub fn dormant_overrides(&self) -> Vec<(&'static str, &'static str)> {
+        let mut out = Vec::new();
+        if self.local_cache_dir != StorageConfig::default().local_cache_dir {
+            out.push((
+                "storage.local_cache_dir",
+                "nothing reads it on the index path — segment families \
+                 materialize in data_dir/segments (#965)",
+            ));
+        }
+        out
+    }
+}
+
+/// Storage backend selector.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StorageBackendType {
+    /// Local filesystem only (default).
+    Local,
+    /// AWS S3 (or compatible, e.g. MinIO).
+    S3,
+}
+
+/// WAL fsync strategy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WalSync {
+    /// fsync after every individual write.
+    Sync,
+    /// fsync on a timer (`wal_batch_ms`).
+    Batched,
+    /// Never fsync (OS decides).
+    Async,
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Segment merge settings.
+///
+/// **8 settings**, of which three are **not read by the merge path that runs**
+/// — see [`MergeConfig::dormant_overrides`]. `run_merge_once`
+/// (`argos-engine/src/index.rs`) reads `max_segment_mb`, `tier_floor_mb`,
+/// `min_merge_count` and `max_merge_count`, and nothing else from this struct.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct MergeConfig {
+    /// Merge strategy (default: `"size_tiered"`).
+    ///
+    /// Only `"size_tiered"` is implemented: `run_merge_once` always builds a
+    /// `SizeTieredMergePolicy`. `"log_structured"` is a documented variant with
+    /// no implementation behind it, so [`Config::validate`] rejects it rather
+    /// than run size-tiered merging while the operator believes otherwise.
+    pub strategy: MergeStrategy,
+    /// Minimum number of segments to trigger a merge (default: `10`).
+    ///
+    /// **DORMANT — accepted and validated, but nothing reads it.** The real
+    /// trigger is per-tier and comes from `min_merge_count`. Setting this away
+    /// from its default logs a warning at startup (see
+    /// [`MergeConfig::dormant_overrides`]).
+    pub min_segments: u32,
+    /// Maximum merged segment size in MiB (default: `8192` = 8 GiB).
+    /// Segments at or above this size are excluded from further merges.
+    pub max_segment_mb: u64,
+    /// I/O rate cap for merge operations in MiB/s (default: `100`).
+    ///
+    /// **DORMANT — accepted, but merges are not throttled.** The `RateLimiter`
+    /// that honours this value is wired only into `argos-storage`'s legacy
+    /// `MergeExecutor`, which the engine does not use; the merge that actually
+    /// runs (`run_merge_once`) never consults it. Setting it away from its
+    /// default logs a warning at startup (see
+    /// [`MergeConfig::dormant_overrides`]).
+    pub io_rate_mb_per_sec: u64,
+    /// Maximum number of concurrent merge operations (default: `1`).
+    ///
+    /// **DORMANT — accepted, but nothing reads it.** Merge parallelism comes
+    /// from the `ARGOS_MERGE_PARALLELISM` environment variable, which also
+    /// defaults to 1. Setting this away from its default logs a warning at
+    /// startup (see [`MergeConfig::dormant_overrides`]).
+    pub max_concurrent: u32,
+    /// Tier boundary base for size-tiered merge policy in MiB (default: `4`).
+    /// Segments group into tiers by `floor(log2(size / tier_floor_mb))`.
+    pub tier_floor_mb: u64,
+    /// Minimum segments in a tier before merging is triggered (default: `4`).
+    /// Distinct from `min_segments` (which gates whether a merge runs at all).
+    pub min_merge_count: u32,
+    /// Maximum segments merged per batch (default: `16`).
+    /// Caps per-batch RAM: ~max_merge_count × per-segment overhead.
+    pub max_merge_count: u32,
+}
+
+impl Default for MergeConfig {
+    fn default() -> Self {
+        Self {
+            strategy: MergeStrategy::SizeTiered,
+            min_segments: 10,
+            max_segment_mb: 8192,
+            io_rate_mb_per_sec: 100,
+            max_concurrent: 1,
+            tier_floor_mb: 4,
+            min_merge_count: 4,
+            max_merge_count: 16,
+        }
+    }
+}
+
+impl MergeConfig {
+    /// Merge settings this build accepts but does not act on, reported as
+    /// `("merge.io_rate_mb_per_sec", "what actually happens")` — and only when
+    /// the operator has moved one away from its default, because leaving a
+    /// dormant knob alone asks for nothing.
+    ///
+    /// Issue #207 found `io_rate_mb_per_sec` documented, validated and inert:
+    /// the `RateLimiter` that honours it lives in `argos-storage`'s legacy
+    /// `MergeExecutor`, which the engine never constructs. `min_segments` and
+    /// `max_concurrent` are in the same state. That is the accepted-and-ignored
+    /// pattern tracked by #204, and the operator it hurts is the one throttling
+    /// merges to protect query latency — they get no throttle and no signal.
+    ///
+    /// These stay accepted rather than becoming hard errors like
+    /// `storage.backend`: the wrong value costs latency, not data, and
+    /// `io_rate_mb_per_sec = 100` has shipped in `argos.default.toml` since v0.1,
+    /// so rejecting it would refuse to start on a config the project itself
+    /// handed out. The caller (`argos-server/src/main.rs`) logs each line at
+    /// WARN. Wiring a real throttle into `run_merge_once` is the fix that makes
+    /// this list shorter.
+    pub fn dormant_overrides(&self) -> Vec<(&'static str, &'static str)> {
+        let d = MergeConfig::default();
+        let mut out = Vec::new();
+        if self.io_rate_mb_per_sec != d.io_rate_mb_per_sec {
+            out.push((
+                "merge.io_rate_mb_per_sec",
+                "merge I/O is not throttled in this build — the rate limiter is \
+                 wired only into argos-storage's unused MergeExecutor",
+            ));
+        }
+        if self.min_segments != d.min_segments {
+            out.push((
+                "merge.min_segments",
+                "nothing reads it — the merge trigger is per-tier and comes from \
+                 merge.min_merge_count",
+            ));
+        }
+        if self.max_concurrent != d.max_concurrent {
+            out.push((
+                "merge.max_concurrent",
+                "nothing reads it — merge parallelism comes from the \
+                 ARGOS_MERGE_PARALLELISM environment variable",
+            ));
+        }
+        out
+    }
+}
+
+/// Segment merge strategy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MergeStrategy {
+    /// Merge segments of similar size (good for write-heavy workloads).
+    SizeTiered,
+    /// LSMT-style levelled merge (good for mixed workloads).
+    LogStructured,
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Compression settings.
+///
+/// **3 settings.**
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct CompressionConfig {
+    /// Enable block compression for stored fields (default: `true`).
+    ///
+    /// **Dormant.** Every durable artifact ARGOS writes is a self-describing
+    /// compressed envelope (`ZBS2` stored, `ZFM4` `.meta`, `ZPS1` `.post`,
+    /// the zstd-flagged `.dv` columns); "off" would mean emitting the legacy
+    /// uncompressed layouts, which only exist as read-side compatibility
+    /// paths. Setting `false` warns at startup — see
+    /// [`CompressionConfig::dormant_overrides`].
+    pub enabled: bool,
+    /// Compression level: `"fast"`, `"balanced"`, or `"best"` (default: `"balanced"`).
+    ///
+    /// Selects the Zstandard effort level used to re-encode a segment's
+    /// durable artifacts **at merge time**. See [`CompressionLevel`] for the
+    /// level each name maps to, and why flush ignores this knob.
+    pub level: CompressionLevel,
+    /// Number of documents per compressed block (default: `128`).
+    ///
+    /// **Dormant.** Kept because it has shipped in `argos.default.toml` since
+    /// v0.1, but ARGOS's stored codec is columnar over the whole segment
+    /// section rather than blocked by document count, so there is no
+    /// doc-block for this to size. Validated against its documented 16–4096
+    /// range and warned about when moved off the default — see
+    /// [`CompressionConfig::dormant_overrides`].
+    pub block_size_docs: u32,
+}
+
+impl Default for CompressionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            level: CompressionLevel::Balanced,
+            block_size_docs: 128,
+        }
+    }
+}
+
+impl CompressionConfig {
+    /// The documented range for `block_size_docs`, quoted in
+    /// `argos.default.toml` and on `landing/docs/config.html`.
+    pub const BLOCK_SIZE_DOCS_RANGE: std::ops::RangeInclusive<u32> = 16..=4096;
+
+    /// Compression settings this build accepts but does not act on, in the
+    /// same `("compression.key", "what actually happens")` shape as
+    /// [`MergeConfig::dormant_overrides`], and reported the same way — only
+    /// when the operator has moved one off its default.
+    ///
+    /// Issue #318 found the whole `[compression]` section inert: two servers
+    /// differing only in `enabled` / `level` / `block_size_docs` produced
+    /// byte-identical segments (`.seg` 261,481 / `.dv` 10,679 / `.post`
+    /// 192,287 on a 3,000-doc corpus), with no error and no warning, while
+    /// the docs described all three as live. `level` is now wired into the
+    /// merge re-encode; these two are not, and stay accepted-but-warned for
+    /// the reason `merge.io_rate_mb_per_sec` does — both ship non-default in
+    /// no config the project itself hands out, and the cost of ignoring them
+    /// is disk footprint, not data.
+    pub fn dormant_overrides(&self) -> Vec<(&'static str, &'static str)> {
+        let d = CompressionConfig::default();
+        let mut out = Vec::new();
+        if self.enabled != d.enabled {
+            out.push((
+                "compression.enabled",
+                "durable artifacts are always compressed in this build — the \
+                 stored (ZBS2), .meta (ZFM4), .post (ZPS1) and .dv envelopes \
+                 have no uncompressed write path, only legacy read support",
+            ));
+        }
+        if self.block_size_docs != d.block_size_docs {
+            out.push((
+                "compression.block_size_docs",
+                "nothing reads it — the stored codec is columnar over the \
+                 whole segment section, not blocked by document count",
+            ));
+        }
+        out
+    }
+}
+
+/// Compression level — the Zstandard effort applied when a segment's durable
+/// artifacts are re-encoded at **merge**.
+///
+/// Three things about this enum are deliberate and were all decided against
+/// what the docs used to promise (issue #318):
+///
+/// 1. **Merge only.** Flush stays pinned at [`CompressionLevel::Balanced`]'s
+///    level 3 regardless of this setting. Raising the flush level to 19 is
+///    exactly the regression recorded in
+///    `engine/reports/2026-04-25T21-50-00_ingest_perf_regression_zstd19.md`
+///    — 1.55 M docs/s peak collapsed to 21 K docs/s with 75 % of documents
+///    rejected, because a ~50 ms segment flush became 5–10 s and tripped
+///    back-pressure. Merge is off the ingest critical path; flush is not.
+/// 2. **All three names are Zstandard**, not "LZ4 for fast". Every durable
+///    envelope ARGOS writes (`ZBS2`, `ZFM4`, `ZPS1`, zstd-flagged `.dv`) is
+///    zstd-framed, and its magic is what the reader dispatches on; making
+///    one level switch algorithm would mean writing the legacy LZ4 layouts
+///    that survive only as read-compatibility paths. `"fast"` is therefore
+///    zstd's own fastest level, not a different codec.
+/// 3. **`"best"` is level 6, not 19.** The RFC #148 thread measured L6 at
+///    −14.4 % stored / −14.3 % `.dv` / −15.4 % `.meta`, while L9 doubles the
+///    decode window from 2.00 to 4.00 MiB and L19 takes it to 8.00 MiB — a
+///    cost every streaming point-get pays on read, forever, for a ratio gain
+///    that measurement did not show. Lucene and Elasticsearch land in the
+///    same place from the other direction: ES's `best_compression` stored
+///    fields format tops out at zstd **3** with a bigger block, not at a
+///    high effort level (`Zstd814StoredFieldsFormat.java:38-46`, read for
+///    approach only — that code is AGPL/SSPL/Elastic-2.0 and none of it is
+///    copied here).
+///
+/// Decoding never depends on the level a segment was written at, so mixed
+/// levels across segments — the normal state after changing this setting —
+/// need no format flag and no migration. That is why ARGOS does not need
+/// Lucene's `Lucene90StoredFieldsFormat.MODE_KEY` segment attribute
+/// (`Lucene90StoredFieldsFormat.java:113-137`, Apache-2.0): Lucene must
+/// record the mode because BEST_SPEED and BEST_COMPRESSION are different
+/// algorithms (LZ4 vs Deflate), whereas here they differ only in effort.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CompressionLevel {
+    /// Zstandard level 1 — maximum throughput, moderate ratio.
+    Fast,
+    /// Zstandard level 3 — good ratio with low CPU overhead. Also the level
+    /// every flush uses, whatever this setting says.
+    Balanced,
+    /// Zstandard level 6 — best measured ratio per byte of decode window.
+    Best,
+}
+
+impl CompressionLevel {
+    /// The Zstandard level this name maps to.
+    ///
+    /// The single source of truth for the mapping: the encoder sites in
+    /// `argos-storage` and `argos-fts` take an `i32` level, and
+    /// `argos-compress`'s codec factory routes through here too, so the
+    /// meaning of "best" cannot drift between the config surface and the
+    /// codecs.
+    pub const fn zstd_level(self) -> i32 {
+        match self {
+            Self::Fast => 1,
+            Self::Balanced => 3,
+            Self::Best => 6,
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Full-text search settings.
+///
+/// **1 setting.**
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct FtsConfig {
+    /// Default analyzer for `text` fields (default: `"standard"`).
+    ///
+    /// Built-in analyzers: `"standard"`, `"whitespace"`, `"simple"`, `"english"`.
+    /// Custom analyzers are defined at index creation time.
+    ///
+    /// **DORMANT — accepted, but nothing reads it.** A `text` field without
+    /// an analyzer of its own uses the index's `analysis.analyzer.default`
+    /// when the index declares one (#991), and `standard` otherwise; this
+    /// node-wide key never enters that choice. Reported at startup when set
+    /// (see [`FtsConfig::dormant_overrides`]).
+    pub default_analyzer: String,
+}
+
+impl Default for FtsConfig {
+    fn default() -> Self {
+        Self {
+            default_analyzer: "standard".into(),
+        }
+    }
+}
+
+impl FtsConfig {
+    /// Full-text settings this build accepts but does not act on, in the
+    /// [`MergeConfig::dormant_overrides`] shape: named only when the operator
+    /// moved one off its default.
+    pub fn dormant_overrides(&self) -> Vec<(&'static str, &'static str)> {
+        let mut out = Vec::new();
+        if self.default_analyzer != FtsConfig::default().default_analyzer {
+            out.push((
+                "fts.default_analyzer",
+                "nothing reads it — a text field uses its own analyzer, the \
+                 index's analysis.analyzer.default, or standard",
+            ));
+        }
+        out
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Vector search (HNSW) settings.
+///
+/// **6 settings.**
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct VectorConfig {
+    /// Similarity metric: `"cosine"`, `"dot_product"`, or `"euclidean"` (default: `"cosine"`).
+    ///
+    /// **DORMANT — accepted, but nothing reads it.** A `dense_vector` field
+    /// takes its `similarity` from the mapping, and a mapping without one
+    /// gets `cosine` (the ES default) whatever this says.
+    pub default_metric: VectorMetric,
+    /// HNSW `M` parameter — edges per node per layer (default: `16`).
+    ///
+    /// Higher values improve recall at the cost of memory and build time.
+    ///
+    /// **DORMANT — validated, but nothing reads it.** The graph builds with
+    /// a fixed `M = 16` (`HnswParams::new`).
+    pub hnsw_m: usize,
+    /// HNSW `ef_construction` — search width during index build (default: `200`).
+    ///
+    /// **DORMANT — validated, but nothing reads it.** The graph builds with
+    /// a fixed `ef_construction = 200` (`HnswParams::new`).
+    pub hnsw_ef_construction: usize,
+    /// HNSW `ef` — search width at query time (default: `100`).
+    ///
+    /// **DORMANT — validated, but nothing reads it.** The query-time beam
+    /// width comes from the request's `num_candidates` (1.5 × `k` when
+    /// omitted), floored at `HNSW_EF_FLOOR`.
+    pub hnsw_ef_search: usize,
+    /// Default quantization: `"none"` (default) or `"scalar8"`. `"binary"` is
+    /// **not implemented in this build** and is rejected at startup.
+    ///
+    /// - `"none"` — full float32 vectors (highest accuracy, most memory).
+    /// - `"scalar8"` — 8-bit scalar quantization, WIRED into the kNN serving
+    ///   path. A `scalar8` dense_vector field is scored from
+    ///   1-byte-per-dimension SQ8 codes written at INGEST time into a flat,
+    ///   slot-addressed u8 array (#392), so it has the recall profile of int8
+    ///   and the kNN scoring working set is the codes (1 byte/dim) instead of
+    ///   the f32 `_source` vectors (4 bytes/dim). `_source` keeps the f32
+    ///   originals, so this shrinks the scoring working set, not total resident
+    ///   memory. When the code store cannot serve (open-time walk not yet
+    ///   converged, a publication race, coverage broken by a wrong-dimension
+    ///   write), queries fall back to the exact `_source` scan. Opted into
+    ///   per field via `index_options.type: int8_hnsw` (or `int8_flat`) on
+    ///   the mapping.
+    /// - `"binary"` — 1-bit binary quantization (~32× memory reduction) — NOT
+    ///   YET IMPLEMENTED (no `BinaryQuantizer` exists).
+    ///
+    /// Honouring `binary` would silently store full-precision vectors while
+    /// claiming a saving, so only `none` and `scalar8` are accepted (see
+    /// `Config::validate`).
+    ///
+    /// **DORMANT — only the `binary` refusal reads it.** Quantization comes
+    /// from each field's `index_options`; setting `"scalar8"` here does not
+    /// quantize a field whose mapping does not ask for it.
+    pub default_quantization: VectorQuantization,
+    /// Maximum supported vector dimensionality (default: `16384`).
+    ///
+    /// **DORMANT — validated (must be ≥ 1), but nothing reads it.** No
+    /// mapping or document is checked against it.
+    pub max_dimensions: usize,
+}
+
+impl VectorConfig {
+    /// Vector settings this build accepts but does not act on, in the
+    /// [`MergeConfig::dormant_overrides`] shape: named only when the operator
+    /// moved one off its default.
+    pub fn dormant_overrides(&self) -> Vec<(&'static str, &'static str)> {
+        let d = VectorConfig::default();
+        let mut out = Vec::new();
+        if self.default_metric != d.default_metric {
+            out.push((
+                "vector.default_metric",
+                "nothing reads it — similarity comes from the field mapping, \
+                 cosine when the mapping omits it",
+            ));
+        }
+        if self.hnsw_m != d.hnsw_m {
+            out.push((
+                "vector.hnsw_m",
+                "nothing reads it — the HNSW graph builds with a fixed M = 16",
+            ));
+        }
+        if self.hnsw_ef_construction != d.hnsw_ef_construction {
+            out.push((
+                "vector.hnsw_ef_construction",
+                "nothing reads it — the HNSW graph builds with a fixed \
+                 ef_construction = 200",
+            ));
+        }
+        if self.hnsw_ef_search != d.hnsw_ef_search {
+            out.push((
+                "vector.hnsw_ef_search",
+                "nothing reads it — the query-time beam width comes from the \
+                 request's num_candidates",
+            ));
+        }
+        if self.default_quantization != d.default_quantization {
+            out.push((
+                "vector.default_quantization",
+                "nothing reads it — quantization comes from each field's \
+                 index_options in the mapping",
+            ));
+        }
+        if self.max_dimensions != d.max_dimensions {
+            out.push((
+                "vector.max_dimensions",
+                "nothing reads it — mappings and documents are not checked \
+                 against it",
+            ));
+        }
+        out
+    }
+}
+
+impl Default for VectorConfig {
+    fn default() -> Self {
+        Self {
+            default_metric: VectorMetric::Cosine,
+            hnsw_m: 16,
+            hnsw_ef_construction: 200,
+            hnsw_ef_search: 100,
+            default_quantization: VectorQuantization::None,
+            max_dimensions: 16384,
+        }
+    }
+}
+
+/// Vector similarity metric.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VectorMetric {
+    /// Cosine similarity (vectors are normalised).
+    Cosine,
+    /// Raw dot product.
+    DotProduct,
+    /// L2 (Euclidean) distance.
+    Euclidean,
+}
+
+/// Vector quantization scheme.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VectorQuantization {
+    /// No quantization — store full float32 vectors.
+    None,
+    /// 8-bit scalar quantization.
+    Scalar8,
+    /// 1-bit binary quantization.
+    Binary,
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Log (time-series) retention settings.
+///
+/// **2 settings.**
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct LogsConfig {
+    /// How long to retain log data before automatic deletion (default: `90` days).
+    ///
+    /// **DORMANT — accepted, but nothing reads it, and nothing deletes log
+    /// data.** `argos_logs::RetentionPolicy` exists but is constructed only by
+    /// that crate's own tests; no server or engine code uses `argos-logs`.
+    pub retention_days: u32,
+    /// Time-based partition granularity (default: `"1h"`).
+    ///
+    /// Supported values: `"1m"`, `"5m"`, `"15m"`, `"1h"`, `"6h"`, `"1d"`.
+    ///
+    /// **DORMANT — accepted, but nothing reads it.** Log indices are not
+    /// partitioned by time.
+    pub time_partition: String,
+}
+
+impl Default for LogsConfig {
+    fn default() -> Self {
+        Self {
+            retention_days: 90,
+            time_partition: "1h".into(),
+        }
+    }
+}
+
+impl LogsConfig {
+    /// `[logs]` settings this build accepts but does not act on, in the
+    /// [`MergeConfig::dormant_overrides`] shape.
+    ///
+    /// Unlike the merge and compression knobs, the cost of ignoring these is
+    /// data, not latency: an operator who sets `retention_days = 30` to keep a
+    /// log volume bounded gets unbounded growth. They stay accepted so a
+    /// config the project handed out still boots, and are named at startup.
+    pub fn dormant_overrides(&self) -> Vec<(&'static str, &'static str)> {
+        let d = LogsConfig::default();
+        let mut out = Vec::new();
+        if self.retention_days != d.retention_days {
+            out.push((
+                "logs.retention_days",
+                "nothing deletes log data in this build — no retention job \
+                 runs; delete old indices or documents yourself",
+            ));
+        }
+        if self.time_partition != d.time_partition {
+            out.push((
+                "logs.time_partition",
+                "nothing reads it — log indices are not partitioned by time",
+            ));
+        }
+        out
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// One measured neural-ingest sample. Advisory: it is not configuration,
+/// it is not serialized, and it is not part of the embedding identity.
+///
+/// Recorded once after the neural model loads. Autoindex turns it into a
+/// time estimate (`corpus bytes / (probe bytes / probe seconds)`). A missing
+/// probe means "not measured" — callers must not invent a rate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NeuralIngestProbe {
+    /// UTF-8 bytes of the timed passages.
+    pub bytes: u64,
+    /// Passages in the timed call.
+    pub passages: u32,
+    /// Wall time of that call, in milliseconds. Zero is not a measurement.
+    pub millis: u64,
+}
+
+/// Embedding backend settings.
+///
+/// ARGOS can embed `semantic_text` fields four ways, chosen by
+/// [`mode`](Self::mode):
+///   * `"lexical"` — the zero-dependency built-in feature-hash embedder
+///     (deterministic, 384-dim, no model, no network). This is the honest
+///     default: lexical, *not* neural semantic understanding.
+///   * `"neural"` — a built-in BERT sentence embedder (all-MiniLM-L6-v2 by
+///     default) that runs in-process via `candle`. The model weights are
+///     downloaded and loaded at startup (or read from
+///     [`local_model_dir`](Self::local_model_dir) for
+///     air-gapped deployments; `HF_ENDPOINT` selects a Hub mirror). If that
+///     load fails, the process refuses to start (#1840) instead of accepting
+///     traffic and failing every ingest. It does not substitute the lexical
+///     embedder: those vectors are not comparable with neural vectors, the
+///     same fail-closed rule as explicit `"proxy"` (#1189). The neural
+///     backend ships in the standard binary; a `--no-default-features` slim
+///     build omits it and falls back to lexical, and identity reports lexical.
+///   * `"proxy"` — call an external OpenAI-compatible embeddings
+///     endpoint ([`default_endpoint`](Self::default_endpoint)). Lets
+///     customers plug in ANY embedding model / provider they already run.
+///     The configured value may be a base URL ending in `/v1` (trailing
+///     slash optional) or a bare host — `/embeddings` is appended — or the
+///     full path ending in `/embeddings`, which is used unchanged. Any other
+///     path is a startup ERROR that names the URL and the
+///     `{origin}/v1/embeddings` path to set. An explicit `mode = "proxy"` with a
+///     missing or unusable endpoint is a startup ERROR (#1189): silently
+///     running lexical instead would write the wrong vectors into the index
+///     while every embedding request appears to succeed.
+///   * `"onnx-experimental"` — a local FP32 ONNX model and tokenizer
+///     ([`onnx_model_path`](Self::onnx_model_path),
+///     [`onnx_tokenizer_path`](Self::onnx_tokenizer_path)) run through ONNX
+///     Runtime; never auto-downloaded. Needs a build with the
+///     `onnx-experimental` feature and is fail-closed: a build without it, or
+///     a missing model or tokenizer, is a startup error, never a lexical
+///     fallback.
+///   * `"auto"` (default) — use the proxy when
+///     [`default_endpoint`](Self::default_endpoint) is set,
+///     otherwise lexical; if the endpoint fails to initialize, fall back to
+///     lexical with a warning. The fallback exists ONLY on this path (#1189).
+///
+/// **20 settings.**
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct EmbeddingConfig {
+    /// Backend selector: `"auto"` (default), `"lexical"`, `"neural"`,
+    /// `"proxy"`, or `"onnx-experimental"`. Unknown values are treated as
+    /// `"auto"`.
+    pub mode: String,
+    /// OpenAI-compatible embeddings URL (default: `""` — disabled).
+    ///
+    /// Accepted forms, trailing slash optional (#2355):
+    /// * a base whose path ends in `/v1` — `/embeddings` is appended
+    ///   (`http://localhost:8000/v1` becomes
+    ///   `http://localhost:8000/v1/embeddings`)
+    /// * a bare origin (`http://host:port` or with only `/`) — `/embeddings`
+    ///   is appended
+    /// * a path that already ends in `/embeddings` — used as given
+    ///
+    /// Any other path refuses to start when [`mode`](Self::mode) is
+    /// `"proxy"` and names this URL plus `{origin}/v1/embeddings`. The value
+    /// stored here is also the proxy half of the embedder identity, so
+    /// changing it after a corpus is indexed is a different embedder even
+    /// when the resolved request URL would be the same.
+    pub default_endpoint: String,
+    /// Model name to request from the endpoint (default: `""`).
+    pub default_model: String,
+    /// Maximum documents per embedding API call (default: `64`). Providers
+    /// cap the request `input` array (often far below 64); the proxy splits
+    /// larger batches into consecutive requests of at most this size (#1190).
+    pub batch_size: usize,
+    /// HTTP timeout for embedding requests in ms (default: `5000`).
+    pub timeout_ms: u64,
+    /// Neural backend: HuggingFace model id to load (default
+    /// `sentence-transformers/all-MiniLM-L6-v2`, a 384-dim sentence encoder).
+    pub neural_model: String,
+    /// Neural backend: directory to cache downloaded model weights. Empty
+    /// (default) uses the standard HuggingFace cache (`~/.cache/huggingface`).
+    pub model_cache_dir: String,
+    /// Neural backend: if set, load `config.json`, `tokenizer.json`, and the
+    /// safetensors weights from this local directory instead of downloading
+    /// — for air-gapped / offline deployments. Empty (default) = download.
+    pub local_model_dir: String,
+    /// Neural backend: how many of one `_bulk` request's scheduling windows
+    /// may run through the embedder concurrently (default: `1`, range:
+    /// `1..=64`). The default preserves the historical strictly-serial
+    /// window loop exactly. `1` is also right for the lexical and proxy
+    /// backends, where there is nothing to overlap. For
+    /// `mode = "neural"` on a many-core box, raising it lets one `_bulk`
+    /// stream keep several BERT forward passes in flight on the shared
+    /// model instead of one (#938); every window is still embedded as its
+    /// own batch and reassembled by position, so outputs are unchanged.
+    pub neural_window_concurrency: usize,
+    /// Experimental ONNX backend: local FP32 all-MiniLM-L6-v2-compatible
+    /// model with int64 BERT inputs and a width-384 token-embedding output.
+    /// Required when `mode = "onnx-experimental"`; never auto-downloaded.
+    pub onnx_model_path: String,
+    /// Experimental ONNX backend: tokenizer.json from the same model/export.
+    pub onnx_tokenizer_path: String,
+    /// Maximum passages collected before one ONNX scheduling call
+    /// (default: `64`, range: `1..=4096`). This is independent of the
+    /// backend's internal `onnx_max_batch` microbatch cap.
+    pub onnx_scheduling_window: usize,
+    /// Experimental ONNX Runtime intra-op threads (default: available CPUs).
+    pub onnx_intra_threads: usize,
+    /// Number of independent ONNX Runtime sessions (default: `1`, range:
+    /// `1..=2`). Two sessions permit two scheduling windows to run in
+    /// parallel, at the cost of another model session's memory.
+    pub onnx_session_pool_size: usize,
+    /// Maximum texts accepted by one ONNX scheduling window.
+    pub onnx_max_pending: usize,
+    /// Maximum documents in one ONNX inference microbatch.
+    pub onnx_max_batch: usize,
+    /// Maximum batch × padded-token slots per ONNX inference microbatch.
+    pub onnx_padded_token_budget: usize,
+    /// Maximum ONNX calls admitted globally per shared model/session.
+    pub onnx_max_inflight_calls: usize,
+    /// Reject one ONNX call above this many UTF-8 input bytes before tokenizing.
+    pub onnx_max_input_bytes_per_call: usize,
+    /// Aggregate UTF-8 bytes admitted globally per shared ONNX model/session.
+    pub onnx_max_inflight_input_bytes: usize,
+    /// Engine-lifetime immutable ONNX assets. Cloned configurations share this
+    /// cell, so identity reporting and lazy loading consume the same bytes.
+    /// It is runtime state, never configuration input or serialized output.
+    #[serde(skip)]
+    pub runtime_onnx_assets:
+        std::sync::Arc<std::sync::OnceLock<Result<EmbeddingAssetSnapshot, String>>>,
+    /// Vector width last confirmed for this proxy endpoint and model (#2306).
+    ///
+    /// Filled by the engine, not by configuration. Cloned configs share the
+    /// cell. Empty until a probe (or the on-disk fallback) succeeds; identity
+    /// reporting then treats the proxy as resumable and publishes the width.
+    /// Serde skips it: it is not a setting and must not round-trip through a
+    /// config file.
+    #[serde(skip)]
+    pub runtime_proxy_width: std::sync::Arc<std::sync::RwLock<Option<ConfirmedProxyWidth>>>,
+    /// Neural ingest probe, shared by cloned configs (the server preloads
+    /// from a clone). `None` inside the cell means the probe ran and did not
+    /// produce a rate; an empty cell means it has not run. Not a setting.
+    #[serde(skip)]
+    pub neural_ingest_probe: std::sync::Arc<std::sync::OnceLock<Option<NeuralIngestProbe>>>,
+}
+
+/// Vector width a proxy embedder confirmed for one endpoint and model.
+///
+/// The digest of a proxy identity stays the configured model and endpoint
+/// (#533). This width is the other half of that identity: autoindex compares
+/// it on resume and refuses to mix a different width into an existing corpus.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfirmedProxyWidth {
+    pub endpoint: String,
+    pub model: String,
+    pub dimensions: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct EmbeddingAssetSnapshot {
+    pub model_bytes: std::sync::Arc<[u8]>,
+    pub tokenizer_bytes: std::sync::Arc<[u8]>,
+    pub model_sha256: String,
+    pub tokenizer_sha256: String,
+}
+
+impl Default for EmbeddingConfig {
+    fn default() -> Self {
+        Self {
+            mode: "auto".to_string(),
+            default_endpoint: String::new(),
+            default_model: String::new(),
+            batch_size: 64,
+            timeout_ms: 5000,
+            neural_model: "sentence-transformers/all-MiniLM-L6-v2".to_string(),
+            model_cache_dir: String::new(),
+            local_model_dir: String::new(),
+            neural_window_concurrency: 1,
+            onnx_model_path: String::new(),
+            onnx_tokenizer_path: String::new(),
+            onnx_scheduling_window: 64,
+            onnx_intra_threads: crate::resource::threads_for(crate::resource::Workload::Latency),
+            onnx_session_pool_size: 1,
+            onnx_max_pending: 4096,
+            onnx_max_batch: 64,
+            onnx_padded_token_budget: 4096,
+            onnx_max_inflight_calls: 8,
+            onnx_max_input_bytes_per_call: 8 * 1024 * 1024,
+            onnx_max_inflight_input_bytes: 32 * 1024 * 1024,
+            runtime_onnx_assets: std::sync::Arc::new(std::sync::OnceLock::new()),
+            runtime_proxy_width: std::sync::Arc::new(std::sync::RwLock::new(None)),
+            neural_ingest_probe: std::sync::Arc::new(std::sync::OnceLock::new()),
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Sentinel value of [`LimitsConfig::max_process_memory_mb`] meaning **AUTO**:
+/// pick the process-memory cap from the machine size (half of RAM under
+/// 16 GiB, then 8 / 16 / 32 GiB) rather than a flat number. It is the serde
+/// default, so an omitted field resolves to AUTO; the governor intercepts it
+/// before any budget
+/// math, so this literal never reaches a budget as a byte count. `u64::MAX` is
+/// used because no operator sets a 16-EiB cap — it is a reserved, unmistakable
+/// "not a real MiB value" marker, distinct from `0` (uncapped, the whole
+/// machine) and every plausible explicit MiB ceiling.
+pub const AUTO_PROCESS_MEMORY_MB: u64 = u64::MAX;
+
+/// Resource limits.
+///
+/// **15 settings.**
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct LimitsConfig {
+    /// Maximum memory a single query may allocate (default: `512` MiB).
+    pub max_query_memory_mb: u64,
+    /// Maximum number of searches executing concurrently (default: `64`).
+    pub max_concurrent_searches: u32,
+    /// Maximum number of mapped fields per index (default: `500`).
+    ///
+    /// Elasticsearch's mapping explosion protection. Keep this low.
+    pub max_fields_per_index: u32,
+    /// Maximum number of actions in a single `_bulk` request (default:
+    /// `50_000`). Each action materializes several intermediate Vecs
+    /// (line pairs, parse outcomes, parsed actions) totalling ~300 B/entry,
+    /// so an unbounded bulk body of one-byte lines can amplify to ~7.5 GiB
+    /// of heap before any memtable admission check fires. This cap rejects
+    /// oversized bulks at the top of the parse phase with a 413-style per-item
+    /// error instead of letting jemalloc abort the process on OOM.
+    pub max_actions_per_bulk: usize,
+    /// Filesystem locations under which a snapshot repository's `settings.location`
+    /// is allowed to resolve (an ES `path.repo` equivalent). Empty (the default)
+    /// means **only `data_dir`** is permitted. Without this bound a write-capable
+    /// client could `PUT /_snapshot/<repo>` with an arbitrary absolute `location`
+    /// and then create/restore snapshots that read or write index data outside
+    /// `data_dir` (path-traversal via the repo root, F-PATH-02). Each entry is a
+    /// base directory; a repo location is accepted only if it canonicalizes to a
+    /// path inside `data_dir` or inside one of these bases.
+    #[serde(default)]
+    pub snapshot_repo_allowlist: Vec<String>,
+    /// Let a snapshot **restore** (never a create) read from the Corpus Hub pack
+    /// cache of the user the server runs as — `$ARGOS_HUB_HOME/packs`, else
+    /// `~/.argos/hub/packs` (`argos_common::hub::hub_packs_dir`) — without listing
+    /// it in `snapshot_repo_allowlist` (default: `true`).
+    ///
+    /// `argos hub pull` / `argos ask` download a signed pack, verify it, extract it
+    /// under that directory and ask the server to restore it. Before this, only
+    /// the node ARGOS starts for itself allowlisted the directory, so a server the
+    /// user started by hand refused every pull. The grant is deliberately
+    /// narrower than an allowlist entry: restore only (a client cannot write a
+    /// snapshot into the user's home), honoured only while the directory is a
+    /// real directory — not a symlink — owned by the server's own user, and the
+    /// repo location is still canonicalized, so a symlink inside the cache that
+    /// points elsewhere is refused. Set `false` to allow `data_dir` and the
+    /// allowlist only.
+    pub hub_pack_restore: bool,
+    /// Maximum HTTP request body size in bytes (default: `100 * 1024 * 1024`,
+    /// i.e. 100 MiB). Caps NDJSON bulk payloads, large mget bodies, etc.
+    /// Raise this only if your client routinely sends bigger requests; the
+    /// router rejects oversized bodies before they reach a handler.
+    pub max_body_bytes: usize,
+    /// Maximum value of `from + size` in a search request (default: `10_000`).
+    ///
+    /// The node-wide default for Elasticsearch's `index.max_result_window`:
+    /// an index whose settings carry `index.max_result_window` uses that, any
+    /// other index uses this. Deep pagination past it should use
+    /// `search_after` / point-in-time cursors instead. Must be in
+    /// `1..=2147483647` (the setting's ES range).
+    pub max_result_window: usize,
+    /// Maximum number of doc-references in a single `_mget` request body
+    /// (default: `10_000`). Mirrors `max_result_window`.
+    pub max_mget_docs: usize,
+    /// Maximum number of buckets a single aggregation may produce
+    /// (default: `65_536`). Mirrors Elasticsearch's `search.max_buckets`
+    /// cluster setting. Without this cap, a `terms` agg over a high-
+    /// cardinality field (e.g. 50M unique user IDs) allocates 50M
+    /// HashMap entries before pagination can drop them. Apply at the
+    /// accumulator boundary, not after sort, so memory never grows
+    /// past the cap.
+    pub max_buckets: usize,
+    /// Process-wide ceiling on the total bytes buffered across ALL indices'
+    /// memtables (default: `0` = auto-derive to 25% of the effective
+    /// cgroup/system memory limit, floored at 2048 MiB, capped at 50% of
+    /// that same limit). This is the parent circuit breaker for the ingest
+    /// path:
+    /// per-index back-pressure only bounds one index at `~3×flush_size_mb`,
+    /// so `N` indices could buffer `N × 1.5 GiB` with no global ceiling —
+    /// the structural cause of the 112 GiB OOM. When the summed memtable
+    /// footprint crosses this budget, writes are rejected with HTTP 429
+    /// `circuit_breaking_exception` instead of growing until the kernel
+    /// OOM-kills the process.
+    pub max_total_memtable_mb: u64,
+    /// Process-wide retained-payload ceiling for all immutable segment
+    /// hydration caches (default: `0` = 20% of the effective cgroup/system
+    /// memory limit). This is not an RSS ceiling: query materialization,
+    /// decode scratch, mmaps, allocator fragmentation, and unrelated caches
+    /// are outside it.
+    pub max_segment_hydration_cache_mb: u64,
+    /// RSS admission watermark, as a percentage of the effective process
+    /// memory limit (default: `95`). The effective limit is the cgroup
+    /// memory limit when one is set (e.g. under `systemd-run -p MemoryMax=`
+    /// or a container), else total system RAM. When resident set size
+    /// crosses this fraction of the limit, writes are rejected with HTTP 429
+    /// `circuit_breaking_exception` so a 429 beats the OOM-killer. Mirrors
+    /// Elasticsearch's real-memory parent circuit breaker (default 95%).
+    /// Set to `0` to disable the RSS admission check.
+    pub memory_watermark_percent: u8,
+    /// Disk flood-stage watermark, as a percentage of the data-dir
+    /// filesystem that is *used* (default: `95`). A background `statvfs`
+    /// poll auto-engages a write block when used space crosses this
+    /// threshold, mirroring Elasticsearch's
+    /// `cluster.routing.allocation.disk.watermark.flood_stage`. This
+    /// prevents the engine from writing until `ENOSPC`, which poisons the
+    /// WAL. The block clears automatically once usage drops back below the
+    /// threshold. Set to `0` to disable the disk watermark. This threshold
+    /// can also be raised or lowered at runtime, no restart required, via
+    /// `PUT _cluster/settings` on the `cluster.routing.allocation.disk.watermark.flood_stage`
+    /// persistent (or transient) key — e.g. `{"persistent":
+    /// {"cluster.routing.allocation.disk.watermark.flood_stage": "97%"}}` —
+    /// matching ES's own recovery flow; that override cannot re-enable the
+    /// watermark if this config value is `0`.
+    pub disk_flood_stage_percent: u8,
+    /// Ceiling on the machine size every other memory budget is derived FROM,
+    /// in MiB. **Omitted / default = AUTO** ([`AUTO_PROCESS_MEMORY_MB`]): ARGOS
+    /// picks the cap from the effective (cgroup-aware) memory it can actually
+    /// see —
+    ///
+    ///   effective < 16 GiB             → half of that RAM
+    ///   16 GiB ≤ effective < 64 GiB    → 8 GiB cap
+    ///   64 GiB ≤ effective < 128 GiB   → 16 GiB cap
+    ///   effective ≥ 128 GiB            → 32 GiB cap
+    ///
+    /// so a laptop is never sized for ~20 GiB of memtables and a big server is
+    /// no longer starved by a flat 8 GiB. A host under 16 GiB used to take the
+    /// 8 GiB step and then the machine, so an 8 GiB box's budget was all of
+    /// its RAM; half of RAM leaves room for the OS during a merge (#1122).
+    /// At 16 GiB the half-RAM step and the 8 GiB step are the same number.
+    /// Every budget in `ResourceGovernor`
+    /// derives from `effective_memory_limit_bytes()` = min(cgroup limit, total
+    /// system RAM); capping that ONE base is what makes every dependent budget
+    /// shrink coherently instead of each growing its own ceiling.
+    ///
+    /// On Windows that base is then lowered to what this process can still
+    /// commit (`GlobalMemoryStatusEx` commit limit and available commit, minus
+    /// a reserve). Physical RAM alone is not a commit budget: with no pagefile
+    /// the commit limit is about RAM, and other processes' commit charge is
+    /// already spent, so an allocation aborts the process while RSS is still
+    /// under the physical-RAM tier (#1122). Linux and macOS are unchanged.
+    ///
+    /// The cap only ever LOWERS the base — `min(machine, cap)`, never invented
+    /// headroom: on a 40 GiB box the 8 GiB tier still yields 8, and under a
+    /// smaller cgroup limit the smaller value wins. Two explicit escape hatches:
+    ///
+    ///   * `0`  → NO cap: derive every budget from the whole machine (the old
+    ///     machine-proportional behaviour; a 64 GiB host then asks for
+    ///     ~16 GiB of memtables before anything else allocates).
+    ///   * `N`  (N > 0) → force a fixed ceiling of exactly N MiB, still min'd
+    ///     with the machine.
+    ///
+    /// Override at runtime without editing config via the environment:
+    /// `ARGOS_MAX_PROCESS_MEMORY_MB=auto|off|unlimited|<MiB>` (env wins over this value;
+    /// `off`/`unlimited` == `0`; a bare `0` is ambiguous and falls back here).
+    pub max_process_memory_mb: u64,
+}
+
+impl Default for LimitsConfig {
+    fn default() -> Self {
+        Self {
+            max_query_memory_mb: 512,
+            max_concurrent_searches: 64,
+            max_fields_per_index: 500,
+            max_actions_per_bulk: 50_000,
+            snapshot_repo_allowlist: Vec::new(),
+            hub_pack_restore: true,
+            max_body_bytes: 100 * 1024 * 1024,
+            max_result_window: 10_000,
+            max_mget_docs: 10_000,
+            max_buckets: 65_536,
+            max_total_memtable_mb: 0, // 0 = auto-derive (25% effective limit, floor 2 GiB, cap 50%)
+            max_segment_hydration_cache_mb: 0, // 0 = 20% effective memory, no floor
+            memory_watermark_percent: 95,
+            disk_flood_stage_percent: 95,
+            // AUTO: half of RAM under 16 GiB, then 8/16/32 GiB, at governor
+            // build time. 0 = uncapped (whole machine); N = a fixed MiB cap.
+            max_process_memory_mb: AUTO_PROCESS_MEMORY_MB,
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// High-throughput turbo indexing settings.
+///
+/// Turbo mode is **opt-in**: it must be enabled per-request via the
+/// `/v1/indices/{name}/turbo-ingest` endpoint or the `X-Turbo: true` header.
+/// These settings tune its behaviour globally.
+///
+/// **3 settings.**
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct IndexingConfig {
+    /// Number of documents accumulated per batch in turbo mode (default: `1000`).
+    ///
+    /// Larger batches amortise WAL and fsync overhead but increase per-batch
+    /// latency.  Values between 500 and 5000 work well for most workloads.
+    ///
+    /// **DORMANT — accepted, but nothing reads it.** A turbo request is
+    /// indexed as one batch, whatever its size.
+    pub turbo_batch_size: usize,
+    /// Enable parallel tokenisation via Rayon in turbo mode (default: `true`).
+    ///
+    /// Disable only for debugging or on single-core machines.
+    ///
+    /// **DORMANT — read, but a no-op.** Since M5.9 the turbo pipeline does
+    /// not pre-tokenise (the FTS index is built from stored fields at merge
+    /// time), so the `parallel` argument it feeds is unused — see the
+    /// `turbo_ingest` module docs.
+    pub turbo_parallel: bool,
+    /// Skip stemming and stopword removal in turbo mode for maximum speed (default: `false`).
+    ///
+    /// When `true`, the `FastTokenizer` is used even for fields that would
+    /// normally be processed by the configured `fts.default_analyzer`.  Search
+    /// recall may be reduced (e.g. "running" won't match "run"), but ingest
+    /// throughput increases significantly.
+    ///
+    /// **DORMANT — read, but a no-op.** The turbo endpoint passes it to
+    /// `index_batch_turbo`, whose `_fast_analyzer` parameter is unused.
+    pub turbo_fast_analyzer: bool,
+}
+
+impl Default for IndexingConfig {
+    fn default() -> Self {
+        Self {
+            turbo_batch_size: 1000,
+            turbo_parallel: true,
+            turbo_fast_analyzer: false,
+        }
+    }
+}
+
+impl IndexingConfig {
+    /// Turbo settings this build accepts but does not act on, in the
+    /// [`MergeConfig::dormant_overrides`] shape.
+    pub fn dormant_overrides(&self) -> Vec<(&'static str, &'static str)> {
+        let d = IndexingConfig::default();
+        let mut out = Vec::new();
+        if self.turbo_batch_size != d.turbo_batch_size {
+            out.push((
+                "indexing.turbo_batch_size",
+                "nothing reads it — a turbo request is indexed as one batch",
+            ));
+        }
+        if self.turbo_parallel != d.turbo_parallel {
+            out.push((
+                "indexing.turbo_parallel",
+                "turbo ingest no longer pre-tokenises, so there is nothing to \
+                 parallelise",
+            ));
+        }
+        if self.turbo_fast_analyzer != d.turbo_fast_analyzer {
+            out.push((
+                "indexing.turbo_fast_analyzer",
+                "the turbo path ignores it — fields keep their configured \
+                 analyzers",
+            ));
+        }
+        out
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Engine parallelism and flush-deadline settings.
+///
+/// Controls how many independent ingest/flush/search pipelines run in
+/// parallel, and how long a flush may wait before it fails instead of
+/// parking a refresh forever.  The worker defaults are tuned for the host's
+/// core count.  Increase `ingest_shards` on high-core-count machines for
+/// linear throughput scaling.
+///
+/// **6 settings.**
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct EngineConfig {
+    /// Number of independent ingest shards (WAL + memtable + flush pipeline
+    /// each).  Must be a power of 2.  Default: `max(1, num_cpus / 2)`.
+    ///
+    /// Each shard has its own WAL file, memtable partition, and flush thread.
+    /// Doubling shards roughly doubles sustained ingest throughput (linear
+    /// scaling) until memory bandwidth is saturated.
+    pub ingest_shards: usize,
+    /// Maximum concurrent shard flush finalizations (default: the maintenance
+    /// share of the machine, `max(2, num_cpus / 8)` — see
+    /// [`crate::resource::threads_for`]).  `ARGOS_FIN_CONC` overrides it for
+    /// one run.
+    pub flush_workers: usize,
+    /// Threads in the background merge pool (default: the maintenance share of
+    /// the machine, `max(2, num_cpus / 8)`).  Merges are the one pool that is
+    /// deliberately kept narrow: nobody waits on a merge, and an all-core merge
+    /// pass was measured stalling ingest for 17.5 s.
+    pub merge_workers: usize,
+    /// Threads available to search segment fan-out — rayon's global pool
+    /// (default: every core).  Search is the path a user waits on, so it gets
+    /// the whole machine unless you deliberately hold cores back.
+    pub search_workers: usize,
+    /// How long a shard flush waits for a flush-admission permit — the
+    /// per-index `flush_sema` or the process-global finalize gate — before
+    /// failing (default: [`Self::DEFAULT_FLUSH_ADMIT_TIMEOUT_SECS`]).
+    ///
+    /// The wait is before the memtable freeze, so a timeout drops no
+    /// documents and the flush can be retried. A healthy finalize is well
+    /// under a second; this bound exists so a permit held by a wedged
+    /// finalize cannot park every later flush (#1635).
+    /// `ARGOS_FLUSH_ADMIT_TIMEOUT_SECS` overrides it for one run.
+    pub flush_admit_timeout_secs: u64,
+    /// How long `flush` / `refresh` waits for one index's flush before
+    /// returning an error that names the index (default:
+    /// [`Self::DEFAULT_FLUSH_TIMEOUT_SECS`]).
+    ///
+    /// Must be at least [`Self::flush_admit_timeout_secs`]. A publication
+    /// that has already frozen the memtable is not cancelled; the caller
+    /// stops waiting and can retry. `ARGOS_FLUSH_TIMEOUT_SECS` overrides it
+    /// for one run.
+    pub flush_timeout_secs: u64,
+}
+
+impl Default for EngineConfig {
+    fn default() -> Self {
+        use crate::resource::{threads_for, Workload};
+        let cpus = crate::resource::cores();
+        Self {
+            ingest_shards: (cpus / 2).max(1).next_power_of_two(),
+            flush_workers: threads_for(Workload::Maintenance),
+            merge_workers: threads_for(Workload::Maintenance),
+            search_workers: threads_for(Workload::Latency),
+            flush_admit_timeout_secs: Self::DEFAULT_FLUSH_ADMIT_TIMEOUT_SECS,
+            flush_timeout_secs: Self::DEFAULT_FLUSH_TIMEOUT_SECS,
+        }
+    }
+}
+
+impl EngineConfig {
+    /// How long a flush may wait for admission before failing, in seconds.
+    /// See [`Self::flush_admit_timeout_secs`].
+    pub const DEFAULT_FLUSH_ADMIT_TIMEOUT_SECS: u64 = 120;
+    /// How long a caller waits for one index's flush, in seconds.
+    /// See [`Self::flush_timeout_secs`].
+    pub const DEFAULT_FLUSH_TIMEOUT_SECS: u64 = 300;
+    /// Upper bound on either flush deadline. Past a day the value is a typo,
+    /// and an unbounded wait is the hang #1635 exists to end.
+    pub const MAX_FLUSH_TIMEOUT_SECS: u64 = 86_400;
+
+    /// Upper bound on any of the worker knobs. Threads are not free: past this
+    /// the request is far more likely to be a typo than an intention, and a
+    /// silently clamped typo is the bug class in #204.
+    pub const MAX_WORKERS: usize = 4096;
+
+    pub fn validate(&self) -> Result<(), crate::XerjError> {
+        if self.ingest_shards == 0 || !self.ingest_shards.is_power_of_two() {
+            return Err(crate::XerjError::config(format!(
+                "engine.ingest_shards must be a power of 2, got {}",
+                self.ingest_shards
+            )));
+        }
+        if self.ingest_shards > 256 {
+            return Err(crate::XerjError::config(format!(
+                "engine.ingest_shards max is 256, got {}",
+                self.ingest_shards
+            )));
+        }
+        // Every worker knob is validated, because every worker knob is now
+        // wired to a pool: an out-of-range value must be refused at startup
+        // rather than accepted and quietly replaced with something else.
+        for (name, value) in [
+            ("engine.flush_workers", self.flush_workers),
+            ("engine.merge_workers", self.merge_workers),
+            ("engine.search_workers", self.search_workers),
+        ] {
+            if value == 0 || value > Self::MAX_WORKERS {
+                return Err(crate::XerjError::config(format!(
+                    "{name} must be in the range 1..={}, got {value}",
+                    Self::MAX_WORKERS
+                )));
+            }
+        }
+        // A zero deadline would fail every flush; a missing deadline is the
+        // #1635 hang. Refuse both rather than clamping.
+        if !(1..=Self::MAX_FLUSH_TIMEOUT_SECS).contains(&self.flush_admit_timeout_secs) {
+            return Err(crate::XerjError::config(format!(
+                "engine.flush_admit_timeout_secs must be from 1 to {} seconds, got {}",
+                Self::MAX_FLUSH_TIMEOUT_SECS,
+                self.flush_admit_timeout_secs
+            )));
+        }
+        if !(1..=Self::MAX_FLUSH_TIMEOUT_SECS).contains(&self.flush_timeout_secs) {
+            return Err(crate::XerjError::config(format!(
+                "engine.flush_timeout_secs must be from 1 to {} seconds, got {}",
+                Self::MAX_FLUSH_TIMEOUT_SECS,
+                self.flush_timeout_secs
+            )));
+        }
+        if self.flush_timeout_secs < self.flush_admit_timeout_secs {
+            return Err(crate::XerjError::config(format!(
+                "engine.flush_timeout_secs ({}) must be at least \
+                 engine.flush_admit_timeout_secs ({}) so a flush can finish \
+                 waiting for admission",
+                self.flush_timeout_secs, self.flush_admit_timeout_secs
+            )));
+        }
+        Ok(())
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Cluster / Raft consensus settings.
+///
+/// When `enabled = false` (the default), the node runs in single-node mode and
+/// no Raft or TCP transport is initialised.
+///
+/// **5 settings.**
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ClusterConfig {
+    /// Enable multi-node cluster mode (default: `false`).
+    ///
+    /// When `true`, the Raft state machine and TCP cluster transport are started
+    /// on `cluster_port`. At least one peer must be listed in `peers`.
+    pub enabled: bool,
+    /// TCP port for inter-node Raft and search messages (default: `9300`).
+    ///
+    /// Each node in the cluster must expose this port and it must be reachable
+    /// from all peers.
+    pub port: u16,
+    /// Peer nodes in `"<host>:<port>=<host>:<port>"` format — the label must
+    /// equal the address. A node's cluster id IS its socket address and
+    /// replies are routed by looking the sender's id up in this list, so a
+    /// differing label makes vote replies undeliverable and the node loses
+    /// every election with no diagnostic of its own (issue #1171; refused
+    /// at [`ClusterConfig::validate`]).
+    ///
+    /// Example: `["10.0.0.2:9300=10.0.0.2:9300", "10.0.0.3:9300=10.0.0.3:9300"]`
+    pub peers: Vec<String>,
+    /// Raft tick interval in milliseconds (default: `50`).
+    ///
+    /// Controls how often the Raft state machine is driven forward. Lower values
+    /// improve leader election latency at the cost of CPU.
+    pub tick_ms: u64,
+    /// Cluster-wide shared secret authenticating every control frame on
+    /// `port` (default: empty — which is only legal while `enabled = false`).
+    ///
+    /// Every node in the cluster must be configured with the **same** secret.
+    /// Frames are signed with HMAC-SHA256 over a per-connection challenge, so
+    /// a peer that does not hold this secret cannot inject Raft messages, and a
+    /// captured frame cannot be replayed.
+    ///
+    /// May be left empty here and supplied via the `ARGOS_CLUSTER_AUTH_SECRET`
+    /// environment variable instead — preferable when the config file is baked
+    /// into an image. An explicit non-empty value here wins over the
+    /// environment.
+    ///
+    /// **Fail-closed:** with `enabled = true` and no secret from either source,
+    /// the node refuses to start. There is no unauthenticated cluster mode.
+    ///
+    /// Minimum length [`ClusterConfig::MIN_AUTH_SECRET_LEN`]; generate one with
+    /// `openssl rand -hex 32`.
+    pub auth_secret: String,
+}
+
+impl Default for ClusterConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            port: 9300,
+            peers: Vec::new(),
+            tick_ms: 50,
+            auth_secret: String::new(),
+        }
+    }
+}
+
+impl ClusterConfig {
+    /// Environment variable consulted when `auth_secret` is empty.
+    pub const AUTH_SECRET_ENV: &'static str = "ARGOS_CLUSTER_AUTH_SECRET";
+
+    /// Minimum accepted secret length, in characters.
+    ///
+    /// Kept in step with `argos_cluster::auth::MIN_SECRET_LEN`; the transport
+    /// enforces the same floor independently, so a mismatch fails closed.
+    pub const MIN_AUTH_SECRET_LEN: usize = 16;
+
+    /// The secret actually in force, or `None` if neither source supplied one.
+    ///
+    /// Precedence: an explicit non-empty `auth_secret` wins; otherwise
+    /// [`Self::AUTH_SECRET_ENV`]. Explicit configuration beats the ambient
+    /// environment so that a stray env var cannot silently re-key a cluster.
+    pub fn effective_auth_secret(&self) -> Option<String> {
+        Self::resolve_auth_secret(&self.auth_secret, std::env::var(Self::AUTH_SECRET_ENV).ok())
+    }
+
+    /// Pure resolution rule behind [`Self::effective_auth_secret`], split out so
+    /// it can be tested without mutating process-wide environment state.
+    pub fn resolve_auth_secret(field: &str, env: Option<String>) -> Option<String> {
+        let field = field.trim();
+        if !field.is_empty() {
+            return Some(field.to_string());
+        }
+        env.filter(|v| !v.trim().is_empty())
+            .map(|v| v.trim().to_string())
+    }
+
+    /// Fail-closed validation: cluster mode requires a usable shared secret.
+    pub fn validate(&self) -> Result<(), crate::XerjError> {
+        if !self.enabled {
+            return Ok(());
+        }
+        match self.effective_auth_secret() {
+            None => Err(crate::XerjError::config(format!(
+                "cluster.enabled = true requires a shared secret: set cluster.auth_secret \
+                 or the {} environment variable. Refusing to start an unauthenticated \
+                 cluster transport — anyone able to reach cluster.port could otherwise \
+                 inject Raft control messages.",
+                Self::AUTH_SECRET_ENV
+            ))),
+            Some(s) if s.chars().count() < Self::MIN_AUTH_SECRET_LEN => {
+                Err(crate::XerjError::config(format!(
+                    "cluster auth secret is too short ({} chars, minimum {}); \
+                     generate one with `openssl rand -hex 32`",
+                    s.chars().count(),
+                    Self::MIN_AUTH_SECRET_LEN
+                )))
+            }
+            Some(_) => self.validate_peers(),
+        }
+    }
+
+    /// Validate peer entries beyond the shared-secret rules: every entry
+    /// must parse, and its label must equal its address (#1171).
+    ///
+    /// The cluster transport keys its reply map by peer label and routes
+    /// replies through `peers.get(candidate_id)` — and a node's Raft id IS
+    /// its listen address (derived in the server boot). A friendly label
+    /// (`n2=10.0.0.2:9300`) therefore makes the node's vote reply
+    /// undeliverable: it becomes an eternal candidate, re-electing every
+    /// ~200 ms, and the only diagnostic lands in the *rejecting* node's
+    /// log (`unknown peer: …`), never its own. Refusing at config load
+    /// turns that silent runtime churn into a boot-time error.
+    fn validate_peers(&self) -> Result<(), crate::XerjError> {
+        for peer in &self.peers {
+            match peer.split_once('=') {
+                Some((id, addr)) => {
+                    let addr = addr.trim();
+                    if let Err(e) = addr.parse::<std::net::SocketAddr>() {
+                        return Err(crate::XerjError::config(format!(
+                            "cluster.peers entry {peer:?} has an unparseable address ({e}); \
+                             expected \"<host:port>=<host:port>\" with the same address on both \
+                             sides of the '='"
+                        )));
+                    }
+                    if id.trim() != addr {
+                        return Err(crate::XerjError::config(format!(
+                            "cluster.peers entry {peer:?}: the label must equal the address. \
+                             Node ids in the cluster are socket addresses and replies are \
+                             routed by looking the sender's id up in the peer list, so a label \
+                             that differs from the address makes this node's vote replies \
+                             undeliverable — it will lose every election with no diagnostic of \
+                             its own (issue #1171). Write the entry as \"{addr}={addr}\""
+                        )));
+                    }
+                }
+                None => {
+                    return Err(crate::XerjError::config(format!(
+                        "cluster.peers entry {peer:?} is malformed: expected \
+                         \"<host:port>=<host:port>\" (the label must equal the address)"
+                    )))
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Point-in-time (PIT) lifecycle settings.
+///
+/// **3 settings.**
+///
+/// PITs are search snapshots — they pin the set of indices and the
+/// max visible seq_no at open time so subsequent searches against
+/// `pit.id` ignore newer writes. Each open PIT holds memory; before
+/// v0.6.2 PITs accumulated forever, which is a trivial memory-leak
+/// vector. The settings here put a TTL on every PIT and run a
+/// background sweeper to evict expired ones.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct PitConfig {
+    /// Default TTL when a client opens a PIT without `?keep_alive=…`
+    /// (default: 300 seconds = 5 minutes). ES requires `keep_alive`;
+    /// we accept its absence and apply this default rather than 400.
+    pub default_keep_alive_secs: u64,
+    /// Hard cap on `keep_alive` regardless of what the client asked
+    /// for (default: 86 400 = 24 h). Prevents abusive clients from
+    /// requesting a 30-day PIT.
+    pub max_keep_alive_secs: u64,
+    /// How often the background sweeper scans for expired PITs
+    /// (default: 30 seconds). Lower = less memory drift, more CPU.
+    pub sweep_interval_secs: u64,
+}
+
+impl Default for PitConfig {
+    fn default() -> Self {
+        Self {
+            default_keep_alive_secs: 300,
+            max_keep_alive_secs: 86_400,
+            sweep_interval_secs: 30,
+        }
+    }
+}
+
+/// ISM/ILM index-lifecycle-management background execution.
+///
+/// Drives `argos_engine::lifecycle`'s tick: for every managed index, run the
+/// current state's pending actions, then evaluate transitions in order and
+/// move to the first one whose conditions are met.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct LifecycleConfig {
+    /// How often the background job ticks (default: 300 seconds = 5
+    /// minutes — the same default OpenSearch ISM itself uses for
+    /// `plugins.index_state_management.job_interval`).
+    pub tick_interval_secs: u64,
+}
+
+impl Default for LifecycleConfig {
+    fn default() -> Self {
+        Self {
+            tick_interval_secs: 300,
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Single-node WAL tap — push a filtered subset of indices to an external
+/// ES-compatible target (issue #320). **10 settings.**
+///
+/// This is deliberately *not* cross-cluster replication. It is one
+/// directional, single node, and target-agnostic because the wire format is
+/// just `_bulk`: an Elasticsearch cluster, an OpenSearch cluster, or another
+/// argos node all work.
+///
+/// Semantics that matter before you turn it on:
+///
+/// - **No backfill.** An index whose WAL has never been pruned (a new one) is
+///   shipped whole. An index that has been running long enough to prune
+///   starts from the moment it is allowlisted: it ships what happens next,
+///   not what is already in segments. Use snapshot/restore to seed the target
+///   first if you need the existing data.
+/// - **At-least-once.** A batch is re-sent if the cursor could not be
+///   advanced, so the target may see a document twice. `doc_id` is the
+///   `_bulk` `_id` and each action carries `version_type: external` with the
+///   entry's `seq_no`, so a redelivery (and an out-of-order one) is a no-op
+///   on any target that honours external versioning.
+/// - **Retention never waits for the target.** WAL generations are pruned as
+///   soon as their entries are durable in a segment, whether or not the tap
+///   has shipped them — coupling the two would let a slow remote fill the
+///   local disk. A tap that falls that far behind loses entries and *says
+///   so*: `gaps` in `GET /_xerj/wal_tap/_stats`, plus a warning per gap.
+///   `min_retained_generations` buys a **bounded** amount of slack; it is a
+///   floor, not a lease, so a stalled target still cannot fill the disk.
+/// - **System indices are never shipped**, whatever the allowlist says.
+/// - **Runtime edits are durable.** `PUT /_xerj/wal_tap` persists the patched
+///   configuration next to the cursors and re-applies it over the file
+///   config on the next boot (`DELETE /_xerj/wal_tap` drops the overlay and
+///   reverts to this file). Otherwise a restart would silently revert to
+///   `enabled = false` while the cursors froze and WAL pruning continued.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct WalTapConfig {
+    /// Master switch (default: `false` — off).
+    pub enabled: bool,
+    /// Base URL of the target cluster, e.g. `"https://central:9200"`. The
+    /// tap POSTs to `{target_url}/_bulk`. Empty disables the tap even when
+    /// `enabled = true`.
+    pub target_url: String,
+    /// Verbatim `Authorization` header value for the target, e.g.
+    /// `"ApiKey abc123"` or `"Basic dXNlcjpwdw=="`. Empty sends none.
+    /// Never echoed back by the REST surface.
+    pub target_auth: String,
+    /// Index allowlist. Glob patterns (`*` only, as in `_cat` expressions);
+    /// empty ships nothing. `["*"]` ships every non-system index.
+    pub indices: Vec<String>,
+    /// How often each index's WAL is polled, in milliseconds (default:
+    /// `500`). This is the floor on end-to-end latency.
+    pub poll_interval_ms: u64,
+    /// Maximum WAL entries in one `_bulk` request (default: `1000`).
+    pub max_batch_docs: usize,
+    /// Maximum `_bulk` body size in bytes (default: 5 MiB). A single
+    /// document larger than this is still sent, alone.
+    pub max_batch_bytes: usize,
+    /// Per-request timeout against the target, in seconds (default: `30`).
+    pub request_timeout_secs: u64,
+    /// Ceiling on the exponential retry backoff, in seconds (default: `60`).
+    pub max_retry_backoff_secs: u64,
+    /// Rotated WAL generations kept per shard **after** every entry in them
+    /// is durable in a segment, so a tap whose target is briefly unreachable
+    /// still finds them (default: `0` — prune as soon as it is safe, the
+    /// pre-#320 behaviour).
+    ///
+    /// The default loses data on an outage longer than one flush interval
+    /// (`storage.flush_interval_secs`, 30 s): the entries are gone from the
+    /// WAL and the tap reports `gaps`. Set this to cover the outage you want
+    /// to survive — `2` buys roughly two flush windows.
+    ///
+    /// The cost is bounded and paid whether or not a tap is running: at most
+    /// `n * storage.wal_max_size_mb` extra megabytes per WAL shard per index.
+    /// It is deliberately **not** an Elasticsearch-style retention lease,
+    /// which holds generations for as long as a follower is behind and is how
+    /// a dead follower wedges a leader's disk.
+    ///
+    /// Unlike every other field here, this one does not live in the tap: it
+    /// lives in each index's `WalWriter`. `PUT /_xerj/wal_tap` therefore
+    /// pushes it onto the open writers itself
+    /// (`Engine::apply_wal_retention_floor`) and reports how many it reached,
+    /// rather than acknowledging a value that reaches nothing.
+    pub min_retained_generations: u64,
+}
+
+impl Default for WalTapConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            target_url: String::new(),
+            target_auth: String::new(),
+            indices: Vec::new(),
+            poll_interval_ms: 500,
+            max_batch_docs: 1000,
+            max_batch_bytes: 5 * 1024 * 1024,
+            request_timeout_secs: 30,
+            max_retry_backoff_secs: 60,
+            min_retained_generations: 0,
+        }
+    }
+}
+
+impl WalTapConfig {
+    /// Largest `min_retained_generations` this node accepts.
+    ///
+    /// The knob costs `n × storage.wal_max_size_mb` of disk per WAL shard per
+    /// index whether or not a tap is running, so an operator who types an
+    /// extra digit must not be able to fill the disk quietly.
+    pub const MAX_RETAINED_GENERATIONS: u64 = 64;
+    /// Accepted range for `poll_interval_ms`.
+    pub const POLL_INTERVAL_MS_RANGE: std::ops::RangeInclusive<u64> = 50..=60_000;
+    /// Accepted range for `max_retry_backoff_secs` — one day is already far
+    /// past any recovery window a `_bulk` target has, and the upper bound also
+    /// keeps `secs × 1000` nowhere near `u64::MAX`.
+    pub const MAX_RETRY_BACKOFF_SECS_RANGE: std::ops::RangeInclusive<u64> = 1..=86_400;
+
+    /// Range-check every numeric knob, returning the operator message.
+    ///
+    /// Shared by `Config::validate` (the config file, at boot) and
+    /// `PUT /_xerj/wal_tap` (the API), so the file cannot be used to get a
+    /// value past the bound the API enforces.
+    pub fn check_limits(&self) -> Result<(), String> {
+        if !Self::POLL_INTERVAL_MS_RANGE.contains(&self.poll_interval_ms) {
+            return Err(format!(
+                "wal_tap.poll_interval_ms must be between {} and {}, got {}",
+                Self::POLL_INTERVAL_MS_RANGE.start(),
+                Self::POLL_INTERVAL_MS_RANGE.end(),
+                self.poll_interval_ms
+            ));
+        }
+        if !Self::MAX_RETRY_BACKOFF_SECS_RANGE.contains(&self.max_retry_backoff_secs) {
+            return Err(format!(
+                "wal_tap.max_retry_backoff_secs must be between {} and {} (one day), got {}",
+                Self::MAX_RETRY_BACKOFF_SECS_RANGE.start(),
+                Self::MAX_RETRY_BACKOFF_SECS_RANGE.end(),
+                self.max_retry_backoff_secs
+            ));
+        }
+        if self.min_retained_generations > Self::MAX_RETAINED_GENERATIONS {
+            return Err(format!(
+                "wal_tap.min_retained_generations must be at most {}: it holds that many \
+                 rotated WAL files per shard per index, costing up to \
+                 n * storage.wal_max_size_mb of disk each. Got {}",
+                Self::MAX_RETAINED_GENERATIONS,
+                self.min_retained_generations
+            ));
+        }
+        if self.max_batch_docs == 0 {
+            return Err("wal_tap.max_batch_docs must be at least 1".into());
+        }
+        if self.max_batch_bytes == 0 {
+            return Err("wal_tap.max_batch_bytes must be at least 1".into());
+        }
+        if self.request_timeout_secs == 0 {
+            return Err("wal_tap.request_timeout_secs must be at least 1".into());
+        }
+        Ok(())
+    }
+
+    /// Reject a `target_url` this node must not accept, returning the operator
+    /// message for a `400`.
+    ///
+    /// Two rules, and the second one is a credential boundary:
+    ///
+    /// 1. It has to be an absolute `http://` / `https://` URL, because the tap
+    ///    POSTs `{target_url}/_bulk` and a relative one silently targets
+    ///    nothing.
+    /// 2. **No userinfo.** `https://user:pass@host` is an ordinary URL and
+    ///    `reqwest` turns its userinfo into a `Basic` `Authorization` header —
+    ///    so it is `target_auth` wearing a disguise. `target_auth` is
+    ///    write-only precisely so that "can call the admin API" never becomes
+    ///    "holds the target's credential", and `target_url` is echoed by
+    ///    `GET /_xerj/wal_tap`, by `_stats`, and by the boot log. Accepting
+    ///    userinfo would defeat that in one line of config.
+    pub fn check_target_url(url: &str) -> Result<(), String> {
+        let trimmed = url.trim();
+        if trimmed.is_empty() {
+            return Ok(());
+        }
+        let Some(rest) = trimmed
+            .strip_prefix("http://")
+            .or_else(|| trimmed.strip_prefix("https://"))
+        else {
+            return Err(
+                "wal_tap.target_url must be an absolute http:// or https:// URL, e.g. \
+                 \"https://central:9200\""
+                    .to_string(),
+            );
+        };
+        // Userinfo is everything before the first `@` of the authority, which
+        // ends at the first `/`, `?` or `#`.
+        let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+        if authority.contains('@') {
+            return Err("wal_tap.target_url must not carry credentials in the URL \
+                 (user:password@host): target_url is echoed by GET /_xerj/wal_tap, by \
+                 /_xerj/wal_tap/_stats and in the server log. Put the credential in \
+                 wal_tap.target_auth, which is write-only."
+                .to_string());
+        }
+        Ok(())
+    }
+
+    /// `target_url` as it is safe to show: any userinfo replaced by `***`.
+    ///
+    /// [`check_target_url`](Self::check_target_url) refuses userinfo on the way
+    /// in, so this only fires for a URL that reached the process another way —
+    /// an older state file, or a hand-edited config on a node whose operator
+    /// skipped validation. Belt and braces on a credential is cheap.
+    pub fn redacted_target_url(&self) -> String {
+        redact_url_userinfo(&self.target_url)
+    }
+}
+
+/// Replace `scheme://user:pass@host/…` with `scheme://***@host/…`.
+pub fn redact_url_userinfo(url: &str) -> String {
+    let Some((scheme, rest)) = url.split_once("://") else {
+        return url.to_string();
+    };
+    let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let (authority, tail) = rest.split_at(authority_end);
+    match authority.rsplit_once('@') {
+        Some((_userinfo, host)) => format!("{scheme}://***@{host}{tail}"),
+        None => url.to_string(),
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Scroll + async-search context lifecycle settings (RC4 blocker 11).
+///
+/// **7 settings.**
+///
+/// Every open scroll context pins a fully-hydrated `Vec<Hit>` snapshot and
+/// every stored async-search result pins its response JSON. Before v1.0.0-rc.4
+/// neither was ever expired or capped — an unauthenticated client that opened
+/// scrolls in a loop (or simply never called DELETE /_search/scroll) grew the
+/// process RSS without bound. These settings mirror the PIT lifecycle: a TTL
+/// on every context (refreshed by the `scroll`/`keep_alive` parameters), a
+/// background sweeper, and a hard cap on concurrently-open contexts (requests
+/// beyond the cap get 429, like ES's `search.max_open_scroll_context`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct SearchContextConfig {
+    /// Default scroll TTL when `?scroll=…` carries no parsable duration
+    /// (default: 60 seconds). ES requires the duration; we degrade to this
+    /// default rather than 400.
+    pub scroll_default_keep_alive_secs: u64,
+    /// Hard cap on any scroll keep-alive (default: 86 400 = 24 h — mirrors
+    /// ES `search.max_keep_alive`). Larger requests are capped silently.
+    pub scroll_max_keep_alive_secs: u64,
+    /// Maximum concurrently-open scroll contexts (default: 500 — mirrors
+    /// ES `search.max_open_scroll_context`). Opening more returns 429.
+    pub max_open_scrolls: usize,
+    /// Default async-search result TTL when the submit request carries no
+    /// `keep_alive` (default: 300 seconds, the pre-rc.4 hardcoded expiry).
+    pub async_default_keep_alive_secs: u64,
+    /// Hard cap on any async-search `keep_alive` (default: 86 400 = 24 h).
+    pub async_max_keep_alive_secs: u64,
+    /// Maximum concurrently-stored async-search results (default: 500).
+    /// Submitting more returns 429.
+    pub max_open_async_searches: usize,
+    /// How often the background sweeper drops expired scroll and
+    /// async-search contexts (default: 30 seconds).
+    pub sweep_interval_secs: u64,
+}
+
+impl Default for SearchContextConfig {
+    fn default() -> Self {
+        Self {
+            scroll_default_keep_alive_secs: 60,
+            scroll_max_keep_alive_secs: 86_400,
+            max_open_scrolls: 500,
+            async_default_keep_alive_secs: 300,
+            async_max_keep_alive_secs: 86_400,
+            max_open_async_searches: 500,
+            sweep_interval_secs: 30,
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Rerank provider
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Second-stage reranking provider (`"rerank": {...}` on `_search`).
+///
+/// **3 settings.**
+///
+/// Reranking is the only search-time feature that sends document text off
+/// this node: the text of the top-N hits is POSTed to a third-party judge.
+/// (Two other features send text off the node, both operator configuration:
+/// `[embedding] default_endpoint` — document text at write time, query text at
+/// search time — and the WAL tap. The complete list of outbound connections,
+/// including the neural model download and cluster Raft traffic, is in
+/// `docs/RERANK.md`, "Every way data leaves a ARGOS node".)
+/// It therefore does nothing until an operator supplies a key, and it can be
+/// forbidden outright.
+///
+/// The key can come from here or from the `TYPESAFE_API_KEY` environment
+/// variable; the endpoint from here or `TYPESAFE_ENDPOINT`. **An explicit value
+/// in this file wins over the environment** — the same rule as
+/// `cluster.auth_secret`, for the same reason: a stray variable must not
+/// silently re-point where document text goes. The resolution itself lives in
+/// `argos_rerank::ProviderSettings::resolve`, which is a pure function so it can
+/// be tested without touching process-wide environment state.
+///
+/// The endpoint is validated wherever it came from: the config value in
+/// [`Config::validate`], the environment value in [`Self::check_environment`]
+/// at boot. The first draft validated only the file, so
+/// `TYPESAFE_ENDPOINT=http://user:pw@host/…` started a node whose docs said it
+/// would refuse — and `reqwest` would have sent that userinfo as Basic auth
+/// beside the bearer key.
+///
+/// There is deliberately no per-request key. A key in a search body would land
+/// in slow-query logs, audit trails and client-side request dumps.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct RerankProviderConfig {
+    /// `false` refuses every `rerank` request with a 403 and guarantees no
+    /// document text leaves the host through this feature, whatever the
+    /// environment holds (default: `true` — but inert without a key).
+    pub enabled: bool,
+    /// Provider API key (default: empty → fall back to `TYPESAFE_API_KEY`).
+    /// Never echoed by any endpoint; `GET /_xerj/rerank` reports only whether
+    /// one is set and where it came from.
+    pub api_key: String,
+    /// Provider endpoint (default: empty → `TYPESAFE_ENDPOINT`, then
+    /// `https://api.typesafe.ai/v1/systemone`). Must be an absolute
+    /// `http(s)://` URL without credentials in it.
+    pub endpoint: String,
+}
+
+impl Default for RerankProviderConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            api_key: String::new(),
+            endpoint: String::new(),
+        }
+    }
+}
+
+/// Hand-written so `{:?}` on a `Config` can never put the key in a log line.
+impl std::fmt::Debug for RerankProviderConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RerankProviderConfig")
+            .field("enabled", &self.enabled)
+            .field(
+                "api_key",
+                &if self.api_key.trim().is_empty() {
+                    "<unset>"
+                } else {
+                    "<redacted>"
+                },
+            )
+            .field("endpoint", &redact_url_userinfo(&self.endpoint))
+            .finish()
+    }
+}
+
+impl RerankProviderConfig {
+    /// The environment variable the endpoint falls back to when the config
+    /// field is empty. Mirrors `argos_rerank::JevProvider::ENV_ENDPOINT`; this
+    /// crate does not link `argos-rerank`, and the two are pinned equal by a
+    /// test in `argos-api`, which links both.
+    pub const ENV_ENDPOINT: &'static str = "TYPESAFE_ENDPOINT";
+
+    /// The endpoint the node will actually use, given the config field and the
+    /// environment fallback — the same precedence `ProviderSettings::resolve`
+    /// applies — checked by [`Self::check_endpoint`], with the failure naming
+    /// where the bad value came from. Pure, so it is testable without
+    /// mutating the process environment.
+    pub fn check_resolved_endpoint(
+        config_endpoint: &str,
+        env_endpoint: Option<&str>,
+    ) -> Result<(), String> {
+        if !config_endpoint.trim().is_empty() {
+            return Self::check_endpoint(config_endpoint);
+        }
+        match env_endpoint {
+            Some(v) if !v.trim().is_empty() => Self::check_endpoint(v)
+                .map_err(|reason| format!("{}: {reason}", Self::ENV_ENDPOINT)),
+            _ => Ok(()),
+        }
+    }
+
+    /// Boot-time check of the environment fallback. Separate from
+    /// [`Config::validate`], which must stay a pure function of the file so
+    /// config tests do not depend on the developer's shell.
+    pub fn check_environment(&self) -> Result<(), String> {
+        let env = std::env::var(Self::ENV_ENDPOINT).ok();
+        Self::check_resolved_endpoint(&self.endpoint, env.as_deref())
+    }
+
+    /// An absolute `http(s)://` URL with no userinfo, or empty.
+    ///
+    /// Userinfo is refused for the reason `wal_tap.target_url` refuses it:
+    /// `reqwest` turns `user:pass@host` into an `Authorization` header, so it is
+    /// a credential in a field that a status endpoint echoes.
+    pub fn check_endpoint(url: &str) -> Result<(), String> {
+        let trimmed = url.trim();
+        if trimmed.is_empty() {
+            return Ok(());
+        }
+        let Some(rest) = trimmed
+            .strip_prefix("http://")
+            .or_else(|| trimmed.strip_prefix("https://"))
+        else {
+            return Err(
+                "rerank.endpoint must be an absolute http:// or https:// URL, e.g. \
+                 \"https://api.typesafe.ai/v1/systemone\""
+                    .to_string(),
+            );
+        };
+        let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+        if authority.contains('@') {
+            return Err(
+                "rerank.endpoint must not carry credentials in the URL (user:password@host): \
+                 the endpoint is echoed by GET /_xerj/rerank. Put the credential in \
+                 rerank.api_key, which is never echoed."
+                    .to_string(),
+            );
+        }
+        Ok(())
+    }
+}
+
+/// Typed decisions (`/v1/systemone`, `/_decide`) answered locally by a
+/// weighted nearest-neighbour vote over a labelled-history index — the
+/// retrieval analogue of a judge model, with the evidence staying on the node.
+///
+/// **9 settings.**
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct DecisionsConfig {
+    /// Index holding the judgement history: one document per labelled
+    /// example. Empty (the default) disables both endpoints with a 503 that
+    /// names this setting.
+    pub index: String,
+    /// How many nearest examples vote. The published Banking77 / SMS-spam
+    /// measurements used k = 10.
+    pub k: usize,
+    /// Document field holding each example's label.
+    pub label_field: String,
+    /// Document field holding each example's text.
+    pub text_field: String,
+    /// The label that means "true" for a `noul`. For a `choice` the labels
+    /// come from the question's own `criteria` keys.
+    pub positive_label: String,
+    /// `/_decide` abstains below this vote share (0 = never abstain; the
+    /// `/v1/systemone` wire has no abstain field and errors instead).
+    pub min_confidence: f64,
+    /// Winning vote-share floor in `0.0..=1.0` below which a tier-1 history
+    /// vote escalates to the tier-2 local decision head when armed
+    /// (`ARGOS_DECIDE_MODE=local`, issue #1094). Default `0.8` matches the
+    /// flywheel gate's confidence bar so low-confidence history hits do not
+    /// freeze write-back; `0.0` disables confidence escalation. With no local
+    /// tier armed, a vote below this floor still answers from history.
+    pub escalate_below: f64,
+    /// How much more a human correction weighs in the vote than a cached or
+    /// seeded example, when the history document carries `human: true`
+    /// (issue #1061). 2.0 — the issue's ≥ 2x floor for corrections — is the
+    /// default; 1.0 makes corrections count exactly like any other example.
+    pub human_weight: f64,
+    /// Probability calibration for the decide surface (issue #1063): fit a
+    /// correction from raw probabilities to calibrated ones on a held-out
+    /// 20 % of the labelled history, then ship `p_cal` beside every `p_raw`.
+    /// `isotonic` (PAVA) or `temperature` (one scalar on the log-odds);
+    /// `none` (the default) ships `p_raw` alone and no `p_cal` at all.
+    pub calibration: CalibrationMethod,
+}
+
+impl Default for DecisionsConfig {
+    fn default() -> Self {
+        Self {
+            index: String::new(),
+            k: 10,
+            label_field: "label".to_string(),
+            text_field: "text".to_string(),
+            positive_label: "true".to_string(),
+            min_confidence: 0.0,
+            escalate_below: 0.8,
+            human_weight: 2.0,
+            calibration: CalibrationMethod::None,
+        }
+    }
+}
+
+/// Corpus Hub hosted endpoints: four read-only `GET` routes under
+/// `/_hub/v1/` that answer from the pre-indexed packs restored on this node
+/// (`catalogue`, `def/{slug}/{symbol}`, `code/{slug}`, `search`). They are
+/// served on the Elasticsearch-compatible listener (`server.es_compat_port`),
+/// next to `/_memory`, not on the native one.
+///
+/// **2 settings.**
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct HubConfig {
+    /// Let those four routes — and nothing else — answer without an API key
+    /// (default: `false`, every route needs a key).
+    ///
+    /// With `true`, `GET /_hub/v1/catalogue`, `/_hub/v1/def/{slug}/{symbol}`,
+    /// `/_hub/v1/code/{slug}` and `/_hub/v1/search` skip authentication,
+    /// authorization and the audit log. Every other route on the node keeps
+    /// all three. The four routes are read-only, only ever query `xc-*`
+    /// indices, and are rate-limited to 60 requests a minute per client
+    /// address (`429` with `Retry-After`). Behind a reverse proxy, list the
+    /// proxy in `server.trusted_proxies`; without it every client shares the
+    /// proxy's address and therefore one 60-a-minute budget.
+    pub public: bool,
+    /// Path to the signed `catalogue.json` this node serves at
+    /// `GET /_hub/v1/catalogue` and validates every corpus name against
+    /// (default: `""` — none). A corpus name that is not in the file is a
+    /// `404`. Required when `public = true`. Prefer an absolute path: a
+    /// relative one resolves against the server's working directory.
+    pub catalogue_path: String,
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Tests
+// ═════════════════════════════════════════════════════════════════════════════
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The documented refusal applies to the value the node will USE, from
+    /// whichever place it came. Config wins, so a good config value shadows
+    /// a bad environment one; with no config value the environment is checked.
+    #[test]
+    fn rerank_endpoint_is_checked_from_the_environment_too() {
+        let bad = "http://user:pw@127.0.0.1:9/v1/systemone";
+        let good = "https://api.typesafe.ai/v1/systemone";
+        let err = RerankProviderConfig::check_resolved_endpoint("", Some(bad)).unwrap_err();
+        assert!(err.starts_with("TYPESAFE_ENDPOINT: "), "{err}");
+        assert!(err.contains("must not carry credentials"), "{err}");
+        assert!(RerankProviderConfig::check_resolved_endpoint("", Some("ftp://x")).is_err());
+        assert!(RerankProviderConfig::check_resolved_endpoint("", Some(good)).is_ok());
+        assert!(RerankProviderConfig::check_resolved_endpoint("", Some("  ")).is_ok());
+        assert!(RerankProviderConfig::check_resolved_endpoint("", None).is_ok());
+        // The config value is in force, so the environment value is not used
+        // and not judged.
+        assert!(RerankProviderConfig::check_resolved_endpoint(good, Some(bad)).is_ok());
+        assert!(RerankProviderConfig::check_resolved_endpoint(bad, Some(good)).is_err());
+    }
+
+    /// `[hub]` is closed and fail-closed: a typo is a boot error, the
+    /// defaults leave every route behind the API key, and a public node with
+    /// no catalogue is refused rather than left answering 404 to everything.
+    #[test]
+    fn hub_section_defaults_closed_and_public_requires_a_catalogue() {
+        let d = Config::default();
+        assert!(!d.hub.public, "the hosted routes are keyed by default");
+        assert!(d.hub.catalogue_path.is_empty());
+
+        let ok = Config::from_toml_str(
+            "[hub]\npublic = true\ncatalogue_path = \"/srv/hub/catalogue.json\"\n",
+        )
+        .expect("a public node with a catalogue is valid");
+        assert!(ok.hub.public);
+        assert_eq!(ok.hub.catalogue_path, "/srv/hub/catalogue.json");
+
+        let err = Config::from_toml_str("[hub]\npublic = true\n")
+            .expect_err("public without a catalogue must be refused at boot");
+        assert!(
+            err.to_string().contains("hub.catalogue_path"),
+            "the error names the setting to set: {err}"
+        );
+        // A private node needs no catalogue to boot.
+        Config::from_toml_str("[hub]\npublic = false\n").expect("private, no catalogue");
+
+        // Closed: a misspelt key is an error, not a silently ignored line.
+        assert!(Config::from_toml_str("[hub]\npubic = true\n").is_err());
+    }
+
+    #[test]
+    fn default_config_is_valid() {
+        Config::default()
+            .validate()
+            .expect("default config should be valid");
+    }
+
+    /// #320 — the config file must not be the way around the bounds
+    /// `PUT /_xerj/wal_tap` enforces.
+    ///
+    /// `min_retained_generations` is refused above 64 by the API because the
+    /// knob costs `n × storage.wal_max_size_mb` per WAL shard per index
+    /// whether or not a tap is running; `argos.toml` took any `u64` in silence
+    /// and the node then held that many rotated generations per shard forever.
+    /// `max_retry_backoff_secs` is the same shape and worse: values above
+    /// `u64::MAX / 1000` used to reach an unchecked `* 1000` inside
+    /// `WalTap::arm_backoff`.
+    ///
+    /// Same precedent as `compression.block_size_docs` (#318): an
+    /// out-of-range value is a typo the operator wants to hear about at boot,
+    /// not as a disk-full page later.
+    #[test]
+    fn wal_tap_numeric_knobs_are_range_checked_in_the_config_file_too() {
+        let bad = [
+            ("min_retained_generations = 100", "min_retained_generations"),
+            ("max_retry_backoff_secs = 0", "max_retry_backoff_secs"),
+            (
+                "max_retry_backoff_secs = 18446744073709552",
+                "max_retry_backoff_secs",
+            ),
+            ("poll_interval_ms = 10", "poll_interval_ms"),
+            ("poll_interval_ms = 60001", "poll_interval_ms"),
+            ("max_batch_docs = 0", "max_batch_docs"),
+            ("max_batch_bytes = 0", "max_batch_bytes"),
+            ("request_timeout_secs = 0", "request_timeout_secs"),
+        ];
+        for (line, field) in bad {
+            // `from_toml_str` validates, so a bad file is refused at load —
+            // the node never boots with it.
+            let toml = format!("[wal_tap]\n{line}\n");
+            let err = Config::from_toml_str(&toml)
+                .err()
+                .unwrap_or_else(|| panic!("[wal_tap] {line} must be refused at boot"));
+            assert!(
+                err.to_string().contains(field),
+                "the error must name the field the operator typed ({field}): {err}"
+            );
+        }
+
+        // The bounds themselves are accepted, so this is a range check and not
+        // an accidental ban.
+        for line in [
+            "min_retained_generations = 64",
+            "max_retry_backoff_secs = 86400",
+            "max_retry_backoff_secs = 1",
+            "poll_interval_ms = 50",
+            "poll_interval_ms = 60000",
+        ] {
+            let toml = format!("[wal_tap]\n{line}\n");
+            Config::from_toml_str(&toml)
+                .unwrap_or_else(|e| panic!("[wal_tap] {line} is in range but was refused: {e}"));
+        }
+    }
+
+    #[test]
+    fn parse_minimal_toml() {
+        let cfg = Config::from_toml_str(
+            r#"
+            [server]
+            rest_port = 9000
+            "#,
+        )
+        .expect("minimal TOML should parse");
+        assert_eq!(cfg.server.rest_port, 9000);
+        // Other fields retain their defaults
+        assert_eq!(cfg.server.grpc_port, 8081);
+    }
+
+    #[test]
+    fn duplicate_ports_rejected() {
+        let result = Config::from_toml_str(
+            r#"
+            [server]
+            rest_port = 9200
+            es_compat_port = 9200
+            "#,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn tls_enabled_requires_paths() {
+        let result = Config::from_toml_str(
+            r#"
+            [tls]
+            enabled = true
+            cert_path = ""
+            key_path  = ""
+            "#,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn tls_disabled_no_paths_ok() {
+        let cfg = Config::from_toml_str(
+            r#"
+            [tls]
+            enabled = false
+            "#,
+        )
+        .expect("tls disabled with no paths should be ok");
+        assert!(!cfg.tls.enabled);
+    }
+
+    #[test]
+    fn embedding_timeout_must_be_at_least_one_ms() {
+        assert!(Config::from_toml_str("[embedding]\ntimeout_ms = 0\n").is_err());
+        let cfg = Config::from_toml_str("[embedding]\ntimeout_ms = 900\n")
+            .expect("a sub-second timeout is a valid timeout");
+        assert_eq!(cfg.embedding.timeout_ms, 900);
+    }
+
+    #[test]
+    fn flush_deadlines_must_be_positive_and_ordered() {
+        let zero = Config::from_toml_str("[engine]\nflush_admit_timeout_secs = 0\n");
+        let err = zero.expect_err("a zero flush admission timeout must be refused");
+        assert!(
+            err.to_string().contains("flush_admit_timeout_secs"),
+            "the error must name the setting, got: {err}"
+        );
+        let inverted = Config::from_toml_str(
+            "[engine]\nflush_admit_timeout_secs = 90\nflush_timeout_secs = 30\n",
+        );
+        let err = inverted.expect_err("the flush timeout must cover admission");
+        assert!(
+            err.to_string().contains("flush_timeout_secs"),
+            "the error must name the setting, got: {err}"
+        );
+        let cfg = Config::from_toml_str(
+            "[engine]\nflush_admit_timeout_secs = 30\nflush_timeout_secs = 90\n",
+        )
+        .expect("a shorter admission bound inside the flush bound is valid");
+        assert_eq!(cfg.engine.flush_admit_timeout_secs, 30);
+        assert_eq!(cfg.engine.flush_timeout_secs, 90);
+    }
+
+    #[test]
+    fn max_result_window_must_be_a_positive_es_int() {
+        assert!(Config::from_toml_str("[limits]\nmax_result_window = 0\n").is_err());
+        assert!(Config::from_toml_str("[limits]\nmax_result_window = 2147483648\n").is_err());
+        let cfg = Config::from_toml_str("[limits]\nmax_result_window = 50000\n").unwrap();
+        assert_eq!(cfg.limits.max_result_window, 50_000);
+    }
+
+    #[test]
+    fn s3_backend_without_a_bucket_is_rejected() {
+        // #965 wired `backend = "s3"` as a real index backend, so the old
+        // refusal of the setting itself is gone. What stays refused is naming
+        // the backend without naming a bucket: ARGOS never creates one, so
+        // there is no default to fall back to and a half-written config must
+        // fail loud rather than silently run on local disk.
+        let result = Config::from_toml_str(
+            r#"
+            [storage]
+            backend = "s3"
+            "#,
+        );
+        let err = result.expect_err("s3 backend without s3_bucket must be rejected");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("s3_bucket"),
+            "error must name the missing field, got: {err}"
+        );
+        assert!(
+            msg.contains("docs/OBJECT_STORAGE.md"),
+            "error must point at the doc that holds the contract, got: {err}"
+        );
+    }
+
+    /// The flip side of the guard above: a complete s3 configuration loads
+    /// and validates. Before #965 this exact TOML was refused with "not
+    /// implemented as an index backend".
+    #[test]
+    fn s3_backend_with_a_bucket_is_accepted() {
+        let cfg = Config::from_toml_str(
+            r#"
+            [storage]
+            backend = "s3"
+            s3_bucket = "my-bucket"
+            "#,
+        )
+        .expect("s3 backend with a named bucket must load");
+        assert_eq!(cfg.storage.backend, StorageBackendType::S3);
+        assert_eq!(cfg.storage.s3_bucket, "my-bucket");
+
+        // An S3-compatible endpoint override (R2 / MinIO) is accepted too,
+        // empty (AWS S3) or not.
+        let cfg = Config::from_toml_str(
+            r#"
+            [storage]
+            backend = "s3"
+            s3_bucket = "my-bucket"
+            s3_endpoint = "http://127.0.0.1:9000"
+            "#,
+        )
+        .expect("s3 endpoint override must load");
+        assert_eq!(cfg.storage.s3_endpoint, "http://127.0.0.1:9000");
+    }
+
+    #[test]
+    fn quantization_scalar8_accepted() {
+        // scalar8 (SQ8) is now wired into the kNN serving path, so it must be
+        // accepted at startup (no longer a silent-fake rejection).
+        let cfg = Config::from_toml_str(
+            r#"
+            [vector]
+            default_quantization = "scalar8"
+            "#,
+        )
+        .expect("scalar8 quantization must be accepted now that it is wired");
+        assert_eq!(cfg.vector.default_quantization, VectorQuantization::Scalar8);
+    }
+
+    #[test]
+    fn quantization_binary_rejected() {
+        let result = Config::from_toml_str(
+            r#"
+            [vector]
+            default_quantization = "binary"
+            "#,
+        );
+        assert!(
+            result.is_err(),
+            "binary quantization must be rejected as unimplemented"
+        );
+    }
+
+    #[test]
+    fn local_backend_none_quantization_ok() {
+        let cfg = Config::from_toml_str(
+            r#"
+            [storage]
+            backend = "local"
+
+            [vector]
+            default_quantization = "none"
+            "#,
+        )
+        .expect("local backend + none quantization should be ok");
+        assert_eq!(cfg.storage.backend, StorageBackendType::Local);
+        assert_eq!(cfg.vector.default_quantization, VectorQuantization::None);
+    }
+
+    #[test]
+    fn default_quantization_is_none() {
+        // Guards depend on the default being the only implemented scheme so the
+        // out-of-the-box config validates.
+        assert_eq!(
+            VectorConfig::default().default_quantization,
+            VectorQuantization::None
+        );
+    }
+
+    #[test]
+    fn shipped_default_config_parses_and_validates() {
+        // rc.3 regression: the shipped engine/argos.default.toml failed to
+        // parse (`unknown field hnsw_offload_threshold`, line 223) so the
+        // documented `--config argos.default.toml` invocation was a dead
+        // boot. Every sub-config is `deny_unknown_fields`, so ANY key that
+        // drifts out of the schema kills the boot — guard the shipped file
+        // byte-for-byte at compile time.
+        let toml_src = include_str!("../../../argos.default.toml");
+        let cfg = Config::from_toml_str(toml_src)
+            .expect("shipped argos.default.toml must parse against the current Config schema");
+        cfg.validate()
+            .expect("shipped argos.default.toml must pass Config::validate");
+    }
+
+    /// Flatten a serialised config to `("merge.max_segment_mb", 8192)` pairs.
+    fn flatten(prefix: &str, value: &serde_json::Value, out: &mut Vec<(String, String)>) {
+        match value {
+            serde_json::Value::Object(fields) => {
+                for (name, v) in fields {
+                    let path = if prefix.is_empty() {
+                        name.clone()
+                    } else {
+                        format!("{prefix}.{name}")
+                    };
+                    flatten(&path, v, out);
+                }
+            }
+            other => out.push((prefix.to_string(), other.to_string())),
+        }
+    }
+
+    /// The shipped file opens with "documents … their production-ready
+    /// defaults", so every value it sets must BE the default — otherwise
+    /// `cp argos.default.toml argos.toml`, the documented first step, silently
+    /// changes the engine's behaviour and the file becomes a second, divergent
+    /// source of truth for every number it quotes.
+    ///
+    /// It had already drifted when #207 was filed: the file said
+    /// `max_segment_mb = 5120` against a real default of 8192, so copying it
+    /// shrank the largest mergeable segment by 37% without saying so.
+    #[test]
+    fn shipped_default_config_documents_the_real_defaults() {
+        let toml_src = include_str!("../../../argos.default.toml");
+        let from_file = serde_json::to_value(Config::from_toml_str(toml_src).unwrap()).unwrap();
+        let defaults = serde_json::to_value(Config::default()).unwrap();
+
+        let (mut a, mut b) = (Vec::new(), Vec::new());
+        flatten("", &from_file, &mut a);
+        flatten("", &defaults, &mut b);
+
+        let drift: Vec<String> = a
+            .iter()
+            .zip(b.iter())
+            .filter(|((_, file), (_, code))| file != code)
+            .map(|((key, file), (_, code))| format!("{key}: file says {file}, code says {code}"))
+            .collect();
+        assert!(
+            drift.is_empty(),
+            "engine/argos.default.toml claims to document the shipped defaults but \
+             disagrees with Config::default() on {} setting(s):\n  {}",
+            drift.len(),
+            drift.join("\n  ")
+        );
+
+        // …and the file's own header quotes how many of the 120 it sets. That
+        // number was 38, then 56, and never once the truth (#207), so count the
+        // assignments instead of trusting the sentence.
+        let set_here = toml_src
+            .lines()
+            .filter(|l| {
+                let l = l.trim_start();
+                !l.starts_with('#')
+                    && l.split_once('=')
+                        .is_some_and(|(k, _)| !k.trim().is_empty() && !k.contains('['))
+            })
+            .count();
+        let total: usize = SETTINGS_BY_SECTION.iter().map(|(_, c)| c).sum();
+        let claim = format!("sets {set_here} of ARGOS's {total} user-facing settings");
+        assert!(
+            toml_src.contains(&claim),
+            "argos.default.toml's header must say {claim:?} — it sets {set_here} keys"
+        );
+    }
+
+    /// Undo the four HTML entities the docs pages actually use.
+    fn html_unescape(s: &str) -> String {
+        s.replace("&quot;", "\"")
+            .replace("&#39;", "'")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&amp;", "&")
+    }
+
+    /// Render a serialised default the way `config.html` writes it: strings
+    /// quoted, empty arrays as `[]`, numbers and bools bare.
+    fn as_documented(value: &serde_json::Value) -> String {
+        match value {
+            serde_json::Value::String(s) => format!("\"{s}\""),
+            serde_json::Value::Array(items) if items.is_empty() => "[]".to_string(),
+            other => other.to_string(),
+        }
+    }
+
+    /// The reference table on `landing/docs/config.html`, as
+    /// `(section, key, documented default)` in page order.
+    fn docs_default_table(page: &str) -> Vec<(String, String, String)> {
+        const GROUP: &str = "<div class=\"group\" id=\"";
+        const CELL_K: &str = "<div class=\"cell k\">";
+        const CELL_D: &str = "<div class=\"cell d\">";
+
+        let mut rows = Vec::new();
+        let mut section = String::new();
+        let mut rest = page;
+        loop {
+            let group_at = rest.find(GROUP);
+            let key_at = rest.find(CELL_K);
+            let take_group = match (group_at, key_at) {
+                (Some(g), Some(k)) => g < k,
+                (Some(_), None) => true,
+                _ => false,
+            };
+            if take_group {
+                let after = &rest[group_at.unwrap() + GROUP.len()..];
+                let (id, tail) = after.split_once('"').expect("group id must be quoted");
+                section = id.to_string();
+                rest = tail;
+            } else if let Some(k) = key_at {
+                let after = &rest[k + CELL_K.len()..];
+                let (key, tail) = after.split_once("</div>").expect("cell k must close");
+                let d = tail
+                    .find(CELL_D)
+                    .expect("every key cell has a default cell");
+                let (default, tail) = tail[d + CELL_D.len()..]
+                    .split_once("</div>")
+                    .expect("cell d must close");
+                rows.push((
+                    section.clone(),
+                    key.trim().to_string(),
+                    html_unescape(default).trim().to_string(),
+                ));
+                rest = tail;
+            } else {
+                return rows;
+            }
+        }
+    }
+
+    /// Split `"batched"    # durability knob` into value and comment, without
+    /// mistaking a `#` inside a quoted string for the comment marker.
+    fn split_value_and_comment(rhs: &str) -> (&str, &str) {
+        let rhs = rhs.trim();
+        let end = if let Some(inner) = rhs.strip_prefix('"') {
+            inner.find('"').map(|i| i + 2).unwrap_or(rhs.len())
+        } else {
+            rhs.find('#').unwrap_or(rhs.len())
+        };
+        let (value, comment) = rhs.split_at(end);
+        (value.trim(), comment.trim())
+    }
+
+    /// The docs site is the *other* copy of the defaults, and it drifted
+    /// exactly the way `argos.default.toml` did (#207).
+    ///
+    /// `landing/docs/config.html` shipped `wal_max_size_mb = 512`,
+    /// `flush_size_mb = 256` and `default_quantization = "scalar8"` in its
+    /// copy-pasteable `[storage]` and `[vector]` blocks while its own DEFAULT
+    /// table — thirty lines above, on the same page — said 1024, 512 and
+    /// `"none"`. An operator pasting the `[vector]` block switched on 8-bit
+    /// quantization and its 1–2% recall loss without asking for it.
+    /// `shipped_default_config_documents_the_real_defaults` did not catch it
+    /// because it only reads the TOML, so read the page too:
+    ///
+    /// 1. every DEFAULT cell in the reference table must equal
+    ///    `Config::default()`, and
+    /// 2. every assignment in an example block must equal the real default —
+    ///    unless its comment says `not a default`, which is how the blocks
+    ///    that exist to *turn something on* (TLS, cluster, embedding) declare
+    ///    themselves to the reader as well as to this test.
+    #[test]
+    fn the_docs_site_config_page_agrees_with_the_real_defaults() {
+        let page = include_str!("../../../../landing/docs/config.html");
+        let defaults = serde_json::to_value(Config::default()).unwrap();
+        let table = docs_default_table(page);
+        assert!(
+            table.len() > 40,
+            "only parsed {} rows out of the config.html reference table — the page's \
+             markup changed and this guard is no longer reading it",
+            table.len()
+        );
+
+        let mut drift: Vec<String> = Vec::new();
+        for (section, key, documented) in &table {
+            match defaults.get(section).and_then(|s| s.get(key)) {
+                None => drift.push(format!(
+                    "table: [{section}] {key} is documented but is not a key in Config"
+                )),
+                Some(actual) => {
+                    let real = as_documented(actual);
+                    if &real != documented {
+                        drift.push(format!(
+                            "table: [{section}] {key} says {documented}, code says {real}"
+                        ));
+                    }
+                }
+            }
+        }
+
+        for block in page.split("<pre class=\"code\">").skip(1) {
+            let block = html_unescape(block.split("</pre>").next().unwrap_or_default());
+            let mut section = String::new();
+            for line in block.lines() {
+                let line = line.trim();
+                if line.starts_with('#') {
+                    continue;
+                }
+                if let Some(name) = line.strip_prefix('[').and_then(|l| l.strip_suffix(']')) {
+                    section = name.to_string();
+                    continue;
+                }
+                let Some((key, rhs)) = line.split_once('=') else {
+                    continue;
+                };
+                let key = key.trim();
+                if key.is_empty()
+                    || !key
+                        .bytes()
+                        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+                {
+                    continue;
+                }
+                if section.is_empty() {
+                    // Skipping quietly here is how a whole block escapes the
+                    // check. Only a line that names a real setting matters, so
+                    // report exactly those and stay quiet about `key = value`
+                    // text that is not config at all.
+                    if defaults
+                        .as_object()
+                        .is_some_and(|cfg| cfg.values().any(|s| s.get(key).is_some()))
+                    {
+                        drift.push(format!(
+                            "example: `{key} = …` sits in a block with no [section] header \
+                             above it, so nothing can check it against Config::default() — \
+                             add the header"
+                        ));
+                    }
+                    continue;
+                }
+                let Some(actual) = defaults.get(&section).and_then(|s| s.get(key)) else {
+                    drift.push(format!(
+                        "example: [{section}] {key} is not a key in Config — a reader pasting \
+                         this block gets `unknown field` and no server"
+                    ));
+                    continue;
+                };
+                let (value, comment) = split_value_and_comment(rhs);
+                let real = as_documented(actual);
+                if value != real && !comment.contains("not a default") {
+                    drift.push(format!(
+                        "example: [{section}] {key} = {value} contradicts the real default \
+                         {real} and does not say so — add `# not a default ({real})` to the \
+                         line if the example means it"
+                    ));
+                }
+            }
+        }
+
+        assert!(
+            drift.is_empty(),
+            "landing/docs/config.html disagrees with Config::default() in {} place(s):\n  {}",
+            drift.len(),
+            drift.join("\n  ")
+        );
+    }
+
+    /// `merge.strategy = "log_structured"` used to parse, validate and then run
+    /// size-tiered merging anyway — nothing in the tree reads the field (#207).
+    /// An operator who picks a levelled policy for its read amplification must
+    /// hear that it does not exist, not get the other one silently.
+    #[test]
+    fn the_unimplemented_merge_strategy_is_rejected_not_silently_substituted() {
+        let err = Config::from_toml_str("[merge]\nstrategy = \"log_structured\"\n")
+            .expect_err("log_structured must be refused while it is unimplemented")
+            .to_string();
+        assert!(
+            err.contains("merge.strategy") && err.contains("not implemented"),
+            "the error must name the setting and say why: {err}"
+        );
+
+        Config::from_toml_str("[merge]\nstrategy = \"size_tiered\"\n")
+            .expect("the implemented policy must still be accepted");
+    }
+
+    /// The three merge knobs this build accepts without acting on. Silence was
+    /// the bug (#207): the operator throttling merges to protect query latency
+    /// got no throttle and no signal.
+    #[test]
+    fn dormant_merge_settings_are_named_only_when_an_operator_sets_them() {
+        assert!(
+            MergeConfig::default().dormant_overrides().is_empty(),
+            "an untouched default asks for nothing, so it must not warn"
+        );
+
+        for (toml, expected) in [
+            ("io_rate_mb_per_sec = 250", "merge.io_rate_mb_per_sec"),
+            ("min_segments = 4", "merge.min_segments"),
+            ("max_concurrent = 4", "merge.max_concurrent"),
+        ] {
+            let cfg = Config::from_toml_str(&format!("[merge]\n{toml}\n")).unwrap();
+            let named: Vec<&str> = cfg
+                .merge
+                .dormant_overrides()
+                .into_iter()
+                .map(|(key, _)| key)
+                .collect();
+            assert_eq!(
+                named,
+                vec![expected],
+                "setting {toml} must be reported, and nothing else"
+            );
+        }
+
+        // A setting that IS read by `run_merge_once` must never be reported.
+        let cfg = Config::from_toml_str("[merge]\nmax_segment_mb = 4096\n").unwrap();
+        assert!(
+            cfg.merge.dormant_overrides().is_empty(),
+            "max_segment_mb reaches the merge policy, so it is not dormant"
+        );
+    }
+
+    /// #318 — the `[compression]` section reached no encoder at all: two
+    /// nodes differing only in `enabled` / `level` / `block_size_docs` wrote
+    /// byte-identical segments, with no error and no warning, while the docs
+    /// called all three live. `level` is wired now (see the engine-side merge
+    /// test); the other two are dormant, and dormant must be *audible*.
+    #[test]
+    fn dormant_compression_settings_are_named_only_when_an_operator_sets_them() {
+        assert!(
+            CompressionConfig::default().dormant_overrides().is_empty(),
+            "an untouched default asks for nothing, so it must not warn"
+        );
+
+        for (toml, expected) in [
+            ("enabled = false", "compression.enabled"),
+            ("block_size_docs = 512", "compression.block_size_docs"),
+        ] {
+            let cfg = Config::from_toml_str(&format!("[compression]\n{toml}\n")).unwrap();
+            let named: Vec<&str> = cfg
+                .compression
+                .dormant_overrides()
+                .into_iter()
+                .map(|(key, _)| key)
+                .collect();
+            assert_eq!(
+                named,
+                vec![expected],
+                "setting {toml} must be reported, and nothing else"
+            );
+        }
+
+        // `level` now reaches the merge re-encode, so it must NOT be reported
+        // — a warning on a knob that works is the same lie in the other
+        // direction.
+        let cfg = Config::from_toml_str("[compression]\nlevel = \"best\"\n").unwrap();
+        assert!(
+            cfg.compression.dormant_overrides().is_empty(),
+            "compression.level reaches the merge encoder, so it is not dormant"
+        );
+    }
+
+    /// The rest of the accepted-and-ignored keys (#204): each one was
+    /// documented as working, validated where it has a range, and read by
+    /// nothing — measured on rc.89, `fts.default_analyzer = "whitespace"`,
+    /// `vector.default_metric = "euclidean"`, `vector.max_dimensions = 4` and
+    /// a 90→30 day `logs.retention_days` all changed nothing, with no warning.
+    /// `Config::dormant_overrides` must name each one, only when it is set,
+    /// and must stay quiet on the shipped default file.
+    #[test]
+    fn every_dormant_setting_is_named_only_when_an_operator_sets_it() {
+        assert!(
+            Config::default().dormant_overrides().is_empty(),
+            "an untouched default asks for nothing, so it must not warn"
+        );
+        let shipped = Config::from_toml_str(include_str!("../../../argos.default.toml")).unwrap();
+        assert!(
+            shipped.dormant_overrides().is_empty(),
+            "`cp argos.default.toml argos.toml` must boot without warnings: {:?}",
+            shipped.dormant_overrides()
+        );
+
+        for (toml, expected) in [
+            (
+                "[fts]\ndefault_analyzer = \"whitespace\"",
+                "fts.default_analyzer",
+            ),
+            (
+                "[vector]\ndefault_metric = \"euclidean\"",
+                "vector.default_metric",
+            ),
+            ("[vector]\nhnsw_m = 32", "vector.hnsw_m"),
+            (
+                "[vector]\nhnsw_ef_construction = 400",
+                "vector.hnsw_ef_construction",
+            ),
+            ("[vector]\nhnsw_ef_search = 200", "vector.hnsw_ef_search"),
+            (
+                "[vector]\ndefault_quantization = \"scalar8\"",
+                "vector.default_quantization",
+            ),
+            ("[vector]\nmax_dimensions = 4", "vector.max_dimensions"),
+            ("[logs]\nretention_days = 30", "logs.retention_days"),
+            ("[logs]\ntime_partition = \"1d\"", "logs.time_partition"),
+            (
+                "[indexing]\nturbo_batch_size = 2000",
+                "indexing.turbo_batch_size",
+            ),
+            (
+                "[indexing]\nturbo_parallel = false",
+                "indexing.turbo_parallel",
+            ),
+            (
+                "[indexing]\nturbo_fast_analyzer = true",
+                "indexing.turbo_fast_analyzer",
+            ),
+            (
+                "[storage]\nlocal_cache_dir = \"/mnt/nvme\"",
+                "storage.local_cache_dir",
+            ),
+            // The two older sections now reach the same aggregate.
+            ("[merge]\nmin_segments = 4", "merge.min_segments"),
+            (
+                "[compression]\nblock_size_docs = 512",
+                "compression.block_size_docs",
+            ),
+        ] {
+            let cfg = Config::from_toml_str(&format!("{toml}\n")).unwrap();
+            let named: Vec<&str> = cfg
+                .dormant_overrides()
+                .into_iter()
+                .map(|(key, _)| key)
+                .collect();
+            assert_eq!(
+                named,
+                vec![expected],
+                "setting {toml:?} must be reported, and nothing else"
+            );
+        }
+
+        // Neighbours that ARE read must never be reported.
+        for toml in [
+            "[storage]\nwal_sync = \"sync\"",
+            "[embedding]\nbatch_size = 16",
+            "[limits]\nmax_fields_per_index = 50",
+        ] {
+            let cfg = Config::from_toml_str(&format!("{toml}\n")).unwrap();
+            assert!(
+                cfg.dormant_overrides().is_empty(),
+                "{toml:?} is wired, so it is not dormant"
+            );
+        }
+    }
+
+    /// The documented 16–4096 range was never enforced: #318's repro node
+    /// booted happily on `block_size_docs = 999999`.
+    #[test]
+    fn out_of_range_block_size_docs_is_refused_at_startup() {
+        for bad in [15u32, 4097, 999_999, 0] {
+            // Rejected on the path a real boot takes — `from_toml_str`
+            // validates, so #318's `block_size_docs = 999999` node would not
+            // have started.
+            let err = Config::from_toml_str(&format!("[compression]\nblock_size_docs = {bad}\n"))
+                .unwrap_err();
+            assert!(
+                err.to_string().contains("compression.block_size_docs"),
+                "the error must name the setting, got: {err}"
+            );
+
+            // And directly, so the check cannot be lost by a refactor that
+            // moves parsing off `validate`.
+            let mut cfg = Config::default();
+            cfg.compression.block_size_docs = bad;
+            assert!(cfg.validate().is_err(), "{bad} must fail validate()");
+        }
+
+        for ok in [16u32, 128, 4096] {
+            Config::from_toml_str(&format!("[compression]\nblock_size_docs = {ok}\n"))
+                .unwrap_or_else(|e| panic!("block_size_docs = {ok} is in range, got: {e}"));
+        }
+    }
+
+    /// The zstd level behind each name. Pinned because these numbers are
+    /// quoted in `argos.default.toml` and on `landing/docs/compression.html`,
+    /// and because `"best"` deliberately means 6 rather than the 19 the enum
+    /// used to document — see the doc comment for the measurements.
+    #[test]
+    fn compression_level_names_map_to_the_documented_zstd_levels() {
+        assert_eq!(CompressionLevel::Fast.zstd_level(), 1);
+        assert_eq!(CompressionLevel::Balanced.zstd_level(), 3);
+        assert_eq!(CompressionLevel::Best.zstd_level(), 6);
+
+        // The default must stay byte-for-byte what flush already writes, so
+        // that adopting this build changes nothing for an operator who never
+        // touched the section.
+        assert_eq!(
+            CompressionConfig::default().level.zstd_level(),
+            3,
+            "the default level must equal the pinned flush level"
+        );
+    }
+
+    #[test]
+    fn onnx_throughput_controls_preserve_single_session_defaults() {
+        let cfg = Config::from_toml_str("[embedding]\n").unwrap();
+        assert_eq!(cfg.embedding.onnx_scheduling_window, 64);
+        assert_eq!(cfg.embedding.onnx_session_pool_size, 1);
+    }
+
+    /// The window concurrency opt-in must default to serial (#938): an
+    /// operator who never touches it keeps the one-window-at-a-time loop
+    /// that shipped before the key existed.
+    #[test]
+    fn neural_window_concurrency_defaults_to_serial() {
+        assert_eq!(Config::default().embedding.neural_window_concurrency, 1);
+        let cfg = Config::from_toml_str("[embedding]\n").unwrap();
+        assert_eq!(cfg.embedding.neural_window_concurrency, 1);
+        let cfg = Config::from_toml_str("[embedding]\nmode = \"neural\"\n").unwrap();
+        assert_eq!(cfg.embedding.neural_window_concurrency, 1);
+        // Round-trips through the file format.
+        let cfg = Config::from_toml_str("[embedding]\nneural_window_concurrency = 8\n").unwrap();
+        assert_eq!(cfg.embedding.neural_window_concurrency, 8);
+    }
+
+    #[test]
+    fn neural_window_concurrency_accepts_only_bounded_values() {
+        for value in [1usize, 2, 8, 64] {
+            Config::from_toml_str(&format!(
+                "[embedding]\nneural_window_concurrency = {value}\n"
+            ))
+            .unwrap_or_else(|error| {
+                panic!("neural_window_concurrency={value} must be valid: {error}")
+            });
+        }
+        for value in [0usize, 65] {
+            Config::from_toml_str(&format!(
+                "[embedding]\nneural_window_concurrency = {value}\n"
+            ))
+            .expect_err(&format!(
+                "neural_window_concurrency={value} must be rejected"
+            ));
+        }
+    }
+
+    #[test]
+    fn onnx_throughput_controls_accept_only_bounded_values() {
+        for (key, valid) in [
+            ("onnx_scheduling_window", [1, 64, 4096].as_slice()),
+            ("onnx_session_pool_size", [1, 2].as_slice()),
+        ] {
+            for value in valid {
+                Config::from_toml_str(&format!("[embedding]\n{key} = {value}\n"))
+                    .unwrap_or_else(|error| panic!("{key}={value} must be valid: {error}"));
+            }
+        }
+        for (key, invalid) in [
+            ("onnx_scheduling_window", [0, 4097].as_slice()),
+            ("onnx_session_pool_size", [0, 3].as_slice()),
+        ] {
+            for value in invalid {
+                Config::from_toml_str(&format!("[embedding]\n{key} = {value}\n"))
+                    .expect_err(&format!("{key}={value} must be rejected"));
+            }
+        }
+    }
+
+    /// The safe default: no proxy is trusted, so `X-Forwarded-For` carries no
+    /// authority anywhere until an operator says otherwise (#76 S5-4).
+    #[test]
+    fn trusted_proxies_default_to_empty() {
+        assert!(Config::default().server.trusted_proxies.is_empty());
+        let cfg = Config::from_toml_str("[server]\nrest_port = 9000\n").unwrap();
+        assert!(cfg.server.trusted_proxies.is_empty());
+        assert!(
+            crate::net::TrustedProxies::parse(&cfg.server.trusted_proxies)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn trusted_proxies_parse_from_toml() {
+        let cfg = Config::from_toml_str("[server]\ntrusted_proxies = [\"10.0.0.0/8\", \"::1\"]\n")
+            .unwrap();
+        cfg.validate().unwrap();
+        let t = crate::net::TrustedProxies::parse(&cfg.server.trusted_proxies).unwrap();
+        assert!(t.contains(&"10.4.5.6".parse().unwrap()));
+        assert!(!t.contains(&"11.4.5.6".parse().unwrap()));
+    }
+
+    /// A typo in a trust boundary fails startup rather than silently
+    /// producing a set that trusts nothing (or everything).
+    #[test]
+    fn malformed_trusted_proxy_fails_validation() {
+        let err = Config::from_toml_str("[server]\ntrusted_proxies = [\"10.0.0.0/99\"]\n")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("trusted_proxies"),
+            "error should name the setting, got: {err}"
+        );
+    }
+
+    /// Leaf keys in a serialised value — one per setting a user can set.
+    /// Sub-configs are grouping, not settings, so only leaves count.
+    fn count_settings(value: &serde_json::Value) -> usize {
+        match value {
+            serde_json::Value::Object(fields) => fields.values().map(count_settings).sum(),
+            _ => 1,
+        }
+    }
+
+    /// Settings per section, and the total. Every one of these numbers is
+    /// quoted in a doc comment above the matching struct (and the total in the
+    /// module header, in `argos-common/src/lib.rs`, in `engine/README.md` and in
+    /// `argos.default.toml`) — change the table and the prose together.
+    const SETTINGS_BY_SECTION: &[(&str, usize)] = &[
+        ("server", 8),
+        ("auth", 3),
+        ("cors", 2),
+        ("tls", 4),
+        ("storage", 12),
+        ("merge", 8),
+        ("compression", 3),
+        ("fts", 1),
+        ("vector", 6),
+        ("logs", 2),
+        ("embedding", 20),
+        ("limits", 15),
+        ("indexing", 3),
+        ("engine", 6),
+        ("cluster", 5),
+        ("pit", 3),
+        ("search_context", 7),
+        ("logging", 2),
+        ("compat", 2),
+        ("lifecycle", 1),
+        ("wal_tap", 10),
+        ("rerank", 3),
+        ("decisions", 9),
+        ("hub", 2),
+    ];
+
+    /// Count the settings by *counting them*.
+    ///
+    /// This test used to read
+    ///
+    /// ```ignore
+    /// let total = 6 + 3 + 4 + 10 + 5 + 3 + 1 + 6 + 2 + 4 + 12 + 3 + 2;
+    /// assert_eq!(total, 61);
+    /// ```
+    ///
+    /// — the identity `61 == 61`, which could not fail whatever `Config`
+    /// actually held. By the time #207 was filed it had drifted so far that the
+    /// tree quoted 38, 50, 56, 60 and 61 in five places, none of them right.
+    /// `Config` is `Serialize` and every field defaults, so the honest count is
+    /// the number of leaf keys in a default config.
+    #[test]
+    fn count_user_facing_settings() {
+        let cfg = serde_json::to_value(Config::default()).expect("Config serialises");
+        let sections = cfg.as_object().expect("Config is a table");
+
+        let measured: Vec<(String, usize)> = sections
+            .iter()
+            .map(|(name, v)| (name.clone(), count_settings(v)))
+            .collect();
+        let expected: Vec<(String, usize)> = SETTINGS_BY_SECTION
+            .iter()
+            .map(|(n, c)| ((*n).to_string(), *c))
+            .collect();
+        assert_eq!(
+            measured, expected,
+            "the per-section settings counts changed. That is fine — but each is \
+             quoted in the doc comment above its struct, so update both"
+        );
+
+        let total: usize = SETTINGS_BY_SECTION.iter().map(|(_, c)| c).sum();
+        assert_eq!(
+            total,
+            count_settings(&cfg),
+            "the section table must sum to the whole config"
+        );
+        assert_eq!(
+            total, 137,
+            "the total settings count changed. It is quoted in this module's \
+             header, in argos-common/src/lib.rs, in engine/README.md, in \
+             argos.default.toml and in EXPECTED_SETTINGS in \
+             argos-engine/tests/product_experience.rs — update all of them"
+        );
+    }
+
+    // ── gRPC h2c exposure: fail closed (issue #229) ──────────────────────────
+
+    /// `0.0.0.0` binds every interface, so "TLS on, bound to the world" is
+    /// exactly the case that must be caught — this is the assertion that
+    /// fails without the #229 fix.
+    ///
+    /// It used to reach `0.0.0.0` by saying nothing, because that was the
+    /// shipped default; #228 made the default loopback, so the exposure is
+    /// now written out. That is the point of the change, not an accident of
+    /// it: this configuration has to be typed to happen.
+    #[test]
+    fn tls_on_with_exposed_bind_flags_grpc_h2c_exposure() {
+        let cfg = Config::from_toml_str(
+            "[server]\nbind_address = \"0.0.0.0\"\n\
+             [tls]\nenabled = true\ncert_path = \"/c.pem\"\nkey_path = \"/k.pem\"\n",
+        )
+        .unwrap();
+        assert!(!cfg.bind_address_is_loopback(), "0.0.0.0 is not loopback");
+        assert!(cfg.grpc_h2c_exposed_off_loopback());
+    }
+
+    /// `decisions.calibration` parses the issue's two methods and refuses a
+    /// typo by naming the valid ones — the same refusal shape as every other
+    /// enum setting, so an operator hears about `calibration = "isotonic2"`
+    /// at boot, not from a response that silently shipped no p_cal.
+    #[test]
+    fn decisions_calibration_parses_the_two_methods_and_refuses_a_typo() {
+        for (value, expected) in [
+            ("isotonic", CalibrationMethod::Isotonic),
+            ("temperature", CalibrationMethod::Temperature),
+        ] {
+            let cfg = Config::from_toml_str(&format!(
+                "[decisions]\nindex = \"judgements\"\ncalibration = \"{value}\"\n"
+            ))
+            .expect("parses");
+            assert_eq!(cfg.decisions.calibration, expected);
+        }
+        // The default is none: an uncalibrated node, not a hidden isotonic.
+        assert_eq!(
+            DecisionsConfig::default().calibration,
+            CalibrationMethod::None
+        );
+        let err = Config::from_toml_str(
+            "[decisions]\nindex = \"judgements\"\ncalibration = \"isotonic2\"\n",
+        )
+        .expect_err("typo must be refused");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("calibration") && msg.contains("isotonic"),
+            "the error names the field and the valid values: {msg}"
+        );
+    }
+
+    #[test]
+    fn tls_on_bound_to_loopback_is_fine() {
+        for bind in ["127.0.0.1", "127.0.0.5", "::1", "::ffff:127.0.0.1"] {
+            let cfg = Config::from_toml_str(&format!(
+                "[server]\nbind_address = \"{bind}\"\n\
+                 [tls]\nenabled = true\ncert_path = \"/c.pem\"\nkey_path = \"/k.pem\"\n"
+            ))
+            .unwrap();
+            assert!(cfg.bind_address_is_loopback(), "{bind} should be loopback");
+            assert!(!cfg.grpc_h2c_exposed_off_loopback(), "{bind} must not trip");
+        }
+    }
+
+    #[test]
+    fn tls_off_never_trips_the_check() {
+        // Nothing claims the port is encrypted, so there is no false promise
+        // to fail closed on — the banner already says the listeners are plain.
+        let cfg = Config::from_toml_str("[server]\nbind_address = \"0.0.0.0\"\n").unwrap();
+        assert!(!cfg.tls.enabled);
+        assert!(!cfg.grpc_h2c_exposed_off_loopback());
+    }
+
+    #[test]
+    fn explicit_opt_out_permits_the_exposure() {
+        let cfg = Config::from_toml_str(
+            "[server]\nbind_address = \"10.0.0.7\"\n\
+             [tls]\nenabled = true\ncert_path = \"/c.pem\"\nkey_path = \"/k.pem\"\n\
+             allow_insecure_grpc_h2c = true\n",
+        )
+        .unwrap();
+        assert!(!cfg.grpc_h2c_exposed_off_loopback());
+    }
+
+    #[test]
+    fn routable_bind_with_tls_trips_the_check() {
+        for bind in ["10.0.0.7", "0.0.0.0", "::", "fe80::1", "not-an-ip"] {
+            let cfg = Config::from_toml_str(&format!(
+                "[server]\nbind_address = \"{bind}\"\n\
+                 [tls]\nenabled = true\ncert_path = \"/c.pem\"\nkey_path = \"/k.pem\"\n"
+            ))
+            .unwrap();
+            assert!(cfg.grpc_h2c_exposed_off_loopback(), "{bind} must trip");
+        }
+    }
+
+    // ── Cleartext network exposure: fail closed (issue #228) ─────────────────
+
+    /// The whole point of #228: an operator who configures nothing gets a node
+    /// only their own machine can reach. Before the fix this default was
+    /// `0.0.0.0`, so a first `argos` run published its admin API key in
+    /// cleartext to every interface the host had.
+    #[test]
+    fn default_bind_is_loopback() {
+        let cfg = Config::default();
+        assert_eq!(cfg.server.bind_address, "127.0.0.1");
+        assert!(cfg.bind_address_is_loopback());
+        assert!(
+            !cfg.tls.enabled,
+            "TLS is off by default — that is the point"
+        );
+        assert!(
+            !cfg.cleartext_exposed_off_loopback(),
+            "a zero-config node must boot, not fail closed"
+        );
+        // An empty config file resolves to the same posture as no file.
+        let from_toml = Config::from_toml_str("").unwrap();
+        assert_eq!(from_toml.server.bind_address, "127.0.0.1");
+    }
+
+    /// Exposing every listener in cleartext must be stated, not stumbled into.
+    /// `0.0.0.0` and `::` bind every interface; a link-local address is still
+    /// reachable by every other host on the link; an unparseable address fails
+    /// closed here and is rejected by the `SocketAddr` parse a moment later.
+    #[test]
+    fn cleartext_bind_off_loopback_trips_the_check() {
+        for bind in [
+            "0.0.0.0",
+            "::",
+            "10.0.0.7",
+            "192.168.1.5",
+            "fe80::1",
+            "nope",
+        ] {
+            let cfg =
+                Config::from_toml_str(&format!("[server]\nbind_address = \"{bind}\"\n")).unwrap();
+            assert!(!cfg.tls.enabled);
+            assert!(
+                cfg.cleartext_exposed_off_loopback(),
+                "{bind} with TLS off must trip"
+            );
+        }
+    }
+
+    /// Loopback binds are untouched — local development, the ES-YAML
+    /// conformance harness and every `curl 127.0.0.1` quickstart keep working
+    /// with TLS off. A fail-closed check that fires on the common case gets
+    /// disabled wholesale.
+    #[test]
+    fn cleartext_bind_on_loopback_is_fine() {
+        for bind in ["127.0.0.1", "127.0.0.5", "::1", "::ffff:127.0.0.1"] {
+            let cfg =
+                Config::from_toml_str(&format!("[server]\nbind_address = \"{bind}\"\n")).unwrap();
+            assert!(
+                !cfg.cleartext_exposed_off_loopback(),
+                "{bind} must not trip"
+            );
+        }
+    }
+
+    /// Every loopback spelling must produce a *bindable* address, not merely
+    /// pass the loopback predicate. `format!("{bind}:{port}")` cannot express
+    /// an IPv6 literal — `"::1:9200"` does not parse — so a `::1` node used to
+    /// pass every check here and then die at bind time with `invalid socket
+    /// address syntax`, after creating its data directory and printing a
+    /// first-run console link. Making loopback the default (#228) makes `::1`
+    /// a spelling people will now actually reach for.
+    #[test]
+    fn loopback_spellings_produce_bindable_addresses() {
+        for bind in ["127.0.0.1", "::1", "[::1]", " ::1 "] {
+            let cfg =
+                Config::from_toml_str(&format!("[server]\nbind_address = \"{bind}\"\n")).unwrap();
+            assert!(cfg.bind_address_is_loopback(), "{bind} should be loopback");
+            let addr = cfg
+                .socket_addr(9200)
+                .unwrap_or_else(|| panic!("{bind} must yield a socket address"));
+            assert!(addr.ip().is_loopback());
+            assert_eq!(addr.port(), 9200);
+        }
+        assert_eq!(
+            Config::from_toml_str("[server]\nbind_address = \"::1\"\n")
+                .unwrap()
+                .socket_addr(9200)
+                .unwrap()
+                .to_string(),
+            "[::1]:9200"
+        );
+    }
+
+    /// A bind address that is not an IP has no socket address to offer, and
+    /// says so rather than producing something that fails later.
+    #[test]
+    fn non_ip_bind_has_no_socket_addr() {
+        let cfg = Config::from_toml_str("[server]\nbind_address = \"example.com\"\n").unwrap();
+        assert!(cfg.bind_ip().is_none());
+        assert!(cfg.socket_addr(9200).is_none());
+        assert!(!cfg.bind_address_is_loopback(), "must fail closed");
+    }
+
+    /// The escape hatch for proxy/sidecar/mesh TLS termination and for
+    /// container images, whose network namespace is the boundary.
+    #[test]
+    fn declared_insecure_bind_permits_the_exposure() {
+        let cfg = Config::from_toml_str(
+            "[server]\nbind_address = \"0.0.0.0\"\nallow_insecure_network_bind = true\n",
+        )
+        .unwrap();
+        assert!(!cfg.cleartext_exposed_off_loopback());
+    }
+
+    /// With TLS on, REST and ES-compat are encrypted and this check has
+    /// nothing to say — the residual gRPC h2c exposure is #229's job. The two
+    /// predicates partition on `tls.enabled`, so they can never both fire.
+    #[test]
+    fn tls_on_is_the_other_checks_business() {
+        let cfg = Config::from_toml_str(
+            "[server]\nbind_address = \"0.0.0.0\"\n\
+             [tls]\nenabled = true\ncert_path = \"/c.pem\"\nkey_path = \"/k.pem\"\n",
+        )
+        .unwrap();
+        assert!(!cfg.cleartext_exposed_off_loopback());
+        assert!(cfg.grpc_h2c_exposed_off_loopback());
+        assert!(!(cfg.cleartext_exposed_off_loopback() && cfg.grpc_h2c_exposed_off_loopback()));
+    }
+
+    /// `allow_insecure_network_bind` relaxes only the cleartext check. It must
+    /// not become a way to smuggle past #229's gRPC refusal as well, or one
+    /// opt-out silently buys two exposures.
+    #[test]
+    fn insecure_bind_opt_out_does_not_relax_the_grpc_check() {
+        let cfg = Config::from_toml_str(
+            "[server]\nbind_address = \"0.0.0.0\"\nallow_insecure_network_bind = true\n\
+             [tls]\nenabled = true\ncert_path = \"/c.pem\"\nkey_path = \"/k.pem\"\n",
+        )
+        .unwrap();
+        assert!(cfg.grpc_h2c_exposed_off_loopback());
+    }
+
+    // ── Cluster auth: fail closed (issue #75) ────────────────────────────────
+
+    #[test]
+    fn cluster_enabled_without_secret_is_rejected() {
+        let err = Config::from_toml_str(
+            "[cluster]\nenabled = true\nport = 9300\npeers = [\"n2=10.0.0.2:9300\"]\n",
+        )
+        .expect_err("cluster mode without a shared secret must not load");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("auth_secret") && msg.contains("ARGOS_CLUSTER_AUTH_SECRET"),
+            "error must name both secret sources, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn cluster_enabled_with_secret_is_accepted() {
+        let cfg = Config::from_toml_str(
+            "[cluster]\nenabled = true\nauth_secret = \"0123456789abcdef0123\"\n",
+        )
+        .expect("cluster mode with a secret must load");
+        assert!(cfg.cluster.enabled);
+        assert_eq!(
+            cfg.cluster.effective_auth_secret().as_deref(),
+            Some("0123456789abcdef0123")
+        );
+    }
+
+    #[test]
+    fn cluster_short_secret_is_rejected() {
+        let err = Config::from_toml_str("[cluster]\nenabled = true\nauth_secret = \"hunter2\"\n")
+            .expect_err("a 7-char cluster secret must be rejected");
+        assert!(err.to_string().contains("too short"), "{err}");
+    }
+
+    #[test]
+    fn cluster_disabled_needs_no_secret() {
+        // The overwhelmingly common case: cluster mode off, nothing to check.
+        Config::from_toml_str("[cluster]\nenabled = false\n").expect("single-node must still load");
+        Config::default()
+            .validate()
+            .expect("defaults must validate");
+    }
+
+    // ── Cluster peers / ports: fail at load, not as silent runtime churn
+    //    (issue #1171) ────────────────────────────────────────────────────
+
+    #[test]
+    fn cluster_peer_label_must_equal_its_address() {
+        // A friendly label makes vote replies undeliverable (replies are
+        // routed by looking the sender's id up in the peer list, and ids
+        // ARE addresses) — the node then loses every election with no
+        // diagnostic of its own. Measured: 51+ elections in ~15 s.
+        let err = Config::from_toml_str(
+            "[cluster]\nenabled = true\nauth_secret = \"0123456789abcdef0123\"\n\
+             peers = [\"n2=10.0.0.2:9300\"]\n",
+        )
+        .expect_err("a peer label that differs from its address must be refused at load");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("label must equal the address"),
+            "error must name the rule, got: {msg}"
+        );
+        assert!(
+            msg.contains("10.0.0.2:9300=10.0.0.2:9300"),
+            "error must show the corrected entry, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn cluster_peer_label_matching_address_is_accepted() {
+        Config::from_toml_str(
+            "[cluster]\nenabled = true\nauth_secret = \"0123456789abcdef0123\"\n\
+             peers = [\"10.0.0.2:9300=10.0.0.2:9300\", \"10.0.0.3:9300=10.0.0.3:9300\"]\n",
+        )
+        .expect("label==address peer entries must load");
+    }
+
+    #[test]
+    fn cluster_malformed_peer_entry_is_rejected() {
+        let err = Config::from_toml_str(
+            "[cluster]\nenabled = true\nauth_secret = \"0123456789abcdef0123\"\n\
+             peers = [\"10.0.0.2:9300\"]\n",
+        )
+        .expect_err("a peer entry without label=address must be refused");
+        assert!(
+            err.to_string().contains("malformed"),
+            "error must say malformed, got: {err}"
+        );
+    }
+
+    #[test]
+    fn cluster_port_colliding_with_a_data_listener_is_rejected() {
+        // The bind would fail at boot and the node would silently degrade
+        // to single-node with a green /_cluster/health — refuse at load.
+        let err = Config::from_toml_str(
+            "[server]\nes_compat_port = 9300\n[cluster]\nenabled = true\n\
+             auth_secret = \"0123456789abcdef0123\"\nport = 9300\n",
+        )
+        .expect_err("cluster.port colliding with a data listener must be refused");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("collides with server.es_compat_port") && msg.contains("#1171"),
+            "error must name the colliding listener, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn cluster_port_distinct_from_data_listeners_is_accepted() {
+        Config::from_toml_str(
+            "[server]\nrest_port = 18000\ngrpc_port = 18001\nes_compat_port = 18002\n\
+             [cluster]\nenabled = true\nauth_secret = \"0123456789abcdef0123\"\nport = 19300\n\
+             peers = [\"10.0.0.2:19300=10.0.0.2:19300\"]\n",
+        )
+        .expect("a distinct cluster port must load");
+    }
+
+    #[test]
+    fn auth_secret_resolution_prefers_explicit_config() {
+        let env = Some("from-environment".to_string());
+        // Explicit config wins; a stray env var cannot silently re-key a cluster.
+        assert_eq!(
+            ClusterConfig::resolve_auth_secret("from-config", env.clone()),
+            Some("from-config".to_string())
+        );
+        // Empty / whitespace-only config falls back to the environment.
+        assert_eq!(
+            ClusterConfig::resolve_auth_secret("", env.clone()),
+            Some("from-environment".to_string())
+        );
+        assert_eq!(
+            ClusterConfig::resolve_auth_secret("   ", env),
+            Some("from-environment".to_string())
+        );
+        // Neither source → None, which is what makes validation fail closed.
+        assert_eq!(ClusterConfig::resolve_auth_secret("", None), None);
+        assert_eq!(
+            ClusterConfig::resolve_auth_secret("  ", Some("  ".to_string())),
+            None
+        );
+        // Surrounding whitespace (e.g. a trailing newline from `$(cat file)`)
+        // is configuration noise, not key material.
+        assert_eq!(
+            ClusterConfig::resolve_auth_secret("", Some("  padded-secret\n".to_string())),
+            Some("padded-secret".to_string())
+        );
+    }
+}

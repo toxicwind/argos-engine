@@ -41,16 +41,16 @@ input libFuzzer minimised the `TimeDelta::hours out of bounds` panic down to.
 
 | target | entry point | why it is untrusted |
 |---|---|---|
-| `query_dsl` | `xerj_query::parse_request`, `rewrite` | the whole `_search` body: nesting depth, clause count, sort and `_source` specs |
-| `query_string` | `xerj_query::parse_query` on `query_string` / `simple_query_string` | the hand-written Lucene grammar, also reachable via `?q=` — ES's CVE-2023-31419 was a stack overflow here |
-| `date_math` | `xerj_query::dates` | `"gte": "now-1d/d"` and `"format": "…"` are caller-supplied; both compile through hand-written tokenisers |
-| `sql` | `xerj_engine::sql::parse_sql` | `/_sql` takes a statement from the wire; ES's CVE-2024-43709 was an OOM from a crafted SQL query |
-| `painless` | `xerj_engine::painless::{check_script_limits, eval_painless}` | attacker-supplied *code* inside a query body, plus the depth/op/deadline budgets that are supposed to bound it |
-| `index_name_date_math` | `xerj_api::es_compat::resolve_date_math_index`, then `xerj_engine::index::resolve_date_math` | `<logs-{now/d}>` arrives in a request URI — a second date-math implementation with its own brace scanner |
-| `agg_script` | `xerj_engine::aggs::run_aggs` with a fuzzed script in `scripted_metric`, `bucket_script`, `bucket_selector` | two *more* Painless-subset tokenisers, distinct from `xerj_engine::painless` and reached only through an aggregation body |
+| `query_dsl` | `argos_query::parse_request`, `rewrite` | the whole `_search` body: nesting depth, clause count, sort and `_source` specs |
+| `query_string` | `argos_query::parse_query` on `query_string` / `simple_query_string` | the hand-written Lucene grammar, also reachable via `?q=` — ES's CVE-2023-31419 was a stack overflow here |
+| `date_math` | `argos_query::dates` | `"gte": "now-1d/d"` and `"format": "…"` are caller-supplied; both compile through hand-written tokenisers |
+| `sql` | `argos_engine::sql::parse_sql` | `/_sql` takes a statement from the wire; ES's CVE-2024-43709 was an OOM from a crafted SQL query |
+| `painless` | `argos_engine::painless::{check_script_limits, eval_painless}` | attacker-supplied *code* inside a query body, plus the depth/op/deadline budgets that are supposed to bound it |
+| `index_name_date_math` | `argos_api::es_compat::resolve_date_math_index`, then `argos_engine::index::resolve_date_math` | `<logs-{now/d}>` arrives in a request URI — a second date-math implementation with its own brace scanner |
+| `agg_script` | `argos_engine::aggs::run_aggs` with a fuzzed script in `scripted_metric`, `bucket_script`, `bucket_selector` | two *more* Painless-subset tokenisers, distinct from `argos_engine::painless` and reached only through an aggregation body |
 
 The `es_compat` entry point above is named first for a reason. The first version
-of `index_name_date_math` fuzzed `xerj_engine::index::resolve_date_math` alone —
+of `index_name_date_math` fuzzed `argos_engine::index::resolve_date_math` alone —
 which has no production callers — so it passed while the resolver that runs on
 the wire still aborted on `<logs-{2026-01-01||+9999999999999d}>`. **Fuzz the
 function the request reaches**, and check that it is that function: `grep` for
@@ -58,7 +58,7 @@ callers before you write the harness.
 
 This list is the coverage. It is not every parser in the engine, and the
 security docs must name these rather than claim the parser surface generally —
-that overstatement is what [#207](https://github.com/xerj-org/xerj/issues/207)
+that overstatement is what [#207](https://github.com/argos-org/argos/issues/207)
 was filed about.
 
 ## Adding a target
@@ -68,7 +68,7 @@ was filed about.
    starts from the empty input and reaches almost nothing in a bounded run.
 3. Nothing else — `fuzz-smoke.sh` discovers targets with `cargo fuzz list`, so
    CI picks it up automatically, and
-   `xerj-engine/tests/security_tooling_claims.rs` fails if the harness or its
+   `argos-engine/tests/security_tooling_claims.rs` fails if the harness or its
    seeds are missing.
 
 ## Conventions

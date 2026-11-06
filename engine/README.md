@@ -1,17 +1,17 @@
-# xerj
+# argos
 
 **AI-native search, vector, and log engine. Rust/C. Single binary. Zero GC. Byte-perfect.**
 
-xerj is an Elasticsearch-compatible search engine that replaces ES clusters with a single binary.
+argos is an Elasticsearch-compatible search engine that replaces ES clusters with a single binary.
 
 ## Quick Start
 
 ```bash
 # Download and run
-./xerj --data-dir ./data --insecure
+./argos --data-dir ./data --insecure
 
 # Or with Docker
-docker run -v xerj-data:/data -p 9200:9200 xerj --insecure
+docker run -v argos-data:/data -p 9200:9200 argos --insecure
 
 # Create an index
 curl -X PUT http://localhost:9200/my-index
@@ -27,39 +27,39 @@ curl -X POST http://localhost:9200/my-index/_search \
   -d '{"query": {"match": {"content": "world"}}}'
 ```
 
-## Why xerj?
+## Why argos?
 
 Head-to-head against Elasticsearch 8.13.0 on the same machine, identical
 HTTP wire payloads, single-node, tmpfs data dir, both freshly started
 ([full report][bench]):
 
-| | Elasticsearch 8.13 | xerj | Winner |
+| | Elasticsearch 8.13 | argos | Winner |
 |---|---:|---:|---|
-| Binary size | ~800 MB | ~16 MB | **xerj 50×** |
-| Cold start (after restart) | 6.04 s | **0.40 s** | **xerj 15×** |
-| Graceful shutdown (SIGTERM) | 3.27 s | **0.24 s** | **xerj 14×** |
-| RSS, warmed (100k docs + 1k vectors) | 2,527 MB | **86 MB** | **xerj 29×** |
-| Disk, post-restart | 6 MB | **4 MB** | **xerj 1.5×** |
-| Per-shard WAL post-flush | 55 B | **16 B** | **xerj 3.4×** |
-| Index creation (`PUT /idx`) | 23.5 ms | **2.6 ms** | **xerj 9×** |
-| `PUT /_doc/{id}?refresh=true` p50 | 6.50 ms | **0.34 ms** | **xerj 19×** |
-| `DELETE /_doc/{id}?refresh=true` p50 | 5.20 ms | **0.30 ms** | **xerj 17×** |
-| Term query p50 | 0.79 ms | **0.32 ms** | **xerj 2.5×** |
-| Match query p50 | 1.28 ms | **0.35 ms** | **xerj 3.7×** |
-| Terms agg p50 | 1.06 ms | **0.33 ms** | **xerj 3.2×** |
-| Top-K sort p50 | 4.50 ms | **0.35 ms** | **xerj 13×** |
-| kNN k=10 p50 | 1.43 ms | **0.49 ms** | **xerj 2.9×** |
+| Binary size | ~800 MB | ~16 MB | **argos 50×** |
+| Cold start (after restart) | 6.04 s | **0.40 s** | **argos 15×** |
+| Graceful shutdown (SIGTERM) | 3.27 s | **0.24 s** | **argos 14×** |
+| RSS, warmed (100k docs + 1k vectors) | 2,527 MB | **86 MB** | **argos 29×** |
+| Disk, post-restart | 6 MB | **4 MB** | **argos 1.5×** |
+| Per-shard WAL post-flush | 55 B | **16 B** | **argos 3.4×** |
+| Index creation (`PUT /idx`) | 23.5 ms | **2.6 ms** | **argos 9×** |
+| `PUT /_doc/{id}?refresh=true` p50 | 6.50 ms | **0.34 ms** | **argos 19×** |
+| `DELETE /_doc/{id}?refresh=true` p50 | 5.20 ms | **0.30 ms** | **argos 17×** |
+| Term query p50 | 0.79 ms | **0.32 ms** | **argos 2.5×** |
+| Match query p50 | 1.28 ms | **0.35 ms** | **argos 3.7×** |
+| Terms agg p50 | 1.06 ms | **0.33 ms** | **argos 3.2×** |
+| Top-K sort p50 | 4.50 ms | **0.35 ms** | **argos 13×** |
+| kNN k=10 p50 | 1.43 ms | **0.49 ms** | **argos 2.9×** |
 | Bulk-ingest 100k docs/s | **179,574** | 95,405 | ES 1.88× |
 | Per-batch (5K) bulk p99 | **34.8 ms** | 80.3 ms | ES 2.3× |
 | Data loss on restart | 0% | 0% | tied |
-| GC pauses | 20–40 ms (JVM) | **0** (no GC) | **xerj** |
-| Config surface | 3,000+ knobs | **137**, all optional | **xerj** |
+| GC pauses | 20–40 ms (JVM) | **0** (no GC) | **argos** |
+| Config surface | 3,000+ knobs | **137**, all optional | **argos** |
 
-xerj wins on every operational and read-path metric. ES still wins
+argos wins on every operational and read-path metric. ES still wins
 bulk-ingest throughput on warm Lucene `IndexWriter` (perf-backlog item
 to close — sharded flush thresholds + doc-values borrow refactor).
 
-[bench]: reports/2026-04-25T13-40-00_xerj_vs_elasticsearch_disk_parity.md
+[bench]: reports/2026-04-25T13-40-00_argos_vs_elasticsearch_disk_parity.md
 
 ## Features
 
@@ -78,22 +78,22 @@ to close — sharded flush thresholds + doc-values borrow refactor).
 ## Building
 
 ```bash
-cargo build --release -p xerj-server
+cargo build --release -p argos-server
 ```
 
-The resulting binary is at `target/release/xerj`.
+The resulting binary is at `target/release/argos`.
 
 ## Configuration
 
-See [`xerj.default.toml`](xerj.default.toml) for the commonly-tuned settings, and
-[`crates/xerj-common/src/config.rs`](crates/xerj-common/src/config.rs) for all 137
+See [`argos.default.toml`](argos.default.toml) for the commonly-tuned settings, and
+[`crates/argos-common/src/config.rs`](crates/argos-common/src/config.rs) for all 137
 — every one of them optional.
 
 The minimal config to get started:
 
 ```toml
 [server]
-data_dir = "/var/lib/xerj"
+data_dir = "/var/lib/argos"
 es_compat_port = 9200
 
 [auth]
@@ -105,18 +105,18 @@ opt-out, appropriate only for a trusted private network or local development.
 Leave it out (or set it to `true`) and the server mints an admin key on first
 boot and writes it to `<data_dir>/admin.key` (mode 0600). The key is not
 printed: the first-run notice names that path. Every client then has to send
-it — including `xerj autoindex`, which never reads the key out of
-`xerj.toml`; give it `--api-key` or `XERJ_API_KEY`:
+it — including `argos autoindex`, which never reads the key out of
+`argos.toml`; give it `--api-key` or `ARGOS_API_KEY`:
 
 ```bash
-export XERJ_API_KEY="$(cat /var/lib/xerj/admin.key)"
-xerj autoindex ~/my-project
+export ARGOS_API_KEY="$(cat /var/lib/argos/admin.key)"
+argos autoindex ~/my-project
 ```
 
 Pass a config file with `--config`:
 
 ```bash
-xerj --config /etc/xerj/xerj.toml
+argos --config /etc/argos/argos.toml
 ```
 
 ## ES API Coverage
@@ -166,9 +166,9 @@ xerj --config /etc/xerj/xerj.toml
 ## Query Types Supported
 
 Complete and machine-checked. The list is generated from
-`xerj_query::parser::SUPPORTED_QUERY_TYPES`, that constant is pinned to
+`argos_query::parser::SUPPORTED_QUERY_TYPES`, that constant is pinned to
 `parse_query`'s dispatch table by a unit test, and this file is compared
-against it by `crates/xerj-engine/tests/docs_capability_lists.rs` — so a query
+against it by `crates/argos-engine/tests/docs_capability_lists.rs` — so a query
 type cannot be added or removed without the build failing until the docs
 follow.
 
@@ -208,7 +208,7 @@ Recognised and **deliberately rejected with a 400**:
 `has_child`, `has_parent`
 <!-- /generated:rejected-query-types -->
 
-XERJ never materialises a parent/child join, so a `has_child` that ran would
+ARGOS never materialises a parent/child join, so a `has_child` that ran would
 match against flat documents and return silently wrong hits. It refuses at
 parse time instead, with a message that names the alternative (denormalize the
 relationship). Any other query type answers `unknown query type`.
@@ -218,13 +218,13 @@ ES answers a lookup (`term`, `terms`, `match`, `match_phrase`,
 `match_phrase_prefix`, `prefix`, `wildcard`, `regexp`, `fuzzy`, `range`) naming
 a field the index does not map with a silent 0-hit — which a caller cannot
 distinguish from an empty corpus; the map-gate measurement counted 5 silent
-wrong-field misses in 30 agent intents. XERJ keeps that default on the wire
+wrong-field misses in 30 agent intents. ARGOS keeps that default on the wire
 (the ES-YAML suite has legitimate cases querying an unmapped `missing_field`)
 but answers it with the `_xerj.hints` `unknown_field` diagnostic, and refuses
 with a **400 naming the field** and the searchable fields where strictness is
 asked for: `?strict_unknown_fields=true` per request,
 `index.query.strict_unknown_fields=true` per index (one strict target covers
-the whole request), and — because `xerj autoindex` PUTs an explicit full
+the whole request), and — because `argos autoindex` PUTs an explicit full
 schema, where a wrong field name is a mistake and not a dynamic-mapping
 probe — every index autoindex creates. `?strict_unknown_fields=false` opts
 one request back out. Two exemptions hold either way: `exists` on an unmapped
@@ -235,7 +235,7 @@ is never validated. `_msearch` applies the same rule per item (setting only
 ## Aggregation Types Supported
 
 Complete and machine-checked the same way, from
-`xerj_engine::aggs::SUPPORTED_AGG_TYPES`. No probabilistic sketch sits in the
+`argos_engine::aggs::SUPPORTED_AGG_TYPES`. No probabilistic sketch sits in the
 metric path — `cardinality` is a true distinct count, not an HLL estimate, and
 `terms` `doc_count` is precise.
 
@@ -285,8 +285,8 @@ Bucket aggregations take nested sub-aggregations via an inner `aggs` key.
 
 ```
 HTTP Request
-    → xerj-api  (Axum handler, es_compat.rs)
-    → xerj-query  parse_request() — raw JSON → SearchRequest (QueryNode tree)
+    → argos-api  (Axum handler, es_compat.rs)
+    → argos-query  parse_request() — raw JSON → SearchRequest (QueryNode tree)
     → Engine::get_index() — looks up named index
     → Index::search()
          → memtable scan  (in-memory BM25 via FtsMemtable)
@@ -301,28 +301,28 @@ HTTP Request
 
 | Crate | Purpose |
 |---|---|
-| `xerj-server` | Binary entry point; CLI, config loading, server startup |
-| `xerj-api` | Axum HTTP layer; ES-compatible and native REST handlers |
-| `xerj-engine` | `Engine` and `Index` structs — the integration layer |
-| `xerj-query` | Query DSL: AST, ES JSON parser, planner, rewriter, executor |
-| `xerj-storage` | WAL, segments, version map, index store |
-| `xerj-fts` | BM25 scoring, analyzer registry, postings lists |
-| `xerj-common` | Shared types: `Config`, `Schema`, `FieldType`, `XerjError` |
-| `xerj-vector` | Dense vector HNSW index for k-NN / semantic search |
-| `xerj-compress` | Block compression codecs (LZ4, Zstd) |
-| `xerj-logs` | Columnar log ingestion and time-based retention |
-| `xerj-ai` | Text chunking, embedding proxy, memory store |
-| `xerj-autoindex` | `xerj autoindex` — zero-config folder onboarding; a pure ES-compat HTTP client, it does not link the engine |
-| `xerj-console-api` | Console backend at `/_xerj-console/api/v1` — auth, prefs, dashboards, saved views, data sources |
-| `xerj-cluster` | Embedded Raft consensus for cluster metadata, written from scratch |
-| `xerj-mcp` | MCP stdio server exposing XERJ's REST surface to agent hosts as tools |
-| `xerj-rerank` | Second-stage reranking client for `_search`: strict `rerank` block parser, provider call with batching and a deadline, degrade-on-deadline / surface-on-contract failure policy. A leaf the API layer calls; the engine does not link it |
-| `xerj-hub` | Corpus Hub v2 client behind `xerj ask` / `xerj "<question>"`, `xerj hub …` and `xerj code <corpus> --def`: pulls, verifies and restores signed pre-indexed packs, builds them for CI, and routes a question to a corpus. Depends on `xerj-autoindex`; the engine does not link it |
-| `xerj-wasm` | Pluggable ingest-time document transform pipeline |
+| `argos-server` | Binary entry point; CLI, config loading, server startup |
+| `argos-api` | Axum HTTP layer; ES-compatible and native REST handlers |
+| `argos-engine` | `Engine` and `Index` structs — the integration layer |
+| `argos-query` | Query DSL: AST, ES JSON parser, planner, rewriter, executor |
+| `argos-storage` | WAL, segments, version map, index store |
+| `argos-fts` | BM25 scoring, analyzer registry, postings lists |
+| `argos-common` | Shared types: `Config`, `Schema`, `FieldType`, `XerjError` |
+| `argos-vector` | Dense vector HNSW index for k-NN / semantic search |
+| `argos-compress` | Block compression codecs (LZ4, Zstd) |
+| `argos-logs` | Columnar log ingestion and time-based retention |
+| `argos-ai` | Text chunking, embedding proxy, memory store |
+| `argos-autoindex` | `argos autoindex` — zero-config folder onboarding; a pure ES-compat HTTP client, it does not link the engine |
+| `argos-console-api` | Console backend at `/_argos-console/api/v1` — auth, prefs, dashboards, saved views, data sources |
+| `argos-cluster` | Embedded Raft consensus for cluster metadata, written from scratch |
+| `argos-mcp` | MCP stdio server exposing ARGOS's REST surface to agent hosts as tools |
+| `argos-rerank` | Second-stage reranking client for `_search`: strict `rerank` block parser, provider call with batching and a deadline, degrade-on-deadline / surface-on-contract failure policy. A leaf the API layer calls; the engine does not link it |
+| `argos-hub` | Corpus Hub v2 client behind `argos ask` / `argos "<question>"`, `argos hub …` and `argos code <corpus> --def`: pulls, verifies and restores signed pre-indexed packs, builds them for CI, and routes a question to a corpus. Depends on `argos-autoindex`; the engine does not link it |
+| `argos-wasm` | Pluggable ingest-time document transform pipeline |
 
-Every crate under `crates/` appears in this table — `crates/xerj-engine/tests/docs_capability_lists.rs`
+Every crate under `crates/` appears in this table — `crates/argos-engine/tests/docs_capability_lists.rs`
 fails if one is missing or if the table names a crate that no longer exists. Five of them
-(`xerj-autoindex`, `xerj-console-api`, `xerj-cluster`, `xerj-mcp`, `xerj-wasm`) were absent until
+(`argos-autoindex`, `argos-console-api`, `argos-cluster`, `argos-mcp`, `argos-wasm`) were absent until
 issue #211. The conformance runner lives outside `crates/`, at `tests/es-compat-yaml`.
 
 ### Storage Model
@@ -342,7 +342,7 @@ Documents are written to the WAL and an in-memory memtable first. The memtable i
 
 ## Security
 
-By default, xerj requires an API key on every request. On first startup, the admin key is auto-generated and written to `<data_dir>/admin.key`:
+By default, argos requires an API key on every request. On first startup, the admin key is auto-generated and written to `<data_dir>/admin.key`:
 
 ```bash
 curl -H "Authorization: ApiKey <key>" http://localhost:9200/_cluster/health
@@ -352,23 +352,23 @@ Use `--insecure` to disable auth and TLS in development environments.
 
 ## Pricing
 
-xerj is open source. No ERU licensing. No per-node fees. No feature gates.
+argos is open source. No ERU licensing. No per-node fees. No feature gates.
 
 All capabilities — vector search, full-text search, aggregations, SQL, log ingestion,
 embedding proxy — are available in the single open-source binary with no paid tiers.
 
 ## Aggregation Exactness
 
-xerj `terms` aggregations are **exact**, not estimates.
+argos `terms` aggregations are **exact**, not estimates.
 
 Elasticsearch uses the HyperLogLog++ algorithm for `cardinality` and can return
 approximate bucket counts for `terms` aggregations under high cardinality.
-xerj computes every aggregation over the full document set with precise counts —
+argos computes every aggregation over the full document set with precise counts —
 there is no sampling, no approximation, and no `doc_count_error_upper_bound`.
 
 ## Vector Dimensions
 
-xerj supports up to **16,384 dimensions** per vector field — 4× Elasticsearch's
+argos supports up to **16,384 dimensions** per vector field — 4× Elasticsearch's
 limit of 4,096.  This accommodates current and next-generation embedding models:
 
 | Model                   | Dimensions |
@@ -385,15 +385,15 @@ but not wired in this build, and setting it logs a warning at startup.
 
 ## Embedding Token Limits
 
-xerj delegates embedding generation to the configured external model API
+argos delegates embedding generation to the configured external model API
 (e.g. OpenAI, Ollama, or a self-hosted model).  Token limits are therefore
-**model-specific**, not xerj-specific:
+**model-specific**, not argos-specific:
 
 - OpenAI `text-embedding-ada-002` — 8,191 tokens per input
 - OpenAI `text-embedding-3-*`     — 8,191 tokens per input
 - Ollama `nomic-embed-text`       — model-dependent (typically 2,048–8,192)
 
-xerj's chunker (`xerj-ai`) splits long documents into model-appropriate
+argos's chunker (`argos-ai`) splits long documents into model-appropriate
 windows before calling the embedding API.  Configure the endpoint and model
 in `[embedding]` in your config file.
 
@@ -415,7 +415,7 @@ curl -X POST http://localhost:9200/orders/_update_by_query \
 
 ## SIEM Use Cases
 
-xerj is purpose-built as a data substrate for SIEM (Security Information and
+argos is purpose-built as a data substrate for SIEM (Security Information and
 Event Management) deployments:
 
 - **Log ingestion** — syslog (RFC 3164/5424), OTLP, and structured JSON ingest
@@ -440,7 +440,7 @@ cargo check
 cargo test
 
 # Run a specific crate's tests
-cargo test -p xerj-engine
+cargo test -p argos-engine
 
 # Lint
 cargo clippy -- -D warnings

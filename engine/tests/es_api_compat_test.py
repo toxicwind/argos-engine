@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ES API compatibility test — tests xerj against a reference ES cluster.
+"""ES API compatibility test — tests argos against a reference ES cluster.
 
 Exercises every major ES REST endpoint and compares responses.
 Writes a datetime-stamped report to engine/reports/.
@@ -7,7 +7,7 @@ Writes a datetime-stamped report to engine/reports/.
 import http.client, json, sys, time, os
 from datetime import datetime
 
-XERJ = ("localhost", 9800)
+ARGOS = ("localhost", 9800)
 ES    = ("127.0.0.1", 9300)
 INDEX = "api_compat_test"
 
@@ -44,7 +44,7 @@ def req(host, port, method, path, body=None, headers=None):
 def test(name, method, path, body=None, check=None, headers=None):
     """Run a request against both engines, compare."""
     try:
-        xs, xj, xd = req(*XERJ, method, path, body, headers)
+        xs, xj, xd = req(*ARGOS, method, path, body, headers)
     except Exception as e:
         xs, xj, xd = 0, None, str(e).encode()
     try:
@@ -60,7 +60,7 @@ def test(name, method, path, body=None, check=None, headers=None):
         # Allow 200 vs 201 (both are success)
         if not ({xs, es} <= {200, 201}):
             passed = False
-            notes.append(f"status: xerj={xs} es={es}")
+            notes.append(f"status: argos={xs} es={es}")
 
     # Custom check
     if check and xj is not None:
@@ -72,7 +72,7 @@ def test(name, method, path, body=None, check=None, headers=None):
                     # Include key response fields for debugging
                     xval = xj.get("hits",{}).get("total",{}).get("value","?") if isinstance(xj, dict) else "?"
                     eval_ = ej.get("hits",{}).get("total",{}).get("value","?") if isinstance(ej, dict) else "?"
-                    notes.append(f"check failed (xerj total={xval}, es total={eval_})")
+                    notes.append(f"check failed (argos total={xval}, es total={eval_})")
         except Exception as e:
             passed = False
             notes.append(f"check error: {e}")
@@ -97,7 +97,7 @@ def setup():
         }}
     }
     # Delete if exists
-    for h, p in [XERJ, ES]:
+    for h, p in [ARGOS, ES]:
         try: req(h, p, "DELETE", f"/{INDEX}")
         except Exception: pass
 
@@ -119,7 +119,7 @@ def seed():
         }))
     body = "\n".join(docs) + "\n"
 
-    for h, p, name in [(*XERJ, "xerj"), (*ES, "ES")]:
+    for h, p, name in [(*ARGOS, "argos"), (*ES, "ES")]:
         conn = http.client.HTTPConnection(h, p, timeout=30)
         conn.request("POST", "/_bulk", body=body.encode(),
                      headers={"Content-Type": "application/x-ndjson"})
@@ -131,7 +131,7 @@ def seed():
     time.sleep(1)  # let both flush
     time.sleep(1)  # extra settle time for flush to complete
     # Force refresh on both so docs are searchable
-    for h, p, name in [(*XERJ, "xerj"), (*ES, "ES")]:
+    for h, p, name in [(*ARGOS, "argos"), (*ES, "ES")]:
         try:
             conn = http.client.HTTPConnection(h, p, timeout=30)
             conn.request("POST", f"/{INDEX}/_refresh")
@@ -145,7 +145,7 @@ def seed():
 def run_tests():
     log(f"=== ES API Compatibility Test Suite ===")
     log(f"Date: {datetime.now().isoformat()}")
-    log(f"xerj: {XERJ[0]}:{XERJ[1]}")
+    log(f"argos: {ARGOS[0]}:{ARGOS[1]}")
     log(f"ES:    {ES[0]}:{ES[1]}")
     log("")
 
@@ -240,7 +240,7 @@ def run_tests():
     log("--- Bulk API ---")
     # Send a proper NDJSON bulk body (not body=None which was the bug)
     bulk_ndjson = '{"index":{"_index":"'+INDEX+'","_id":"bulk1"}}\n{"title":"bulk test doc"}\n'
-    for h, p, name in [(*XERJ, "xerj"), (*ES, "ES")]:
+    for h, p, name in [(*ARGOS, "argos"), (*ES, "ES")]:
         try:
             conn = http.client.HTTPConnection(h, p, timeout=30)
             conn.request("POST", "/_bulk", body=bulk_ndjson.encode(),
@@ -265,7 +265,7 @@ def run_tests():
     test("GET /test_alias/_count", "GET", "/test_alias/_count")
 
     # ── Cleanup ──
-    for h, p in [XERJ, ES]:
+    for h, p in [ARGOS, ES]:
         try: req(h, p, "DELETE", f"/{INDEX}")
         except Exception: pass
         try: req(h, p, "POST", "/_aliases", {"actions": [{"remove": {"index": INDEX, "alias": "test_alias"}}]})
@@ -279,7 +279,7 @@ def write_report():
     with open(REPORT, "w") as f:
         f.write(f"# ES API Compatibility Test\n")
         f.write(f"**Date**: {datetime.now().isoformat()}\n")
-        f.write(f"**xerj**: {XERJ[0]}:{XERJ[1]}\n")
+        f.write(f"**argos**: {ARGOS[0]}:{ARGOS[1]}\n")
         f.write(f"**ES**: {ES[0]}:{ES[1]}\n\n")
         f.write(f"## Summary\n\n")
         f.write(f"| Metric | Count |\n|---|---:|\n")
@@ -289,7 +289,7 @@ def write_report():
         f.write(f"| **Pass rate** | {100*n_pass/total:.1f}% |\n\n")
 
         f.write(f"## Results\n\n")
-        f.write(f"| Test | Status | xerj HTTP | ES HTTP | Notes |\n")
+        f.write(f"| Test | Status | argos HTTP | ES HTTP | Notes |\n")
         f.write(f"|---|---|---:|---:|---|\n")
         for name, status, xs, es, detail in results:
             f.write(f"| {name} | {'✅' if status=='PASS' else '❌'} {status} | {xs} | {es} | {detail} |\n")
@@ -298,7 +298,7 @@ def write_report():
             f.write(f"\n## Failures\n\n")
             for name, status, xs, es, detail in results:
                 if status == "FAIL":
-                    f.write(f"- **{name}**: xerj={xs} es={es}{detail}\n")
+                    f.write(f"- **{name}**: argos={xs} es={es}{detail}\n")
 
         f.write(f"\n## Log\n\n```\n")
         for line in log_lines:

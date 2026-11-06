@@ -1,6 +1,6 @@
 ---
 "create API key returns a well-formed, re-authenticatable credential":
-  # The yaml runner boots XERJ --insecure (auth disabled), so the
+  # The yaml runner boots ARGOS --insecure (auth disabled), so the
   # authenticate round-trip can't be exercised here — that is covered by a
   # Rust integration test. This asserts the create response shape/values.
   - do:

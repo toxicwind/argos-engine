@@ -1,0 +1,676 @@
+//! Shared application state threaded through all request handlers.
+//!
+//! [`AppState`] is cloned cheaply into every handler via Axum's `State`
+//! extractor. All mutable fields are wrapped in `Arc<DashMap<…>>` or
+//! `Arc<RwLock<…>>` so concurrent requests never block each other on a
+//! global lock.
+
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Arc;
+use std::time::Instant;
+
+use chrono::{DateTime, Utc};
+use dashmap::DashMap;
+use tokio::sync::RwLock;
+use argos_common::{config::Config, metrics::Metrics, types::Schema};
+use argos_engine::Engine;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Index settings
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Per-index settings that can be configured at creation time.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct IndexSettings {
+    /// Number of primary shards (informational for ES compat — argos is
+    /// effectively single-shard per node in v0.1).
+    pub number_of_shards: u32,
+    /// Number of replica shards (informational — replication not yet impl).
+    pub number_of_replicas: u32,
+    /// Maximum number of result documents returned in a single search
+    /// (per-index override; falls back to global config default 10,000).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_result_window: Option<u32>,
+    /// Whether new fields are accepted dynamically or rejected (true by default).
+    #[serde(default = "crate::state::bool_true")]
+    pub dynamic_mapping: bool,
+}
+
+pub fn bool_true() -> bool {
+    true
+}
+
+impl Default for IndexSettings {
+    fn default() -> Self {
+        Self {
+            number_of_shards: 1,
+            number_of_replicas: 0,
+            max_result_window: None,
+            dynamic_mapping: true,
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// IndexHandle
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// API-layer view of an index (for ES-compat endpoints that need settings).
+#[derive(Debug, Clone)]
+pub struct IndexHandle {
+    /// Current mapping schema, wrapped for reader-writer concurrent access.
+    pub schema: Arc<RwLock<Schema>>,
+    /// Per-index configuration (shards, replicas, etc.).
+    pub settings: IndexSettings,
+    /// When this index was first created.
+    pub created_at: DateTime<Utc>,
+    /// When this index was last modified (document write or schema evolution).
+    pub updated_at: DateTime<Utc>,
+    /// Approximate document count (updated on ingest, decremented on delete).
+    pub doc_count: Arc<std::sync::atomic::AtomicU64>,
+}
+
+impl IndexHandle {
+    /// Create a new handle with the given schema and settings.
+    pub fn new(schema: Schema, settings: IndexSettings) -> Self {
+        let now = Utc::now();
+        Self {
+            schema: Arc::new(RwLock::new(schema)),
+            settings,
+            created_at: now,
+            updated_at: now,
+            doc_count: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+        }
+    }
+
+    /// Approximate document count (relaxed load — fine for stats).
+    pub fn doc_count(&self) -> u64 {
+        self.doc_count.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Increment the document counter by `n`.
+    pub fn increment_docs(&self, n: u64) {
+        self.doc_count
+            .fetch_add(n, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Decrement the document counter by `n` (saturating at 0).
+    pub fn decrement_docs(&self, n: u64) {
+        let prev = self
+            .doc_count
+            .fetch_update(
+                std::sync::atomic::Ordering::Relaxed,
+                std::sync::atomic::Ordering::Relaxed,
+                |v| Some(v.saturating_sub(n)),
+            )
+            .unwrap_or(0);
+        let _ = prev;
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tasks API — real in-flight long-running operation registry
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// One in-flight long-running operation (reindex, delete/update_by_query, …).
+/// Cloned cheaply out of the registry for read-only ES responses; `cancelled`
+/// is shared (Arc) with the live [`TaskHandle`] so a `_cancel` is observable.
+#[derive(Clone)]
+pub struct TaskEntry {
+    pub id: u64,
+    pub action: String,
+    pub start_time_ms: i64,
+    pub start_instant: Instant,
+    pub node: Arc<String>,
+    pub cancelled: Arc<AtomicBool>,
+}
+
+impl TaskEntry {
+    pub fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::Relaxed)
+    }
+    pub fn running_nanos(&self) -> u64 {
+        self.start_instant.elapsed().as_nanos() as u64
+    }
+    /// ES task key (`{node}:{id}`), used as the registry map key.
+    pub fn key(&self) -> String {
+        format!("{}:{}", self.node, self.id)
+    }
+}
+
+/// RAII handle returned by [`TaskRegistry::register`]. Dropping it (at the end
+/// of the long-running handler) removes the task from the registry, so the
+/// Tasks API only ever reflects genuinely in-flight operations. If the task
+/// was already finalized via [`TaskRegistry::complete`], the removal here is
+/// a no-op (the entry has already moved to the completed store).
+pub struct TaskHandle {
+    inner: Arc<DashMap<String, TaskEntry>>,
+    key: String,
+    pub cancelled: Arc<AtomicBool>,
+}
+
+impl TaskHandle {
+    pub fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::Relaxed)
+    }
+    /// The ES task key (`{node}:{id}`) this handle was registered under.
+    pub fn key(&self) -> &str {
+        &self.key
+    }
+}
+
+impl Drop for TaskHandle {
+    fn drop(&mut self) {
+        self.inner.remove(&self.key);
+    }
+}
+
+/// Snapshot of a finished long-running task kept around so `GET
+/// /_tasks/{id}` can report `completed: true` with a final `response` —
+/// mirroring ES, which persists completed-task docs (`.tasks` index) after
+/// the in-flight entry disappears instead of turning into a 404.
+#[derive(Clone)]
+pub struct CompletedTask {
+    pub entry: TaskEntry,
+    /// `running_time_in_nanos` frozen at completion time (the live
+    /// `TaskEntry::running_nanos` would otherwise keep growing forever).
+    pub running_nanos: u64,
+    pub response: serde_json::Value,
+}
+
+/// Registry of in-flight long-running tasks. Cheaply cloneable (`Arc` inside).
+#[derive(Clone)]
+pub struct TaskRegistry {
+    inner: Arc<DashMap<String, TaskEntry>>,
+    completed: Arc<DashMap<String, CompletedTask>>,
+    next_id: Arc<AtomicU64>,
+    node_id: Arc<String>,
+}
+
+impl TaskRegistry {
+    pub fn new(node_id: Arc<String>) -> Self {
+        Self {
+            inner: Arc::new(DashMap::new()),
+            completed: Arc::new(DashMap::new()),
+            next_id: Arc::new(AtomicU64::new(1)),
+            node_id,
+        }
+    }
+    /// Register a new in-flight task; the returned handle removes it on Drop.
+    pub fn register(&self, action: &str) -> TaskHandle {
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let entry = TaskEntry {
+            id,
+            action: action.to_string(),
+            start_time_ms: Utc::now().timestamp_millis(),
+            start_instant: Instant::now(),
+            node: self.node_id.clone(),
+            cancelled: cancelled.clone(),
+        };
+        let key = entry.key();
+        self.inner.insert(key.clone(), entry);
+        TaskHandle {
+            inner: self.inner.clone(),
+            key,
+            cancelled,
+        }
+    }
+    pub fn cancel(&self, id: &str) -> bool {
+        match self.inner.get(id) {
+            Some(e) => {
+                e.cancelled.store(true, Ordering::Relaxed);
+                true
+            }
+            None => false,
+        }
+    }
+    pub fn get(&self, id: &str) -> Option<TaskEntry> {
+        self.inner.get(id).map(|e| e.value().clone())
+    }
+    pub fn list(&self) -> Vec<TaskEntry> {
+        self.inner.iter().map(|e| e.value().clone()).collect()
+    }
+    /// Move a finished task from the in-flight registry into the completed
+    /// store, freezing its running time and attaching the final `response`.
+    /// A no-op if `key` isn't currently in-flight (e.g. already completed,
+    /// or never registered).
+    pub fn complete(&self, key: &str, response: serde_json::Value) {
+        if let Some((_, entry)) = self.inner.remove(key) {
+            let running_nanos = entry.running_nanos();
+            self.completed.insert(
+                key.to_string(),
+                CompletedTask {
+                    entry,
+                    running_nanos,
+                    response,
+                },
+            );
+        }
+    }
+    pub fn get_completed(&self, id: &str) -> Option<CompletedTask> {
+        self.completed.get(id).map(|e| e.value().clone())
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ML anomaly detection — detector configs
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// A persisted anomaly-detector configuration.
+///
+/// A detector describes how to turn a time-series source index into a set of
+/// evenly-spaced buckets (via `date_histogram` over `time_field`), reduce each
+/// bucket to a single number (via `function` over `field`), and then score each
+/// bucket against a statistical baseline (moving mean + stddev) built from the
+/// preceding *normal* buckets. It is a real, honest statistical detector — not
+/// an opaque ML model — and is fully deterministic.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct MlDetector {
+    /// User-supplied detector id (path segment, unique per node).
+    pub detector_id: String,
+    /// Source index (or index pattern) to analyse.
+    pub source_index: String,
+    /// Time field used to bucket the data (default `@timestamp`).
+    pub time_field: String,
+    /// Metric function: `count | mean | min | max | sum`.
+    pub function: String,
+    /// Field the metric function operates on. Ignored (and optional) for `count`.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub field: Option<String>,
+    /// Bucket span, ES interval syntax (e.g. `"1h"`, `"5m"`, `"1d"`).
+    pub bucket_span: String,
+    /// Number of standard deviations a bucket must deviate from its baseline to
+    /// be flagged as an anomaly (default `3.0`).
+    #[serde(default = "default_anomaly_threshold")]
+    pub anomaly_threshold: f64,
+    /// Creation timestamp (epoch millis).
+    pub create_time_ms: i64,
+    /// Optional human description.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub description: Option<String>,
+}
+
+pub fn default_anomaly_threshold() -> f64 {
+    3.0
+}
+
+impl MlDetector {
+    /// Absolute path of the on-disk detector registry file.
+    fn registry_path(data_dir: &str) -> std::path::PathBuf {
+        std::path::Path::new(data_dir)
+            .join("_ml")
+            .join("detectors.json")
+    }
+
+    /// Load all persisted detectors from `<data_dir>/_ml/detectors.json`.
+    ///
+    /// An ABSENT file is a fresh node and yields an empty registry silently. A
+    /// file that is present but unreadable or unparseable also yields an empty
+    /// registry — every detector the operator configured disappears — so it is
+    /// logged at ERROR rather than swallowed (issue #204). Boot is not failed
+    /// on it: a node that refuses to start is worse than one that starts with
+    /// its ML jobs missing and says so.
+    pub fn load_all(data_dir: &str) -> DashMap<String, MlDetector> {
+        let map = DashMap::new();
+        let path = Self::registry_path(data_dir);
+        match std::fs::read(&path) {
+            Ok(bytes) => match serde_json::from_slice::<Vec<MlDetector>>(&bytes) {
+                Ok(list) => {
+                    for d in list {
+                        map.insert(d.detector_id.clone(), d);
+                    }
+                }
+                Err(e) => tracing::error!(
+                    path = %path.display(), error = %e,
+                    "ml detector registry is unparseable — ALL configured detectors are \
+                     being dropped; move the file aside to stop it being overwritten"
+                ),
+            },
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => tracing::error!(
+                path = %path.display(), error = %e,
+                "ml detector registry could not be read — ALL configured detectors are \
+                 being dropped"
+            ),
+        }
+        map
+    }
+
+    /// Persist the full registry to disk.
+    ///
+    /// Issue #204: the write used to be `let _ = ..`, so a detector accepted
+    /// with a 200 could fail to reach disk and vanish at the next restart with
+    /// no signal anywhere. Still best-effort — the caller has already
+    /// acknowledged — but no longer silent.
+    pub fn save_all(data_dir: &str, registry: &DashMap<String, MlDetector>) {
+        let path = Self::registry_path(data_dir);
+        let list: Vec<MlDetector> = registry.iter().map(|e| e.value().clone()).collect();
+        if let Err(e) = Self::write_registry(&path, &list) {
+            tracing::error!(
+                path = %path.display(), error = %e,
+                "failed to persist ml detector registry — detectors are live in memory \
+                 but WILL BE LOST on restart"
+            );
+        }
+    }
+
+    fn write_registry(path: &std::path::Path, list: &[MlDetector]) -> std::io::Result<()> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let bytes = serde_json::to_vec_pretty(list)?;
+        std::fs::write(path, bytes)
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MlDatafeed — a continuous anomaly-detection datafeed
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// A datafeed continuously scores new data for an existing anomaly detector
+/// (its `job_id`). When started it re-scores the detector's series every
+/// `frequency_secs` and appends any newly-flagged anomaly buckets to the job's
+/// results store, so a client can poll them via
+/// `GET /_ml/anomaly_detectors/{job_id}/results/records`.
+///
+/// This is the ES `_ml/datafeeds` surface: a datafeed references a job, pulls
+/// from one or more `indices` through an optional `query`, and runs on a fixed
+/// `frequency`. The scoring model is the same transparent moving mean/stddev
+/// z-score used by the on-demand `_score` endpoint — no opaque model.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct MlDatafeed {
+    /// User-supplied datafeed id (path segment, unique per node).
+    pub datafeed_id: String,
+    /// The anomaly-detector (`job_id`) this datafeed feeds. Must reference an
+    /// existing detector.
+    pub job_id: String,
+    /// Indices the datafeed reads from. Defaults to the detector's
+    /// `source_index` when omitted at create time.
+    #[serde(default)]
+    pub indices: Vec<String>,
+    /// Query restricting which docs feed the buckets (default `match_all`).
+    #[serde(default = "default_match_all_query")]
+    pub query: serde_json::Value,
+    /// How often (seconds) the started datafeed re-scores; clamped to `>= 1`.
+    #[serde(default = "default_frequency_secs")]
+    pub frequency_secs: u64,
+    /// Lifecycle state: `"started"` or `"stopped"`.
+    #[serde(default = "default_datafeed_state")]
+    pub state: String,
+    /// Highest bucket timestamp (epoch millis) already scored, used to emit only
+    /// NEW anomaly records on each pass. Runtime-only — never persisted, and
+    /// reset on load so a restart re-scores cleanly against the (in-memory)
+    /// results store.
+    #[serde(skip)]
+    pub last_scored_ms: Option<i64>,
+}
+
+pub fn default_match_all_query() -> serde_json::Value {
+    serde_json::json!({ "match_all": {} })
+}
+
+pub fn default_frequency_secs() -> u64 {
+    60
+}
+
+pub fn default_datafeed_state() -> String {
+    "stopped".to_string()
+}
+
+impl MlDatafeed {
+    /// Absolute path of the on-disk datafeed registry file.
+    fn registry_path(data_dir: &str) -> std::path::PathBuf {
+        std::path::Path::new(data_dir)
+            .join("_ml")
+            .join("datafeeds.json")
+    }
+
+    /// Load all persisted datafeeds. Runtime state (`state`, cursor) is reset:
+    /// background scoring tasks and the results store are in-memory only and do
+    /// not survive a restart, so a freshly-loaded datafeed is always `stopped`.
+    ///
+    /// A present-but-unreadable registry drops every configured datafeed; that
+    /// is logged at ERROR rather than swallowed (issue #204). An absent file is
+    /// a fresh node and stays quiet.
+    pub fn load_all(data_dir: &str) -> DashMap<String, MlDatafeed> {
+        let map = DashMap::new();
+        let path = Self::registry_path(data_dir);
+        match std::fs::read(&path) {
+            Ok(bytes) => match serde_json::from_slice::<Vec<MlDatafeed>>(&bytes) {
+                Ok(list) => {
+                    for mut d in list {
+                        d.state = "stopped".to_string();
+                        d.last_scored_ms = None;
+                        map.insert(d.datafeed_id.clone(), d);
+                    }
+                }
+                Err(e) => tracing::error!(
+                    path = %path.display(), error = %e,
+                    "ml datafeed registry is unparseable — ALL configured datafeeds are \
+                     being dropped; move the file aside to stop it being overwritten"
+                ),
+            },
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => tracing::error!(
+                path = %path.display(), error = %e,
+                "ml datafeed registry could not be read — ALL configured datafeeds are \
+                 being dropped"
+            ),
+        }
+        map
+    }
+
+    /// Persist the full registry to disk. Best-effort but not silent — see
+    /// [`MlDetector::save_all`] (issue #204).
+    pub fn save_all(data_dir: &str, registry: &DashMap<String, MlDatafeed>) {
+        let path = Self::registry_path(data_dir);
+        let list: Vec<MlDatafeed> = registry.iter().map(|e| e.value().clone()).collect();
+        if let Err(e) = Self::write_registry(&path, &list) {
+            tracing::error!(
+                path = %path.display(), error = %e,
+                "failed to persist ml datafeed registry — datafeeds are live in memory \
+                 but WILL BE LOST on restart"
+            );
+        }
+    }
+
+    fn write_registry(path: &std::path::Path, list: &[MlDatafeed]) -> std::io::Result<()> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let bytes = serde_json::to_vec_pretty(list)?;
+        std::fs::write(path, bytes)
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AppState
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Boot outcome of the cluster transport (#1171) — what *happened*, not what
+/// was asked for (`cluster.enabled` in the config is the ask).
+///
+/// The REST layer cannot infer this from the config: a node configured for a
+/// ring whose transport failed to bind serves single-node while the operator
+/// believes it is clustered, and before this enum existed that node's
+/// `/_cluster/health` stayed green forever — the failure was one ERROR line
+/// at boot and then invisible. `argos-server/src/main.rs` records the real
+/// outcome here right after `AppState::new`, before any router exists to
+/// read it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ClusterTransportStatus {
+    /// Cluster mode is off: single-node is the *intended* state and health
+    /// reports green honestly.
+    #[default]
+    Disabled,
+    /// `cluster.enabled = true` and the transport bound and the Raft runner
+    /// started.
+    Running,
+    /// `cluster.enabled = true` but the transport failed to bind, or
+    /// cluster-state storage was unavailable: this node is serving
+    /// single-node against a configured ring. Health must say so (#1171).
+    Degraded,
+}
+
+/// Shared state injected into every request handler via Axum's `State`
+/// extractor.
+#[derive(Clone)]
+pub struct AppState {
+    /// Engine-wide configuration (immutable after startup).
+    pub config: Arc<Config>,
+    /// The search engine (manages all indices).
+    ///
+    /// Wrapped in `Arc` so that cloning `AppState` — which Axum/tower does
+    /// several times per request across the middleware stack (auth, request-id,
+    /// trace, CORS) and once more for the handler — bumps a single refcount
+    /// instead of deep-cloning `Engine`'s ~30 inner `Arc<DashMap<…>>` fields
+    /// (plus a `PathBuf`). Under concurrent load those ~30 shared refcounts
+    /// bounced between cores on every clone/drop; a saturated `perf` profile
+    /// attributed ~42 % of server CPU to `AppState::clone` + its `drop`. All
+    /// `Engine` methods take `&self`, so `state.engine.foo()` and `&state.engine`
+    /// keep working unchanged via `Deref` coercion.
+    pub engine: Arc<Engine>,
+    /// Prometheus metrics.
+    pub metrics: Arc<Metrics>,
+    /// In-memory registry of in-flight long-running tasks (reindex,
+    /// delete/update_by_query) backing the ES Tasks API.
+    pub tasks: TaskRegistry,
+    /// In-process Elasticsearch license document — mutated by `PUT /_license`,
+    /// reflected by `GET /_license` and the `license` block of `GET /_xpack`.
+    pub license: Arc<RwLock<serde_json::Value>>,
+    /// Whether the Watcher service is "running" (toggled by
+    /// `_watcher/_start` / `_watcher/_stop`; reported in `_xpack`).
+    pub watcher_active: Arc<AtomicBool>,
+    /// Registry of anomaly-detector configs, keyed by detector id. Loaded from
+    /// `<data_dir>/_ml/detectors.json` at startup and re-persisted on every
+    /// create/delete. Backs the `PUT/GET/DELETE /_ml/anomaly_detectors/{id}`,
+    /// `POST /_ml/anomaly_detectors/{id}/_score`, and `_cat/ml` endpoints.
+    pub ml_detectors: Arc<DashMap<String, MlDetector>>,
+    /// Registry of continuous datafeed configs, keyed by datafeed id. Loaded
+    /// from `<data_dir>/_ml/datafeeds.json` at startup and re-persisted on every
+    /// create/delete/start/stop. Backs the `/_ml/datafeeds/*` endpoints.
+    pub ml_datafeeds: Arc<DashMap<String, MlDatafeed>>,
+    /// Anomaly records produced by started datafeeds, keyed by `job_id`. Bounded
+    /// (last ~10k records per job). In-memory only — not persisted, does not
+    /// survive a restart. Backs `GET /_ml/anomaly_detectors/{job_id}/results/records`.
+    pub ml_results: Arc<DashMap<String, Vec<serde_json::Value>>>,
+    /// Live background scoring tasks, keyed by datafeed id. Aborted on `_stop`
+    /// (and replaced on a re-`_start`). In-memory only.
+    pub ml_datafeed_tasks: Arc<DashMap<String, tokio::task::JoinHandle<()>>>,
+    /// Share links (`/_share`): records loaded from `<data_dir>/shares.json`
+    /// plus the claim rate limiter. See `crate::share`.
+    pub shares: Arc<crate::share::ShareStore>,
+    /// Resolved rerank-provider settings (key, endpoint, kill switch, shared
+    /// HTTP client) — the injection seam for [`crate::rerank_stage`].
+    ///
+    /// Resolved once here from `[rerank]` in the config file with the
+    /// `TYPESAFE_*` environment variables as the fallback, and never read from
+    /// the environment again. A test points a node at its own stub by replacing
+    /// this field, so parallel tests never race on process-wide env state.
+    pub rerank: Arc<argos_rerank::ProviderSettings>,
+    /// The System One decide-ladder settings (tier 2 local head armed or
+    /// not) — the same injection seam as `rerank`, for
+    /// [`crate::systemone_api`].
+    ///
+    /// Resolved once here from `ARGOS_DECIDE_MODE` / `ARGOS_DECIDE_MODEL_DIR`
+    /// (the env half of a future `--decide-mode` server flag) and never read
+    /// from the environment again. A test arms a node by replacing this
+    /// field, so parallel tests never race on process-wide env state.
+    pub decide: Arc<crate::systemone_api::DecideSettings>,
+    /// The decide surface's calibration fits (#1063): one cached fit per
+    /// decisions index, lazily computed by [`crate::systemone_api`] and
+    /// refreshed by `GET /_decide/_calibration`. Held here, not in the
+    /// handler, so every request path that ships a probability reads the same
+    /// fit.
+    pub decide_calibration: Arc<crate::systemone_api::CalibrationCache>,
+    /// What the cluster transport boot actually did (#1171) — see
+    /// [`ClusterTransportStatus`]. `AppState::new` cannot know a boot
+    /// outcome, so it seeds this from the config alone and
+    /// `argos-server/src/main.rs` overwrites it with the truth before the
+    /// first router exists; the constructor's `enabled -> Running` seed is
+    /// for direct-construction tests modelling a configured ring that came
+    /// up, which is also what every handler assumed before the field
+    /// existed.
+    pub cluster_transport: ClusterTransportStatus,
+}
+
+impl AppState {
+    /// Construct state from a config, engine, and metrics instance.
+    pub fn new(config: Config, engine: Engine, metrics: Metrics) -> Self {
+        let tasks = TaskRegistry::new(engine.node_id.clone());
+        let now = Utc::now();
+        let license = Arc::new(RwLock::new(serde_json::json!({
+            "uid": uuid::Uuid::new_v4().to_string(),
+            "type": "basic",
+            "mode": "basic",
+            "status": "active",
+            "issue_date": now.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string(),
+            "issue_date_in_millis": now.timestamp_millis(),
+            "start_date_in_millis": now.timestamp_millis(),
+            "expiry_date_in_millis": i64::MAX,
+            "max_nodes": 1000,
+            "issued_to": "argos",
+            "issuer": "argos"
+        })));
+        let watcher_active = Arc::new(AtomicBool::new(true));
+        // A blocked cluster-state boot is a diagnostic shell. Do not even
+        // read auxiliary persisted registries: they are storage state whose
+        // ownership may be described by the unsupported cluster metadata.
+        let (ml_detectors, ml_datafeeds) = if engine.cluster_state_boot_status().is_writable() {
+            (
+                Arc::new(MlDetector::load_all(&config.server.data_dir)),
+                Arc::new(MlDatafeed::load_all(&config.server.data_dir)),
+            )
+        } else {
+            (Arc::new(DashMap::new()), Arc::new(DashMap::new()))
+        };
+        let shares = crate::share::ShareStore::open(&config.server.data_dir);
+        let rerank = Arc::new(argos_rerank::ProviderSettings::from_config_and_env(
+            config.rerank.enabled,
+            &config.rerank.api_key,
+            &config.rerank.endpoint,
+        ));
+        let decide = Arc::new(crate::systemone_api::DecideSettings::from_env());
+        let decide_calibration = Arc::new(crate::systemone_api::CalibrationCache::default());
+        // Seeded from the config alone — see the field doc: `argos-server`'s
+        // main overwrites this with the real boot outcome before the first
+        // router exists.
+        let cluster_transport = if config.cluster.enabled {
+            ClusterTransportStatus::Running
+        } else {
+            ClusterTransportStatus::Disabled
+        };
+        Self {
+            rerank,
+            decide,
+            decide_calibration,
+            config: Arc::new(config),
+            engine: Arc::new(engine),
+            metrics: Arc::new(metrics),
+            tasks,
+            license,
+            watcher_active,
+            ml_detectors,
+            ml_datafeeds,
+            ml_results: Arc::new(DashMap::new()),
+            ml_datafeed_tasks: Arc::new(DashMap::new()),
+            shares,
+            cluster_transport,
+        }
+    }
+
+    /// Create state with all defaults — useful in tests.
+    pub fn default_for_tests() -> Self {
+        let config = Config::default();
+        let metrics = Metrics::new().expect("metrics init");
+        let engine = Engine::new(config.clone()).expect("engine init");
+        Self::new(config, engine, metrics)
+    }
+}
+
+impl std::fmt::Debug for AppState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AppState").finish_non_exhaustive()
+    }
+}

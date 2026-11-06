@@ -1,7 +1,7 @@
 # Ingest perf regression — root cause: Zstd-19 on the flush path
 
 **Date**: 2026-04-25
-**Branch**: `main` (xerj.ai monorepo) @ `fe590f1`
+**Branch**: `main` (argos.ai monorepo) @ `fe590f1`
 **Triggered by**: SE-demo CLI ingest of 25.5M docs / 5.17 GiB SSH-auth corpus
 **Severity**: P0 — sustained ingest throughput collapsed from **1.55 M docs/s**
 peak (2026-04-18 sync-engine refactor) to **21 K docs/s** with **75 % error rate**
@@ -15,7 +15,7 @@ python3 demo-data/build_corpus.py
 
 # Wipe data dir + run direct CLI ingest (mmap + rayon, bypasses HTTP)
 rm -rf demo-data/data && mkdir -p demo-data/data
-./target/release/xerj index \
+./target/release/argos index \
     --index ssh-auth \
     --file demo-data/ssh_big.ndjson \
     --workers 32 --batch 50000 \
@@ -26,7 +26,7 @@ Result:
 
 ```
 ═══════════════════════════════════════════════════════════
- xerj index: complete
+ argos index: complete
 ═══════════════════════════════════════════════════════════
  file size      : 5166 MB
  docs sent      : 6,428,310
@@ -60,9 +60,9 @@ compression level from 3 → 19 on the **flush** path (not merge — flush):
 
 | File | Line | What runs at level 19 |
 |---|---|---|
-| `crates/xerj-storage/src/stored_codec.rs` | 100 | `STORED_ZSTD_LEVEL` — .seg ZBS2 stored-doc payload, dict bitpack stream |
-| `crates/xerj-storage/src/doc_values.rs` | 604 | per-column doc-values payload (.dv) |
-| `crates/xerj-fts/src/index.rs` | 193 | `ZSTD_DURABLE_LEVEL` — .post ZPS1 + .meta ZFM4 |
+| `crates/argos-storage/src/stored_codec.rs` | 100 | `STORED_ZSTD_LEVEL` — .seg ZBS2 stored-doc payload, dict bitpack stream |
+| `crates/argos-storage/src/doc_values.rs` | 604 | per-column doc-values payload (.dv) |
+| `crates/argos-fts/src/index.rs` | 193 | `ZSTD_DURABLE_LEVEL` — .post ZPS1 + .meta ZFM4 |
 
 All three are on the **memtable-flush hot path**, not merge.  Each flush
 of a ~200K-doc segment now triple-stacks zstd-19 over the stored docs,
@@ -85,7 +85,7 @@ At level 19, it's **~5-10 seconds** per flush.  With one flusher per index
 shard and 32 ingest workers feeding it, the memtable fills 50× faster
 than the flusher can drain.
 
-The `xerj-engine` Condvar back-pressure (`f0221a4 perf(xerj-engine):
+The `argos-engine` Condvar back-pressure (`f0221a4 perf(argos-engine):
 condvar wait_for_drain`) caps the memtable at `3 × flush_threshold`.
 Once the cap is hit, `index_batch_sync_raw` returns
 `ResourceExhausted`.  The CLI ingester retries 240× × 5 ms = 1.2 s, then
@@ -94,7 +94,7 @@ flushes taking 5-10 s, the retry budget is exhausted on every batch.
 
 ### Why the bench didn't catch this
 
-The `2026-04-25T22-50-00_xerj_vs_elasticsearch_rerun.md` bench
+The `2026-04-25T22-50-00_argos_vs_elasticsearch_rerun.md` bench
 reported only a "−5 % Zstd-19 cost" on bulk-100K throughput
 (94 K docs/s vs 99 K pre-bump).  It missed the regression because:
 
@@ -134,15 +134,15 @@ is **false for flush**, which is the back-pressure-critical path.  The
 Two-tier compression level: **fast for flush, max for merge.**
 
 ```rust
-// xerj-storage/src/stored_codec.rs
+// argos-storage/src/stored_codec.rs
 const STORED_ZSTD_FLUSH_LEVEL: i32 = 3;   // ~250 MB/s, sustains 1M+ docs/s ingest
 const STORED_ZSTD_MERGE_LEVEL: i32 = 19;  // amortised: merge is out-of-band, low-pri
 
-// xerj-storage/src/doc_values.rs
+// argos-storage/src/doc_values.rs
 const DV_ZSTD_FLUSH_LEVEL: i32 = 3;
 const DV_ZSTD_MERGE_LEVEL: i32 = 19;
 
-// xerj-fts/src/index.rs
+// argos-fts/src/index.rs
 const ZSTD_FLUSH_LEVEL: i32 = 3;
 const ZSTD_MERGE_LEVEL: i32 = 19;
 ```
@@ -180,10 +180,10 @@ want the level-19 disk efficiency can opt in via `[storage] zstd_level
 
 ## Files
 
-- `engine/crates/xerj-storage/src/stored_codec.rs:100`
-- `engine/crates/xerj-storage/src/doc_values.rs:604`
-- `engine/crates/xerj-fts/src/index.rs:193`
-- `engine/crates/xerj-server/src/main.rs:660-700` (CLI retry loop)
+- `engine/crates/argos-storage/src/stored_codec.rs:100`
+- `engine/crates/argos-storage/src/doc_values.rs:604`
+- `engine/crates/argos-fts/src/index.rs:193`
+- `engine/crates/argos-server/src/main.rs:660-700` (CLI retry loop)
 
 ---
 
@@ -278,9 +278,9 @@ while self.memtable.size_bytes() >= hard_block {
 ```
 
 Files patched:
-- `engine/crates/xerj-engine/src/index.rs:1310-1345` (sync `index_batch_sync_raw`)
-- `engine/crates/xerj-engine/src/index.rs:920-940` (async `index_batch_turbo`)
-- `engine/crates/xerj-engine/src/index.rs:1190-1213` (async sibling)
+- `engine/crates/argos-engine/src/index.rs:1310-1345` (sync `index_batch_sync_raw`)
+- `engine/crates/argos-engine/src/index.rs:920-940` (async `index_batch_turbo`)
+- `engine/crates/argos-engine/src/index.rs:1190-1213` (async sibling)
 
 The fix: instead of giving up at 50 ms (well under one flush cycle),
 block on the Condvar until the memtable drains or 30 s passes.  This
@@ -306,11 +306,11 @@ so we don't ship it again.
 ## Verification — post-fix numbers
 
 ```
-$ ./target/release/xerj index --index ssh-auth --file ssh_big.ndjson \
+$ ./target/release/argos index --index ssh-auth --file ssh_big.ndjson \
       --workers 8 --batch 10000 --limit 1000000 --data-dir ./demo-data/data
 
 ═══════════════════════════════════════════════════════════
- xerj index: complete
+ argos index: complete
  file size      : 5166 MB
  docs sent      : 1,000,000
  errors         : 0
@@ -321,11 +321,11 @@ $ ./target/release/xerj index --index ssh-auth --file ssh_big.ndjson \
  total rate     : 331,017 docs/s    (fully segment-durable)
 ═══════════════════════════════════════════════════════════
 
-$ ./target/release/xerj index --index ssh-auth --file ssh_big.ndjson \
+$ ./target/release/argos index --index ssh-auth --file ssh_big.ndjson \
       --workers 8 --batch 10000 --limit 5000000 --data-dir ./demo-data/data
 
 ═══════════════════════════════════════════════════════════
- xerj index: complete
+ argos index: complete
  docs sent      : 5,000,000
  errors         : 0
  ingest time    : 3.50 s
