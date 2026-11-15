@@ -908,7 +908,7 @@ impl InProcessNode {
     /// Spend one of this request's window halvings; `false` when none are left.
     fn take_shrink(&self) -> bool {
         self.shrinks_left
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1))
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1))
             .is_ok()
     }
 

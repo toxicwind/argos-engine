@@ -457,7 +457,7 @@ impl ExtractionSpoolBudget {
         let _admission = self.admission.lock().unwrap();
         let previous_spools = self
             .spools
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |spools| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |spools| {
                 (spools < self.max_spools).then_some(spools + 1)
             })
             .map_err(|_| {

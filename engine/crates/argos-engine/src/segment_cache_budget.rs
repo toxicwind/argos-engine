@@ -161,7 +161,7 @@ impl SegmentHydrationBudget {
 
 fn checked_sub(counter: &AtomicU64, bytes: u64) -> Result<u64, u64> {
     counter
-        .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+        .try_update(Ordering::AcqRel, Ordering::Acquire, |current| {
             Some(current.saturating_sub(bytes))
         })
         .and_then(|previous| {

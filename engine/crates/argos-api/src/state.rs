@@ -98,7 +98,7 @@ impl IndexHandle {
     pub fn decrement_docs(&self, n: u64) {
         let prev = self
             .doc_count
-            .fetch_update(
+            .try_update(
                 std::sync::atomic::Ordering::Relaxed,
                 std::sync::atomic::Ordering::Relaxed,
                 |v| Some(v.saturating_sub(n)),

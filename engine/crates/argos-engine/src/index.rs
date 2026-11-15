@@ -17079,7 +17079,7 @@ impl Index {
                 }
                 // Item 8: pruned doc leaves the coverage-gate denominator.
                 self.vector_doc_count
-                    .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| {
+                    .try_update(Ordering::Relaxed, Ordering::Relaxed, |v| {
                         Some(v.saturating_sub(1))
                     })
                     .ok();
@@ -21492,7 +21492,7 @@ impl Index {
             self.hnsw_id_rev.write().await.remove(&node_id);
             // Item 8: this doc leaves the coverage-gate denominator.
             self.vector_doc_count
-                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| {
+                .try_update(Ordering::Relaxed, Ordering::Relaxed, |v| {
                     Some(v.saturating_sub(1))
                 })
                 .ok();
@@ -40818,7 +40818,20 @@ const EMBEDDING_EXECUTION_FILE: &str = "embedding_execution.json";
 /// after upgrading would read `persisted.identity_sha256 != current` over a
 /// populated index and refuse to open it — bricking exactly the indices this
 /// change exists to make re-indexable.
-const PERSISTED_EMBEDDING_EXECUTION_VERSION: u32 = 3;
+///
+/// Bumped to 4 by the proxy-endpoint canonicalization: the proxy identity's
+/// `identity_sha256` now hashes the NORMALIZED endpoint (scheme/host
+/// lowercased, default port and userinfo dropped, trailing slashes trimmed)
+/// instead of the raw `default_endpoint` string. The same vector-producing
+/// upstream behind a different spellings of its URL previously moved the hash
+/// and self-locked every proxy index on a cosmetic config edit (e.g. a local
+/// relay `:25238/v1` retired in favor of the direct provider, same bge-m3
+/// model). Every v3 record therefore holds a hash from the superseded
+/// algorithm; without the bump the first restart after upgrading reads
+/// `persisted.identity_sha256 != current` over a populated proxy index and
+/// refuses to open it — bricking exactly the indices this change exists to
+/// make serving again.
+const PERSISTED_EMBEDDING_EXECUTION_VERSION: u32 = 4;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct PersistedEmbeddingExecution {
@@ -41214,6 +41227,54 @@ pub(crate) fn confirm_proxy_embedding_width(
     }
 }
 
+/// Canonical form of a proxy embedding endpoint for fingerprinting.
+///
+/// The digest folds `default_endpoint` into the embedder identity (#533). A
+/// spelling-only change — scheme/host case, an explicit default port, stray
+/// userinfo, or trailing slashes — points at the same OpenAI-compatible
+/// upstream and must not move the hash, or every index recorded under the
+/// other spelling self-locks on restart. Normalize before hashing; unparseable
+/// strings are kept byte-identical so a genuinely different URL still refuses.
+fn canonicalize_proxy_endpoint(endpoint: &str) -> String {
+    let s = endpoint.trim();
+    if s.is_empty() {
+        return s.to_string();
+    }
+    let Some((scheme, rest)) = s.split_once("://") else {
+        return s.to_string();
+    };
+    let scheme = scheme.to_ascii_lowercase();
+    let (authority, path) = match rest.find('/') {
+        Some(i) => (&rest[..i], &rest[i..]),
+        None => (rest, ""),
+    };
+    let authority = match authority.rfind('@') {
+        Some(i) => &authority[i + 1..],
+        None => authority,
+    };
+    let (host, port) = match authority.rsplit_once(':') {
+        Some((h, p)) if !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()) => {
+            (h, Some(p))
+        }
+        _ => (authority, None),
+    };
+    let host = host.to_ascii_lowercase();
+    let mut with_port = String::new();
+    if let Some(p) = port {
+        let is_default = (scheme == "http" && p == "80") || (scheme == "https" && p == "443");
+        if !is_default {
+            with_port.push(':');
+            with_port.push_str(p);
+        }
+    }
+    let path = if path.len() > 1 {
+        path.trim_end_matches('/')
+    } else {
+        path
+    };
+    format!("{scheme}://{host}{with_port}{path}")
+}
+
 pub(crate) fn embedding_execution_identity(
     cfg: &argos_common::config::EmbeddingConfig,
 ) -> Result<crate::engine::EmbeddingExecutionIdentity> {
@@ -41320,7 +41381,8 @@ pub(crate) fn embedding_execution_identity(
             // identities even when they POST to the same path.
             let material = format!(
                 "proxy-unpinned.v1;configured-model={};endpoint={}",
-                cfg.default_model, cfg.default_endpoint
+                cfg.default_model,
+                canonicalize_proxy_endpoint(&cfg.default_endpoint)
             );
             match confirmed_proxy_width(cfg) {
                 Some(width) => (material, true, None, Some(width)),
@@ -41561,13 +41623,30 @@ fn validate_embedding_execution(
             && (persisted.backend != current.backend
                 || (!older_record && persisted.identity_sha256 != current.identity_sha256));
         if genuine_change {
+            // Invariant #7: when the resolved backend name is unchanged (both
+            // "proxy"), the message must still name what actually differs —
+            // the canonical endpoint/model material behind the digest — so it
+            // is never a tautological "proxy vs proxy".
+            let diff_detail = if persisted.backend == current.backend {
+                let canonical_endpoint = canonicalize_proxy_endpoint(&cfg.default_endpoint);
+                format!(
+                    " (same backend; persisted digest={} vs current digest={} for canonical endpoint={:?} model={:?})",
+                    persisted.identity_sha256,
+                    current.identity_sha256,
+                    canonical_endpoint,
+                    cfg.default_model,
+                )
+            } else {
+                String::new()
+            };
             return Err(EngineError::Common(argos_common::ArgosError::embedding(
                 format!(
-                    "index {} holds vectors produced by embedding backend {:?} but this server resolves embedding.mode={:?} to backend {:?}. Query vectors from one embedder scored against document vectors from another are silently wrong rather than visibly wrong: the widths can agree, so no dimension check fires, and the scores stay plausible while the ranking degrades toward noise. Restore the previous embedding configuration, or reindex into a new index under this one.",
+                    "index {} holds vectors produced by embedding backend {:?} but this server resolves embedding.mode={:?} to backend {:?}{}. Query vectors from one embedder scored against document vectors from another are silently wrong rather than visibly wrong: the widths can agree, so no dimension check fires, and the scores stay plausible while the ranking degrades toward noise. Restore the previous embedding configuration, or reindex into a new index under this one.",
                     index_dir.display(),
                     persisted.backend,
                     cfg.mode.trim(),
-                    current.backend
+                    current.backend,
+                    diff_detail
                 ),
             )));
         }
@@ -41946,6 +42025,136 @@ mod embedding_identity_tests {
         let err = validate_embedding_execution(index_dir, &b, false, true)
             .expect_err("#533: a swapped proxy endpoint over a populated index must be refused");
         assert!(format!("{err}").contains("holds vectors produced by embedding backend"));
+    }
+
+    /// Endpoint spelling-only differences must collapse to one canonical form so
+    /// the fingerprint (and the self-lock guard) cannot trip over a config
+    /// cosmetic edit that points at the same upstream.
+    #[test]
+    fn canonicalize_proxy_endpoint_collapses_spelling_only_differences() {
+        assert_eq!(
+            canonicalize_proxy_endpoint("https://FreeInference.org/v1/embeddings/"),
+            "https://freeinference.org/v1/embeddings"
+        );
+        assert_eq!(
+            canonicalize_proxy_endpoint("http://127.0.0.1:80/v1"),
+            "http://127.0.0.1/v1"
+        );
+        assert_eq!(
+            canonicalize_proxy_endpoint("https://user:pass@api.example.com:443/v1//"),
+            "https://api.example.com/v1"
+        );
+        assert_eq!(
+            canonicalize_proxy_endpoint("http://a.example"),
+            "http://a.example"
+        );
+        assert_eq!(canonicalize_proxy_endpoint(""), "");
+        // Unparseable strings stay byte-identical: a genuine different URL still
+        // produces a different identity.
+        assert_eq!(
+            canonicalize_proxy_endpoint("not a url"),
+            "not a url"
+        );
+    }
+
+    /// The v4 canonical-endpoint migration, the same shape as #533/#487: a
+    /// record persisted at version 3 (pre-canonicalization) must be
+    /// grandfathered — not refused — on upgrade, then re-recorded at the
+    /// current version so a LATER real change is still detected.
+    #[test]
+    fn a_version_3_proxy_record_is_grandfathered_then_rebaselined() {
+        let dir = tempfile::tempdir().unwrap();
+        let index_dir = dir.path();
+        let path = index_dir.join(EMBEDDING_EXECUTION_FILE);
+        std::fs::write(
+            &path,
+            serde_json::to_vec_pretty(&PersistedEmbeddingExecution {
+                version: 3,
+                backend: "proxy".into(),
+                identity_sha256: "legacy-v3-sha-pre-canonical-endpoint".into(),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+
+        let proxy = argos_common::config::EmbeddingConfig {
+            mode: "proxy".into(),
+            default_endpoint: "http://127.0.0.1:25238/v1".into(),
+            default_model: String::new(),
+            ..Default::default()
+        };
+        // Populated index, v3 record, v4 current → grandfathered (not refused).
+        validate_embedding_execution(index_dir, &proxy, false, true)
+            .expect("#v4: a v3 proxy record must be grandfathered, not refused, on upgrade");
+
+        // Re-baselined to v4 with the current identity.
+        let rewritten: PersistedEmbeddingExecution =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(rewritten.version, PERSISTED_EMBEDDING_EXECUTION_VERSION);
+        assert_eq!(
+            rewritten.identity_sha256,
+            embedding_execution_identity(&proxy)
+                .unwrap()
+                .identity_sha256
+        );
+
+        // After re-baselining, a LATER endpoint change is still refused.
+        let swapped = argos_common::config::EmbeddingConfig {
+            default_endpoint: "https://b.example/v1".into(),
+            default_model: "bge-m3".into(),
+            ..proxy.clone()
+        };
+        validate_embedding_execution(index_dir, &swapped, false, true).expect_err(
+            "#v4: after re-baselining, a real endpoint change must still be refused",
+        );
+    }
+
+    /// Invariant #7: a proxy→proxy change (same backend name, different
+    /// endpoint/model → different digest) must produce an error that NAMES the
+    /// actual difference. A message that only repeats `backend "proxy"` on both
+    /// sides is tautological and gives the operator nothing to fix.
+    #[test]
+    fn proxy_to_proxy_endpoint_change_error_names_the_difference() {
+        let dir = tempfile::tempdir().unwrap();
+        let index_dir = dir.path();
+        let path = index_dir.join(EMBEDDING_EXECUTION_FILE);
+
+        let first = argos_common::config::EmbeddingConfig {
+            mode: "proxy".into(),
+            default_endpoint: "http://127.0.0.1:25238/v1".into(),
+            default_model: "bge-m3".into(),
+            ..Default::default()
+        };
+        let identity = embedding_execution_identity(&first).unwrap();
+        std::fs::write(
+            &path,
+            serde_json::to_vec_pretty(&PersistedEmbeddingExecution {
+                version: PERSISTED_EMBEDDING_EXECUTION_VERSION,
+                backend: identity.backend.clone(),
+                identity_sha256: identity.identity_sha256.clone(),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+
+        let swapped = argos_common::config::EmbeddingConfig {
+            default_endpoint: "https://b.example/v1".into(),
+            ..first.clone()
+        };
+        let err = validate_embedding_execution(index_dir, &swapped, false, true).unwrap_err();
+        let msg = err.to_string();
+        // The backend name is identical on both sides — the message must not be
+        // tautological, and must surface what actually changed: the canonical
+        // endpoint and the digest delta, not just "proxy vs proxy".
+        assert!(msg.contains("b.example"), "error must name the new endpoint: {msg}");
+        assert!(
+            msg.contains("same backend; persisted digest=") && msg.contains(" vs current digest="),
+            "error must name the digest delta when the backend name is unchanged: {msg}"
+        );
+        assert!(
+            msg.contains("canonical endpoint="),
+            "error must name the canonical endpoint: {msg}"
+        );
     }
 
     /// #2306: confirming a proxy width makes the backend resumable and publishes
