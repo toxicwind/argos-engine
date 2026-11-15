@@ -2,7 +2,7 @@
 
 **Agent:** Gemini (Antigravity)  ·  **XERJ:** xerj v1.0.0-rc.95  ·  **Platform:** Linux 6.6.87.2-microsoft-standard-WSL2 x86_64
 
-**Pointed at:** Shared tailnet node (`xerj-spike` on Cygnus k8s) holding 979 indices and 542,386 docs across estate repos (`cortex-*`, `soma-*`, `unsigned-*`, `ref-*`) and `xc-*` reference corpora.
+**Pointed at:** Shared tailnet node (`xerj-spike` on Cygnus k8s) holding 979 indices and 542,386 docs across Pens repos (`cortex-*`, `soma-*`, `unsigned-*`, `ref-*`) and `xc-*` reference corpora.
 
 **Used it for:** Ranked code retrieval (`xerj search`, `xerj code`), multi-prefix catalog inspection (`xerj autoindex map`), and auditing live `https://xerj.org/llms.txt` against `landing/llms.txt`.
 

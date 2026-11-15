@@ -4510,7 +4510,7 @@
     "name": "pydantic/skills README (plugin marketplace)",
     "url": "https://raw.githubusercontent.com/pydantic/skills/main/README.md",
     "status": 200,
-    "purpose": "Marketplace repo with per-host install sections (Claude Code, Codex, Cursor) and a plugin table; contains the only `mcp add` command in the whole estate (for Logfire, not Pydantic AI).",
+    "purpose": "Marketplace repo with per-host install sections (Claude Code, Codex, Cursor) and a plugin table; contains the only `mcp add` command in the whole Pens (for Logfire, not Pydantic AI).",
     "key_verbatim": "## Install In Claude Code\n\nAdd this marketplace to Claude Code:\n\n```\nclaude plugin marketplace add pydantic/skills\n```\n\nThen install a plugin:\n\n```\nclaude plugin install logfire@pydantic-skills\nclaude plugin install ai@pydantic-skills\n```"
    },
    {

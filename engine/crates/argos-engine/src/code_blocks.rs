@@ -313,12 +313,24 @@ const WRAPPER_KINDS: &[&str] = &[
 /// `items.map(function () {})`). Wrappers between the function and `arguments`
 /// (`await`, parentheses) still count. A `const f = () => {}` declarator does
 /// not.
+/// How many wrapper levels a call-argument callback may sit inside before we
+/// stop looking for the enclosing `arguments` node. A real-world callback is
+/// at most `foo(() => {})` (parent = `arguments`) or `foo(await () => {})` /
+/// `foo((() => {}))` (one or two parentheses/await/unary wrappers). Going
+/// deeper than this means the node is not a *direct* call argument, so it is
+/// pointless to keep climbing — walking further would only reach an outer
+/// call's `arguments` and misclassify the block. Bounded so a pathological
+/// nest (e.g. ten parenthesized layers) terminates in O(1) instead of walking
+/// to the tree root. This is a deliberate cap on *wrapper* depth, not on the
+/// callback body size (that is `NESTED_CALLBACK_MAX_BYTES`).
+const MAX_CALLBACK_WRAPPER_DEPTH: usize = 4;
+
 fn is_call_callback(node: tree_sitter::Node<'_>) -> bool {
     if !CALLBACK_KINDS.contains(&node.kind()) {
         return false;
     }
     let mut cur = node.parent();
-    for _ in 0..4 {
+    for _ in 0..MAX_CALLBACK_WRAPPER_DEPTH {
         let Some(parent) = cur else {
             return false;
         };

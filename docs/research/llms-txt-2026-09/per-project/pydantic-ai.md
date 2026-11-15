@@ -167,7 +167,7 @@ metadata:
 
 <https://raw.githubusercontent.com/pydantic/skills/main/README.md>
 
-Marketplace repo with per-host install sections (Claude Code, Codex, Cursor) and a plugin table; contains the only `mcp add` command in the whole estate (for Logfire, not Pydantic AI).
+Marketplace repo with per-host install sections (Claude Code, Codex, Cursor) and a plugin table; contains the only `mcp add` command in the whole Pens (for Logfire, not Pydantic AI).
 
 ````text
 ## Install In Claude Code

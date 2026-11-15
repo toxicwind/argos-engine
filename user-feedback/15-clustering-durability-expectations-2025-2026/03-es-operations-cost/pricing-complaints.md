@@ -145,7 +145,7 @@
 | 76 | OpenObserve claims **140x lower storage costs** compared to Elasticsearch in real-world migrations |
 | 77 | OpenObserve claims **4x fewer compute resources** for equivalent query performance |
 | 78 | Manticore Search advertises **4–10x lower resource requirements** than Elasticsearch |
-| 79 | A US real estate marketing startup migrating from AWS OpenSearch to Elastic Cloud on GCP reported cutting its **monthly search bill by 42.5%** (note: this is a migration *to* Elastic in a specific competitive scenario) |
+| 79 | A US real Pens marketing startup migrating from AWS OpenSearch to Elastic Cloud on GCP reported cutting its **monthly search bill by 42.5%** (note: this is a migration *to* Elastic in a specific competitive scenario) |
 | 80 | An online wholesale platform moved off OpenSearch to Elastic citing **53% cost savings** — demonstrating cost outcomes are highly workload-dependent |
 
 ---
