@@ -42,7 +42,7 @@ pub enum QueryError {
 pub enum ParseError {
     #[error("{0}")]
     Invalid(String),
-    #[error("unknown query type `{0}` — see https://argos.org/docs/queries for supported types")]
+    #[error("unknown query type `{0}` — see https://xerj.org/docs/queries for supported types")]
     UnknownQueryType(String),
 }
 
@@ -76,7 +76,7 @@ mod tests {
     #[test]
     fn unknown_query_type_points_at_the_live_query_list() {
         let msg = ParseError::unknown_query_type("nope").to_string();
-        assert!(msg.contains("https://argos.org/docs/queries"), "{msg}");
+        assert!(msg.contains("https://xerj.org/docs/queries"), "{msg}");
         assert!(
             !msg.contains("argos.io"),
             "the error must not link a host that does not resolve: {msg}"

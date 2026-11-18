@@ -21212,7 +21212,7 @@ mod malformed_bulk_route_tests {
             "parser error:",
             "parser location: line 1, column ",
             "Fix: replace this source line with exactly one complete UTF-8 JSON object.",
-            "Related help: argos index --help and https://argos.org/llms.txt",
+            "Related help: argos index --help and https://xerj.org/llms.txt",
         ] {
             assert!(
                 reason.contains(expected),

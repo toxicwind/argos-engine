@@ -189,7 +189,7 @@ const KNOWN: &[(&str, Role)] = &[
     // server starts (argos-server/src/main.rs), so a default node opens none of
     // these. catalogue.rs and cli.rs's `fetch_to` are `argos hub pull`'s two
     // read-only fetches (signed catalogue + sig, then the one pack + sig) from
-    // ARGOS_HUB_URL, default https://hub.argos.org: records travel IN, and no
+    // ARGOS_HUB_URL, default https://hub.xerj.org: records travel IN, and no
     // document text, query text or credential goes up, so — as with `argos
     // corpus build` — DATA_EGRESS and the air-gapped rows do not change.
     // node.rs's HubNode is the node-URL client (`--url`, ARGOS_URL, else
@@ -203,7 +203,7 @@ const KNOWN: &[(&str, Role)] = &[
     ("argos-hub/src/cli.rs", Role::Client("`argos hub pull`")),
     ("argos-hub/src/node.rs", Role::Client("`argos hub`")),
     // Agent corpus reviews (#1886): feedback.rs POSTs one structured review
-    // to ARGOS_CORPUS_FEEDBACK_URL, default https://hub.argos.org/api/corpus-feedback,
+    // to ARGOS_CORPUS_FEEDBACK_URL, default https://hub.xerj.org/api/corpus-feedback,
     // automatically after `argos hub pull` and the MCP hub tools, and on demand
     // from `argos hub feedback` / `argos_corpus_feedback`. Unlike `argos hub pull`
     // this sends data UP (scores, corpus slug, agent family, a query shape with

@@ -37,7 +37,7 @@ pub fn catalogue_format_supported(version: u32) -> bool {
 pub const PACK_FORMAT_VERSION: u32 = 1;
 
 /// Where the catalogue and the hosted query API live.
-pub const DEFAULT_HUB_URL: &str = "https://hub.argos.org";
+pub const DEFAULT_HUB_URL: &str = "https://hub.xerj.org";
 
 /// The hub's local root: `ARGOS_HUB_HOME` when set and non-empty, else
 /// `<home>/.argos/hub` ([`crate::home::home_dir_from`]: `HOME`, else

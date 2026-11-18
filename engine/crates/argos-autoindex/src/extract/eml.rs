@@ -679,7 +679,7 @@ mod tests {
         let b64 = base64::engine::general_purpose::STANDARD.encode("secret plan attached");
         let eml = format!(
             "From: Dana Klein <dklein@amazon.com>\r\n\
-             To: Alex Rivard <alex@argos.org>\r\n\
+             To: Alex Rivard <alex@xerj.org>\r\n\
              Subject: =?utf-8?q?Acquisition_=E2=80=94_next_steps?=\r\n\
              Date: Tue, 15 Jul 2026 09:12:00 -0700\r\n\
              Message-ID: <deal-1@amazon.com>\r\n\

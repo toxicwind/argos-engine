@@ -2608,7 +2608,7 @@ mod unity_sniff_tests {
     #[test]
     fn email_is_detected_but_config_is_not() {
         let email = "From: Dana Klein <dklein@amazon.com>\n\
-                     To: Alex Rivard <alex@argos.org>\n\
+                     To: Alex Rivard <alex@xerj.org>\n\
                      Subject: Acquisition next steps\n\
                      Date: Tue, 15 Jul 2026 09:12:00 -0700\n\
                      Message-ID: <deal-1@amazon.com>\n\

@@ -13,7 +13,7 @@
 //! The trust model, stated plainly:
 //!
 //! - The **public** key travels out of band — committed next to the pack
-//!   recipe in this repo, and on argos.org — never inside the pack (a key
+//!   recipe in this repo, and on xerj.org — never inside the pack (a key
 //!   shipped beside its own signature verifies nothing).
 //! - The **seed** lives only in CI's secrets; `corpus build` never sees it.
 //!   Signing is a separate `corpus sign` step so a local build and a

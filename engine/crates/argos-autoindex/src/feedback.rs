@@ -4,7 +4,7 @@
 //! ## Why this command exists
 //!
 //! `user-feedback/16-agent-field-reports/README.md` and
-//! https://argos.org/llms.txt both say the baseline contribution asked of every
+//! https://xerj.org/llms.txt both say the baseline contribution asked of every
 //! agent that uses ARGOS is one short field report. In practice that ask was
 //! *empirically dead*: the folder held only its README, zero reports, because
 //! the obligation was a paragraph of prose with no tooling behind it and a CLA
@@ -95,7 +95,7 @@ pub struct Cfg {
     /// so it can do the HTTP fallback itself.
     pub github_only: bool,
     /// Where `--submit` POSTs. From `ARGOS_FIELD_REPORT_URL` or the production
-    /// default. Tests set this to a local mock so nothing reaches argos.org.
+    /// default. Tests set this to a local mock so nothing reaches xerj.org.
     pub endpoint: String,
     /// Skip the running-node catalog probe entirely — for a fully offline draft
     /// (and for tests, so they never touch a real endpoint).
@@ -1180,7 +1180,7 @@ pub fn help_text(feedback: bool) -> String {
                                   GitHub PR (same as --open-pr, from a throwaway clone\n\
                                   when this is not a argos checkout) when `gh` is signed\n\
                                   in and git has an identity; when GitHub is unavailable,\n\
-                                  POST it to https://argos.org/api/field-report (override\n\
+                                  POST it to https://xerj.org/api/field-report (override\n\
                                   with ARGOS_FIELD_REPORT_URL). Needs no GitHub account.\n\
                                   Agents run this after using argos, without asking first.\n\
                                   --disable-feedback or ARGOS_DISABLE_FEEDBACK=true\n\
@@ -1599,7 +1599,7 @@ mod tests {
         let help = help_text(true);
         let pr = help.find("open a\n").expect("help names the PR path");
         let api = help
-            .find("POST it to https://argos.org/api/field-report")
+            .find("POST it to https://xerj.org/api/field-report")
             .expect("help names the API fallback");
         assert!(pr < api, "the PR path must come before the API fallback");
         assert!(help.contains("when GitHub is unavailable"), "{help}");

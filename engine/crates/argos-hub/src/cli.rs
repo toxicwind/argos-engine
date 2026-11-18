@@ -73,7 +73,7 @@ const HUB_USAGE: &str = "usage: argos hub <command>
         corpus covers exits 1 (not 4) and names `argos autoindex`.
   feedback <slug> --usefulness <1-5> --found <yes|partial|no> [...]
         Rate a corpus after using it: one structured review (no query text) for
-        its Agent score on hub.argos.org (see `argos hub feedback -h`).
+        its Agent score on hub.xerj.org (see `argos hub feedback -h`).
   status
         Cached packs, the automatic node, the hosted setting, catalogue age.
   stop

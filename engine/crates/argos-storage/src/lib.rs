@@ -110,7 +110,7 @@ pub enum StorageError {
     #[error(
         "invalid raw JSON for document [{doc_id}] at one-based batch position {position}: \
          {reason}. Fix: replace that document body with exactly one complete UTF-8 JSON value, \
-         then retry the batch. Related help: `argos index --help` and https://argos.org/llms.txt"
+         then retry the batch. Related help: `argos index --help` and https://xerj.org/llms.txt"
     )]
     RawBatchValidation {
         doc_id: String,

@@ -147,7 +147,7 @@ fn malformed_document_reason(
         "invalid document JSON for document ID {document_id:?} at bulk item position {}: \
          parser error: {error}; parser location: line {}, column {}. \
          Fix: replace this source line with exactly one complete UTF-8 JSON object. \
-         Related help: argos index --help and https://argos.org/llms.txt",
+         Related help: argos index --help and https://xerj.org/llms.txt",
         item_index + 1,
         error.line(),
         error.column(),
@@ -169,7 +169,7 @@ fn lone_surrogate_document_reason(
          surrogate — half of an astral code point (e.g. an emoji cut in two by a fixed-width \
          chunker). Fix: replace the unpaired surrogate with U+FFFD, or re-encode the field as \
          valid UTF-8, before indexing. \
-         Related help: argos index --help and https://argos.org/llms.txt",
+         Related help: argos index --help and https://xerj.org/llms.txt",
         item_index + 1,
     )
 }

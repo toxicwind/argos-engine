@@ -436,7 +436,7 @@ mod raw_document_error_tests {
         let reason = "invalid raw JSON for document [row-17] at one-based batch position 17: \
                       trailing characters at line 1 column 9. Fix: replace that document body \
                       with exactly one complete UTF-8 JSON value, then retry the batch. Related \
-                      help: `argos index --help` and https://argos.org/llms.txt";
+                      help: `argos index --help` and https://xerj.org/llms.txt";
         let (status, body) = ApiError::new(ArgosError::invalid_document_json(reason)).into_parts();
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert_eq!(body.error.error_type, "json_parse_exception");

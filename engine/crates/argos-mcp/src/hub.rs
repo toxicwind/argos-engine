@@ -425,7 +425,7 @@ mod tests {
         let failed = AskOutcome {
             exit: 1,
             stdout: String::new(),
-            stderr: vec!["no hub corpus matches; see argos.org/llms.txt".into()],
+            stderr: vec!["no hub corpus matches; see xerj.org/llms.txt".into()],
             answer: None,
         };
         assert_eq!(outcome_result(failed)["isError"], true);

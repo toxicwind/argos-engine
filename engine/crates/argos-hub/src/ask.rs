@@ -98,7 +98,7 @@ pub const EXIT_NO_KEY: i32 = 5;
 pub const EXIT_HUB_UNAVAILABLE: i32 = 6;
 
 /// Printed (stderr) when the router finds nothing credible.
-pub const NO_CORPUS_MESSAGE: &str = "no hub corpus matches; see argos.org/llms.txt";
+pub const NO_CORPUS_MESSAGE: &str = "no hub corpus matches; see xerj.org/llms.txt";
 /// Printed (stderr) when candidates exist but none covers the question: every
 /// score is a weak overlap, or the question names a project no corpus contains.
 /// Exit [`EXIT_NO_ANSWER`], not the ambiguity exit — there is nothing to pick.
@@ -2849,7 +2849,7 @@ mod tests {
         assert_eq!(out.stderr, [NO_CORPUS_MESSAGE]);
         assert_eq!(
             NO_CORPUS_MESSAGE,
-            "no hub corpus matches; see argos.org/llms.txt"
+            "no hub corpus matches; see xerj.org/llms.txt"
         );
     }
 

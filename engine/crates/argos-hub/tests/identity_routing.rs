@@ -1,5 +1,5 @@
 //! Regression for zero-config routing against a catalogue the shape of the live
-//! hub (468 corpora on 2026-10-21, `https://hub.argos.org/api/v1/catalogue.json`).
+//! hub (468 corpora on 2026-10-21, `https://hub.xerj.org/api/v1/catalogue.json`).
 //!
 //! The fixture keeps each corpus's slug, topics, description and licence class.
 //! Sketches are rebuilt here so that every corpus reports every token of the

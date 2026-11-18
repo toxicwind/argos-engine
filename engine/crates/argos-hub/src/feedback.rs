@@ -1,4 +1,4 @@
-//! Agent reviews of hub corpora: the client half of hub.argos.org's "Agent
+//! Agent reviews of hub corpora: the client half of hub.xerj.org's "Agent
 //! score" (`POST /api/corpus-feedback`; body built by
 //! [`argos_common::corpus_feedback`]).
 //!
@@ -90,7 +90,7 @@ impl State {
 
 /// Automatic reviews go out when feedback is on and the packs are the public
 /// hub's: a process verifying under a non-production key (`ARGOS_HUB_PUBKEY`,
-/// which the tests set) is not reviewing a hub.argos.org corpus, unless
+/// which the tests set) is not reviewing a hub.xerj.org corpus, unless
 /// `ARGOS_CORPUS_FEEDBACK_URL` points the reviews somewhere on purpose.
 pub fn auto_allowed(env: &dyn Fn(&str) -> Option<String>) -> bool {
     argos_common::feedback::enabled()
@@ -209,7 +209,7 @@ pub fn auto_review_for_answer(
 // ── argos hub feedback ────────────────────────────────────────────────────────
 
 pub const FEEDBACK_USAGE: &str = "\
-argos hub feedback — rate a hub corpus after using it (the corpus's Agent score on hub.argos.org)
+argos hub feedback — rate a hub corpus after using it (the corpus's Agent score on hub.xerj.org)
 
 USAGE:
     argos hub feedback <slug> --usefulness <1-5> --found <yes|partial|no> [OPTIONS]
@@ -226,7 +226,7 @@ OPTIONS:
     --dry-run               print the JSON, send nothing
     --disable-feedback      send nothing (also ARGOS_DISABLE_FEEDBACK=true)
 
-Sends one structured review to https://hub.argos.org/api/corpus-feedback (override with
+Sends one structured review to https://hub.xerj.org/api/corpus-feedback (override with
 ARGOS_CORPUS_FEEDBACK_URL); no query text, no personal data, a random install id made on
 this machine. One review per corpus per week counts; a later one that week replaces it.
 No need to ask the user.";

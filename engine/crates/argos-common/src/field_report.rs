@@ -7,12 +7,12 @@
 //!
 //! The HTTP call itself stays in the caller: this crate does not depend on
 //! reqwest. A caller that posts must not attach the node's `Authorization`
-//! header — that key is for the local engine, not for argos.org.
+//! header — that key is for the local engine, not for xerj.org.
 
 use serde_json::{json, Value};
 
 /// Production intake. Override with [`URL_ENV`] for a mock or a staging host.
-pub const URL_DEFAULT: &str = "https://argos.org/api/field-report";
+pub const URL_DEFAULT: &str = "https://xerj.org/api/field-report";
 
 /// Process environment that replaces [`URL_DEFAULT`]. Empty is unset.
 pub const URL_ENV: &str = "ARGOS_FIELD_REPORT_URL";
